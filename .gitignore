@@ -1,0 +1,31 @@
+# Never commit project output or customer data
+Projects/
+*.dwg
+*.bak
+
+# Never commit the reference workbooks or their extracted macros —
+# they contain internal logic, hardcoded report URLs and network paths
+*.xlsm
+*.xls
+*-extract-*.bas
+
+# Salesforce report exports contain customer names and addresses
+*.csv
+
+# Credentials — belong in the OS credential store, never in a repo
+config.ini
+credentials*
+*.credentials
+.env
+
+# Build and editor noise
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+logs/
+.DS_Store
+Thumbs.db
+desktop.ini
