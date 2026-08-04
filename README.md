@@ -69,14 +69,15 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
 ## Reference data
 
-The **Reference data** panel lists all ten tables, lets you search and edit them,
-and produces the exact code to paste back into `SPEED.html`.
+The **Reference data** panel puts all ten tables on their own tabs. Each tab shows
+its row count, a yellow dot when changed this session, and a red count when the
+table has validation errors — so a problem is visible without opening the tab.
 
 | Table | Rows | Contents |
 |---|---|---|

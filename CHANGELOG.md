@@ -3,6 +3,19 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.3.0 — 2026-08-03
+
+- Reference data tables moved from a dropdown onto **tabs**. All ten are visible
+  at once instead of hidden behind a select.
+- Each tab carries its **row count**, a **yellow dot** when the table has unsaved
+  changes, and a **red count** when validation is failing — so an error in a table
+  you are not looking at is still visible.
+- `SPEED-App` (the Python application) has been **deleted**. It duplicated folder
+  generation without the drawing rename, and a project generated with it kept the
+  original `MWD.dwg`. One tool now, so there is nothing to run by mistake. The
+  verified Salesforce SOQL paths and SOAP-login recipe it contained are recorded
+  in the project notes.
+
 ## 1.2.0 — 2026-08-03
 
 ### Reference data manager

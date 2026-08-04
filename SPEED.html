@@ -329,6 +329,37 @@
   .step { font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid #EEF1F6; }
   .step .tag { font-weight: 700; }
 
+  /* ---------------------------------------------------------------- tabs */
+
+  .tabs {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    border-bottom: 2px solid var(--grey-l); padding-bottom: 0;
+  }
+  .tabs button {
+    border: 1px solid transparent; border-bottom: 0;
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    background: transparent; color: var(--muted);
+    font-size: 12px; font-weight: 700; letter-spacing: .01em;
+    padding: 8px 13px; margin-bottom: -2px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    transition: background .13s, color .13s, border-color .13s;
+  }
+  .tabs button:hover:not(.active) { background: #F1F5FA; color: var(--navy); }
+  .tabs button.active {
+    background: var(--white); color: var(--navy);
+    border-color: var(--grey-l); border-bottom: 2px solid var(--white);
+  }
+  .tabs button .n {
+    font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    background: var(--grey-l); color: #4A5A75; font-variant-numeric: tabular-nums;
+  }
+  .tabs button.active .n { background: rgba(0,86,184,.12); color: var(--blue); }
+  .tabs button.dirty::after {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--yellow); box-shadow: 0 0 0 1px rgba(0,0,0,.12); flex: none;
+  }
+  .tabs button.invalid .n { background: #FDECEA; color: var(--err); }
+
   details > summary { cursor: pointer; }
   details > summary:hover { color: var(--blue); }
   details[open] > summary { margin-bottom: 4px; }
@@ -724,11 +755,9 @@
     <div class="panel">
       <h2>Reference data</h2>
       <div class="body">
-        <div class="grid" style="grid-template-columns:1fr 1fr auto; align-items:flex-end">
-          <div>
-            <label for="rd_table">Table</label>
-            <select id="rd_table"></select>
-          </div>
+        <div class="tabs" id="rd_tabs" role="tablist"></div>
+
+        <div class="grid" style="grid-template-columns:1fr auto; align-items:flex-end; margin-top:14px">
           <div>
             <label for="rd_search">Search</label>
             <input id="rd_search" placeholder="filter rows…" autocomplete="off">
@@ -828,7 +857,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -2452,10 +2481,33 @@ function rdSnapshotShipped() {
 }
 
 function rdPopulateSelector() {
-  $("rd_table").innerHTML = Object.entries(TABLE_SCHEMAS).map(([name, s]) =>
-    `<option value="${name}">${s.label} — ${name} (${getTable(name).length})</option>`
-  ).join("");
-  $("rd_table").value = rdCurrent;
+  const strip = $("rd_tabs");
+  strip.innerHTML = Object.entries(TABLE_SCHEMAS).map(([name, s]) => {
+    const rows = getTable(name);
+    const bad = validateTable(name, rows).errors.length > 0;
+    const cls = [
+      name === rdCurrent ? "active" : "",
+      RD_DIRTY.has(name) ? "dirty" : "",
+      bad ? "invalid" : ""
+    ].filter(Boolean).join(" ");
+    const title = [
+      name,
+      RD_DIRTY.has(name) ? "changed this session" : "",
+      bad ? "has validation errors" : ""
+    ].filter(Boolean).join(" — ");
+    return `<button type="button" role="tab" data-t="${name}" class="${cls}" ` +
+           `aria-selected="${name === rdCurrent}" title="${title}">` +
+           `${s.label}<span class="n">${rows.length}</span></button>`;
+  }).join("");
+
+  strip.querySelectorAll("button[data-t]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.t === rdCurrent) return;
+      rdCurrent = btn.dataset.t;
+      $("rd_search").value = "";
+      rdPopulateSelector(); rdRender(); rdValidate(true);
+    });
+  });
 }
 
 function rdRender() {
@@ -2516,7 +2568,7 @@ function rdRender() {
       }
       RD_DIRTY.add(name);
       rdValidate(true);
-      rdPopulateSelector();
+      rdPopulateSelector();   // repaint tabs: dirty dot, row count, error state
       $("rd_note").innerHTML = (schema.note || "") +
         ` <strong style="color:var(--warn)">Changed this session — not yet saved.</strong>`;
     });
@@ -2573,11 +2625,6 @@ function rdInit() {
   rdRender();
   rdValidate(true);
 
-  $("rd_table").addEventListener("change", e => {
-    rdCurrent = e.target.value;
-    $("rd_search").value = "";
-    rdRender(); rdValidate(true);
-  });
   $("rd_search").addEventListener("input", rdRender);
 
   $("rd_add").addEventListener("click", () => {
