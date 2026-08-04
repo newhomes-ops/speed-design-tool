@@ -856,7 +856,8 @@
           </div>
         </div>
 
-        <div id="rd_note" class="hint" style="margin-top:10px"></div>
+        <div id="rd_source" class="hint" style="margin-top:10px"></div>
+        <div id="rd_note" class="hint" style="margin-top:6px"></div>
         <div id="rd_issues" style="margin-top:10px"></div>
 
         <div style="overflow-x:auto; margin-top:12px; max-height:460px; overflow-y:auto">
@@ -868,17 +869,35 @@
         <div id="rd_count" class="hint" style="margin-top:8px"></div>
 
         <div class="actions" style="margin-top:14px">
+          <button id="rd_save" class="primary" type="button">Save to folder</button>
+          <button id="rd_save_all" type="button">Save all changed</button>
           <button id="rd_validate" type="button">Validate</button>
-          <button id="rd_export" class="primary" type="button">Copy table code</button>
-          <button id="rd_export_all" type="button">Copy all changed</button>
+          <button id="rd_import_toggle" type="button">Paste JSON…</button>
+          <button id="rd_export" type="button">Copy table code</button>
+        </div>
+
+        <div id="rd_import_box" style="display:none; margin-top:14px">
+          <label for="rd_import_text">Paste JSON for this table</label>
+          <textarea id="rd_import_text" rows="6" spellcheck="false"
+            style="font-family:Consolas,monospace; font-size:11.5px"
+            placeholder='[{"city":"…","state":"…"}]  — or a full const TABLE = [ … ]; declaration'></textarea>
+          <div class="actions" style="margin-top:10px">
+            <button id="rd_import_check" type="button">Check</button>
+            <button id="rd_import_apply" class="primary" type="button" disabled>Apply</button>
+            <button id="rd_import_cancel" type="button">Cancel</button>
+          </div>
+          <div id="rd_import_report" style="margin-top:10px"></div>
         </div>
         <div class="hint" style="margin-top:8px">
-          Edits apply immediately to calculations in this browser session but are
-          <strong>not saved</strong>. To make a change permanent for everyone:
-          press <strong>Copy table code</strong>, then in
-          <code>SPEED.html</code> on GitHub replace the matching
-          <code>const &lt;TABLE&gt; = [ … ];</code> line and commit. Every
-          designer picks it up on their next refresh.
+          <strong>Save to folder</strong> writes this table to
+          <code>&lt;SPEED folder&gt;/Reference Data/&lt;TABLE&gt;.json</code>. That file is
+          loaded on every start and overrides the copy built into
+          <code>SPEED.html</code> — so edits survive without touching GitHub.
+          <br><br>
+          <strong>Because the JSON lives in your SPEED folder, two designers
+          pointing at two different folders will drift apart.</strong> Keep one
+          shared SPEED folder if the whole team must calculate from the same
+          data. Each tab shows whether it is running built-in or folder data.
         </div>
         <details style="margin-top:12px">
           <summary class="hint" style="cursor:pointer;font-weight:700">
@@ -914,7 +933,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -1570,6 +1589,169 @@ function pvAutoDistribute(totalModules, maxBranch, minBranch) {
    validateTable() checks it so a bad edit is caught before it ships.
    ===================================================================== */
 
+
+/* =====================================================================
+   Reference data persistence — JSON files in the SPEED folder
+
+   Layout:
+       <SPEED folder>/Reference Data/RT_LOCATION.json
+                                    /MODULE_DB.json
+                                    /...
+
+   Load order on startup:
+       1. Built-in tables compiled into SPEED.html (always present, the seed)
+       2. Any JSON found in "Reference Data" overrides the matching table
+
+   A malformed or invalid JSON file never silently replaces good data — the
+   built-in table is kept and the problem is reported.
+
+   TRADE-OFF, stated plainly: because the JSON lives beside the tool rather
+   than inside it, two designers pointing at two different SPEED folders can
+   accumulate different reference data. That is the divergence risk. The
+   mitigation is to keep one shared SPEED folder, and the tool makes the
+   source visible per table and records it in project.json.
+   ===================================================================== */
+
+const RD_FOLDER = "Reference Data";
+
+/** Where each table's current values came from: "built-in" or "folder". */
+const RD_SOURCE = {};
+
+async function rdFolderHandle(create) {
+  if (!state.root) return null;
+  return await getDir(state.root, RD_FOLDER, !!create);
+}
+
+/** Read and apply every JSON file present. Returns a per-table report. */
+async function rdLoadFromFolder() {
+  const report = { loaded: [], skipped: [], errors: [] };
+  const dir = await rdFolderHandle(false);
+  if (!dir) return report;
+
+  for (const name of Object.keys(TABLE_SCHEMAS)) {
+    let text;
+    try {
+      const fh = await dir.getFileHandle(name + ".json", { create: false });
+      text = await (await fh.getFile()).text();
+    } catch (e) {
+      continue;                       // no file for this table; keep built-in
+    }
+
+    let rows;
+    try {
+      rows = JSON.parse(text);
+    } catch (e) {
+      report.errors.push(`${name}.json is not valid JSON (${e.message}). Built-in data kept.`);
+      continue;
+    }
+    if (!Array.isArray(rows)) {
+      report.errors.push(`${name}.json must contain an array. Built-in data kept.`);
+      continue;
+    }
+
+    const { errors } = validateTable(name, rows);
+    if (errors.length) {
+      report.errors.push(`${name}.json failed validation: ${errors[0]} Built-in data kept.`);
+      continue;
+    }
+
+    const previous = getTable(name).length;
+    setTable(name, rows);
+    RD_SOURCE[name] = "folder";
+    RD_SHIPPED[name] = JSON.parse(JSON.stringify(rows));   // folder data is now the baseline
+    report.loaded.push({ name, rows: rows.length, was: previous });
+  }
+  return report;
+}
+
+/** Write one table to its JSON file. */
+async function rdSaveToFolder(name) {
+  if (!state.root) throw new Error("Choose the SPEED folder first.");
+  const { errors } = validateTable(name, getTable(name));
+  if (errors.length) throw new Error(`${name} has validation errors — fix them before saving.`);
+
+  const dir = await rdFolderHandle(true);
+  if (!dir) throw new Error(`Could not create the "${RD_FOLDER}" folder.`);
+
+  const fh = await dir.getFileHandle(name + ".json", { create: true });
+  const w = await fh.createWritable();
+  // One row per line: readable, and git diffs show only the rows that changed.
+  const rows = getTable(name);
+  const body = TABLE_SCHEMAS[name].scalar
+    ? JSON.stringify(rows)
+    : "[\n" + rows.map(r => "  " + JSON.stringify(r)).join(",\n") + "\n]";
+  await w.write(body + "\n");
+  await w.close();
+
+  RD_SOURCE[name] = "folder";
+  RD_SHIPPED[name] = JSON.parse(JSON.stringify(rows));
+  RD_DIRTY.delete(name);
+  return { name, rows: rows.length, bytes: body.length };
+}
+
+/** Parse pasted JSON (or a full `const NAME = [...];` declaration) and apply it. */
+function rdParsePasted(name, text) {
+  let src = String(text || "").trim();
+  if (!src) throw new Error("Nothing to import.");
+
+  // Accept a pasted declaration as well as bare JSON — that is what the
+  // Copy table code button produces, so people will paste it back.
+  const decl = src.match(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([\s\S]*?);?\s*$/);
+  if (decl) {
+    if (decl[1] !== name) {
+      throw new Error(`That looks like ${decl[1]}, but the ${name} tab is open. ` +
+                      `Switch tabs or paste the matching table.`);
+    }
+    src = decl[2];
+  }
+
+  let rows;
+  try {
+    rows = JSON.parse(src);
+  } catch (e) {
+    // Unquoted keys are common when copied out of source. Try once to repair.
+    try {
+      rows = JSON.parse(src.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":'));
+    } catch (e2) {
+      throw new Error("Could not parse that as JSON: " + e.message);
+    }
+  }
+  if (!Array.isArray(rows)) throw new Error("Expected an array of rows.");
+
+  const { errors, warnings } = validateTable(name, rows);
+  if (errors.length) throw new Error(`Validation failed: ${errors[0]}`);
+  return { rows, warnings };
+}
+
+/** Compare incoming rows against what is loaded, so a paste is reviewable. */
+function rdDiffRows(name, incoming) {
+  const schema = TABLE_SCHEMAS[name];
+  const current = getTable(name);
+  if (schema.scalar) {
+    const a = new Set(current.map(String)), b = new Set(incoming.map(String));
+    return {
+      added: [...b].filter(x => !a.has(x)),
+      removed: [...a].filter(x => !b.has(x)),
+      changed: []
+    };
+  }
+  const key = schema.key;
+  const idx = rs => new Map(rs.map(r => [String(r[key] ?? "").trim().toLowerCase(), r]));
+  const a = idx(current), b = idx(incoming);
+  const added = [...b.keys()].filter(k => !a.has(k));
+  const removed = [...a.keys()].filter(k => !b.has(k));
+  const changed = [];
+  for (const [k, row] of b) {
+    if (!a.has(k)) continue;
+    const before = a.get(k);
+    const fields = schema.fields
+      .map(f => f.name)
+      .filter(f => JSON.stringify(before[f] ?? null) !== JSON.stringify(row[f] ?? null));
+    if (fields.length) changed.push({ key: row[key], fields });
+  }
+  return { added, removed, changed };
+}
+
 const TABLE_SCHEMAS = {
   MODULE_DB: {
     label: "PV modules",
@@ -1881,7 +2063,8 @@ if (typeof module !== "undefined" && module.exports) {
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
-    getTable, setTable
+    getTable, setTable,
+    rdParsePasted, rdDiffRows
   });
 }
 
@@ -2239,10 +2422,29 @@ async function pickRoot() {
     } else {
       showMsg("SPEED folder set.", "ok");
     }
+    await rdApplyFolderData();
     await Promise.all([refreshProjects(), reloadReports()]);
   } catch (e) {
     if (e.name !== "AbortError") showMsg("Could not open that folder: " + e.message, "err");
   }
+}
+
+/** Load Reference Data/*.json and refresh the editor. */
+async function rdApplyFolderData() {
+  let report;
+  try { report = await rdLoadFromFolder(); }
+  catch (e) { showMsg("Could not read the Reference Data folder: " + e.message, "warn"); return; }
+
+  if (report.errors.length) showMsg(report.errors.join("  |  "), "err");
+  else if (report.loaded.length) {
+    showMsg("Loaded from Reference Data: " +
+      report.loaded.map(l => `${l.name} (${l.rows} rows)`).join(", "), "ok");
+  }
+  if (typeof rdCurrent !== "undefined") {
+    rdPopulateSelector(); rdRender(); rdValidate(true); rdRenderSource(rdCurrent);
+  }
+  // Equipment dropdowns are built from these tables.
+  if (typeof pvPopulateSelectors === "function") pvPopulateSelectors();
 }
 
 async function pickReports() {
@@ -2492,6 +2694,7 @@ async function init() {
 
   await renderFolderStatus();
   if (state.root) {
+    await rdApplyFolderData();
     await Promise.all([refreshProjects(), reloadReports()]);
   } else if (savedRoot) {
     showMsg("Folder access needs re-confirming. Press 'Choose SPEED folder'.", "warn");
@@ -2599,10 +2802,13 @@ function rdRender() {
   const rows = getTable(name);
   const filter = $("rd_search").value.trim().toLowerCase();
 
-  $("rd_note").innerHTML = (schema.note || "") +
+  const src = RD_SOURCE[name] === "folder" ? "folder" : "built-in";
+  $("rd_source").innerHTML =
+    `Source: <strong style="color:${src === "folder" ? "var(--ok)" : "var(--muted)"}">` +
+    `${src === "folder" ? `Reference Data/${name}.json` : "built into SPEED.html"}</strong>` +
     (RD_DIRTY.has(name)
-      ? ` <strong style="color:var(--warn)">Changed this session — not yet saved.</strong>`
-      : "");
+      ? ` &middot; <strong style="color:var(--warn)">unsaved changes</strong>` : "");
+  $("rd_note").innerHTML = schema.note || "";
 
   // Header
   $("rd_head").innerHTML =
@@ -2652,8 +2858,7 @@ function rdRender() {
       RD_DIRTY.add(name);
       rdValidate(true);
       rdPopulateSelector();   // repaint tabs: dirty dot, row count, error state
-      $("rd_note").innerHTML = (schema.note || "") +
-        ` <strong style="color:var(--warn)">Changed this session — not yet saved.</strong>`;
+      rdRenderSource(name);
     });
   });
 
@@ -2668,6 +2873,15 @@ function rdRender() {
       rdRender(); rdValidate(true); rdPopulateSelector();
     });
   });
+}
+
+function rdRenderSource(name) {
+  const src = RD_SOURCE[name] === "folder" ? "folder" : "built-in";
+  $("rd_source").innerHTML =
+    `Source: <strong style="color:${src === "folder" ? "var(--ok)" : "var(--muted)"}">` +
+    `${src === "folder" ? `Reference Data/${name}.json` : "built into SPEED.html"}</strong>` +
+    (RD_DIRTY.has(name)
+      ? ` &middot; <strong style="color:var(--warn)">unsaved changes</strong>` : "");
 }
 
 function rdValidate(quiet) {
@@ -2734,20 +2948,96 @@ function rdInit() {
     rdCopy(exportTable(rdCurrent, getTable(rdCurrent)), rdCurrent);
   });
 
-  $("rd_export_all").addEventListener("click", () => {
+  $("rd_save").addEventListener("click", async () => {
+    busy(true, "saving…");
+    try {
+      const r = await rdSaveToFolder(rdCurrent);
+      showMsg(`Saved ${r.rows} rows to Reference Data/${r.name}.json. ` +
+              `Loaded automatically on every start.`, "ok");
+      rdRenderSource(rdCurrent); rdPopulateSelector();
+    } catch (e) { showMsg(e.message, "err"); }
+    finally { busy(false); }
+  });
+
+  $("rd_save_all").addEventListener("click", async () => {
     if (RD_DIRTY.size === 0) { showMsg("No tables changed this session.", "warn"); return; }
-    const bad = [];
-    for (const name of RD_DIRTY) {
-      if (validateTable(name, getTable(name)).errors.length) bad.push(name);
+    busy(true, "saving…");
+    const done = [], failed = [];
+    for (const name of Array.from(RD_DIRTY)) {
+      try { const r = await rdSaveToFolder(name); done.push(`${r.name} (${r.rows})`); }
+      catch (e) { failed.push(`${name}: ${e.message}`); }
     }
-    if (bad.length) {
-      showMsg(`Cannot export — errors in ${bad.join(", ")}. Select each and fix them.`, "err");
+    busy(false);
+    if (failed.length) showMsg(`Saved ${done.join(", ")}. Failed — ${failed.join("; ")}`, "warn");
+    else showMsg(`Saved ${done.join(", ")} to Reference Data.`, "ok");
+    rdRenderSource(rdCurrent); rdPopulateSelector();
+  });
+
+  // ---- paste-JSON import ----
+  const importBox = () => $("rd_import_box");
+  let pendingImport = null;
+
+  $("rd_import_toggle").addEventListener("click", () => {
+    const open = importBox().style.display !== "none";
+    importBox().style.display = open ? "none" : "block";
+    if (!open) $("rd_import_text").focus();
+    pendingImport = null;
+    $("rd_import_apply").disabled = true;
+    $("rd_import_report").innerHTML = "";
+  });
+  $("rd_import_cancel").addEventListener("click", () => {
+    importBox().style.display = "none";
+    $("rd_import_text").value = "";
+    $("rd_import_report").innerHTML = "";
+    pendingImport = null;
+    $("rd_import_apply").disabled = true;
+  });
+
+  $("rd_import_check").addEventListener("click", () => {
+    pendingImport = null;
+    $("rd_import_apply").disabled = true;
+    let parsed;
+    try {
+      parsed = rdParsePasted(rdCurrent, $("rd_import_text").value);
+    } catch (e) {
+      $("rd_import_report").innerHTML =
+        `<div class="msg show err">${e.message}</div>`;
       return;
     }
-    const blocks = Array.from(RD_DIRTY)
-      .map(name => exportTable(name, getTable(name))).join("\n\n");
-    rdCopy(blocks, `${RD_DIRTY.size} changed table(s)`);
+    const d = rdDiffRows(rdCurrent, parsed.rows);
+    const changedList = d.changed.slice(0, 8)
+      .map(c => `${c.key} (${c.fields.join(", ")})`).join("; ");
+    $("rd_import_report").innerHTML =
+      `<div class="msg show ok">Valid — ${parsed.rows.length} rows. ` +
+      `Press Apply to load it, then Save to folder.</div>` +
+      `<div class="kv" style="margin-top:8px">` +
+      `<div><span>Rows now</span><span>${getTable(rdCurrent).length}</span></div>` +
+      `<div><span>Rows incoming</span><span>${parsed.rows.length}</span></div>` +
+      `<div><span>Added</span><span>${d.added.length}</span></div>` +
+      `<div><span>Removed</span><span>${d.removed.length}</span></div>` +
+      `<div><span>Changed</span><span>${d.changed.length}</span></div></div>` +
+      (d.added.length ? `<div class="hint" style="margin-top:6px"><strong>Added:</strong> ${d.added.slice(0,12).join(", ")}${d.added.length>12?" …":""}</div>` : "") +
+      (d.removed.length ? `<div class="hint"><strong>Removed:</strong> ${d.removed.slice(0,12).join(", ")}${d.removed.length>12?" …":""}</div>` : "") +
+      (changedList ? `<div class="hint"><strong>Changed:</strong> ${changedList}${d.changed.length>8?" …":""}</div>` : "") +
+      parsed.warnings.slice(0, 6).map(w =>
+        `<div class="msg show warn" style="margin-top:6px">${w}</div>`).join("");
+    pendingImport = parsed.rows;
+    $("rd_import_apply").disabled = false;
   });
+
+  $("rd_import_apply").addEventListener("click", () => {
+    if (!pendingImport) return;
+    setTable(rdCurrent, pendingImport);
+    RD_DIRTY.add(rdCurrent);
+    pendingImport = null;
+    $("rd_import_apply").disabled = true;
+    $("rd_import_text").value = "";
+    $("rd_import_report").innerHTML = "";
+    importBox().style.display = "none";
+    rdRender(); rdValidate(true); rdPopulateSelector(); rdRenderSource(rdCurrent);
+    showMsg(`Loaded into ${rdCurrent}. Press Save to folder to make it permanent.`, "ok");
+  });
+
 }
 
 function pvPopulateSelectors() {

@@ -69,7 +69,7 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
@@ -107,16 +107,37 @@ table has validation errors — so a problem is visible without opening the tab.
 
 ### How editing works
 
-Edits apply immediately to calculations in the current browser session but are
-**not saved**. To make a change permanent for everyone: press **Copy table code**,
-then replace the matching `const <TABLE> = [ … ];` line in `SPEED.html` and commit.
+Edit cells, then press **Save to folder**. The table is written to:
 
-This is deliberate. IPlot-Tool saves table edits to `localStorage`, which means
-each designer can silently accumulate different reference data — two people
-calculating conductor sizes from different ampacity tables, with nothing to
-reveal it. Because the tool is served from one URL, editing at the source and
-committing gives everyone identical data and puts every change in git history.
-For data feeding PE-stamped drawings, that audit trail matters.
+```
+<SPEED folder>/Reference Data/<TABLE>.json
+```
+
+That file is read on every start and **overrides the copy built into
+`SPEED.html`** — so edits persist without touching GitHub. **Save all changed**
+writes every table you touched.
+
+Each tab shows its source: *built into SPEED.html* or *Reference Data/NAME.json*.
+
+**Paste JSON…** takes a pasted array — or a full `const TABLE = [ … ];`
+declaration — validates it, and shows a diff (rows added, removed, changed, and
+which fields changed) before you apply it. Use this rather than retyping data:
+it goes from clipboard to file with no transcription step, which matters for
+values that end up on a stamped drawing.
+
+The built-in tables remain the seed, so a fresh copy of the tool works with no
+`Reference Data` folder at all. **Reset table** restores the current baseline.
+
+### The divergence trade-off
+
+Because the JSON lives in the SPEED folder rather than inside the tool, **two
+designers pointing at two different SPEED folders will drift apart** — one could
+be sizing conductors from a different ampacity table with nothing to reveal it.
+
+Keep **one shared SPEED folder** if the team must calculate from the same data.
+The tool shows the source per table so a local override is visible rather than
+silent. If you need a hard audit trail, commit the JSON files to git as well —
+they are small, and one row per line means diffs show exactly what changed.
 
 ### Validation blocks bad edits
 
@@ -174,7 +195,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-110 tests covering path sanitisation, reserved Windows names, folder-name
+123 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.

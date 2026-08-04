@@ -3,6 +3,34 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.5.0 — 2026-08-03
+
+### Reference data lives in the SPEED folder
+- **Save to folder** writes a table to
+  `<SPEED folder>/Reference Data/<TABLE>.json`, loaded on every start and
+  overriding the built-in copy. No more pasting code into GitHub.
+- **Save all changed** writes every table edited in the session.
+- JSON is written one row per line, so git diffs show only the rows that changed.
+- Built-in tables remain the seed: a fresh copy works with no folder present.
+- A malformed or invalid JSON file **never silently replaces good data** — the
+  built-in table is kept and the problem is reported.
+- Each tab shows whether it is running built-in or folder data.
+
+### Paste JSON import
+- Accepts a bare array or a full `const TABLE = [ … ];` declaration, and repairs
+  unquoted keys.
+- Shows a **diff before applying**: rows added, removed, changed, and which
+  fields changed on each.
+- Refuses a declaration for a different table than the open tab.
+- Validation runs before anything is applied.
+
+### Note on divergence
+Storing JSON per folder means designers with separate SPEED folders can drift
+apart. The tool makes the source visible per table rather than hiding it. One
+shared folder is still the right answer for a team.
+
+- 13 new tests, 123 total.
+
 ## 1.4.0 — 2026-08-03
 
 - **Sections are now separate screens**, switched by a tab bar under the header:
