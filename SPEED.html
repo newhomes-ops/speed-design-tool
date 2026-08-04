@@ -767,7 +767,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -785,7 +785,19 @@ const CONFIG = {
   skipExtensions: [".bak", ".tmp", ".~vsd"],
 
   // Always created even if absent from the template.
-  extraSubfolders: ["Deliverables"]
+  extraSubfolders: ["Deliverables"],
+
+  // The working drawing is renamed as it is copied, so each project folder
+  // holds a drawing named after the customer rather than a generic MWD.dwg.
+  // Matched case-insensitively against the template filename.
+  dwgRenameFrom: "MWD.dwg",
+
+  // Any project field or derived value. Examples:
+  //   "{account_name}"                 -> BADER BOLAND
+  //   "{display_name}"                 -> BADER BOLAND - 8961 Longbrook Dr
+  //   "{project_number} - {account_name}" -> 8961BOLA - BADER BOLAND
+  // The extension is preserved automatically.
+  dwgNameTemplate: "{account_name}"
 };
 
 /* Report column -> project field. Mirrors the verified Python mapping. */
@@ -902,6 +914,47 @@ function folderName(p, template) {
   return sanitizeComponent(raw, p.project_number || "UNTITLED");
 }
 
+/**
+ * Destination filename for a copied template file.
+ *
+ * The working drawing is renamed to the customer so a project folder does not
+ * contain a generically named MWD.dwg. Everything else copies unchanged.
+ * Falls back to the original name if the template produces nothing usable —
+ * a file called ".dwg" would be worse than MWD.dwg.
+ */
+function destFileName(project, sourceName) {
+  const from = (CONFIG.dwgRenameFrom || "").toLowerCase();
+  if (!from || String(sourceName).toLowerCase() !== from) return sourceName;
+
+  const dot = sourceName.lastIndexOf(".");
+  const ext = dot > 0 ? sourceName.slice(dot) : "";
+
+  const values = Object.assign({}, project, {
+    display_name: displayName(project),
+    account_name: String(project.account_name || "").toUpperCase()
+  });
+
+  let stem;
+  try {
+    stem = (CONFIG.dwgNameTemplate || "{account_name}")
+      .replace(/\{(\w+)\}/g, (_, key) => {
+        if (!(key in values)) throw new Error("Unknown field in DWG template: " + key);
+        return values[key] === null || values[key] === undefined ? "" : String(values[key]);
+      });
+  } catch (e) {
+    return sourceName;
+  }
+
+  stem = stem.replace(/(\s-\s){2,}/g, " - ").replace(/^[\s-]+|[\s-]+$/g, "");
+
+  // sanitizeComponent substitutes its own placeholder when the input reduces to
+  // nothing, so a sentinel is used to detect that case rather than shipping a
+  // drawing called "UNSPECIFIED.dwg".
+  const EMPTY = "\u0000";
+  const safe = sanitizeComponent(stem, EMPTY);
+  return safe === EMPTY ? sourceName : safe + ext;
+}
+
 function validateForFolder(p) {
   const problems = [];
   if (!String(p.project_number || "").trim()) problems.push("Project number is required.");
@@ -1007,7 +1060,7 @@ function mapReportRow(row, keyColumn) {
 /* Exposed so the logic can be tested outside a browser. */
 const SPEED_LOGIC = {
   sanitizeComponent, cleanText, toInt, stripHtml, splitRevision,
-  displayName, folderName, validateForFolder, parseCsv, csvToRecords,
+  displayName, folderName, destFileName, validateForFolder, parseCsv, csvToRecords,
   findKeyColumn, mapReportRow, COLUMN_MAP, NOT_IN_CRM, CONFIG
 };
 /* Phase 3 engine is appended to the export below, after it is defined. */
@@ -1506,7 +1559,16 @@ async function planGeneration(state, project) {
   for (const f of files) {
     const reason = shouldSkipFile(f.rel, f.name);
     if (reason) { skipped.push({ rel: f.rel, name: f.name, reason }); continue; }
-    toCopy.push(f);
+
+    // Resolve the destination name now, so the preview shows exactly what
+    // generation will write.
+    const destName = destFileName(project, f.name);
+    const parent = f.rel.slice(0, Math.max(0, f.rel.length - f.name.length));
+    toCopy.push(Object.assign({}, f, {
+      destName,
+      destRel: parent + destName,
+      renamed: destName !== f.name
+    }));
   }
 
   const dirSet = new Set(dirs.map(d => d.rel));
@@ -1514,6 +1576,13 @@ async function planGeneration(state, project) {
 
   if (!toCopy.some(f => f.name.toLowerCase().endsWith(".dwg"))) {
     warnings.push("No .dwg file found in the template tree — check the folder you chose.");
+  }
+  const dwgSource = toCopy.find(f =>
+    f.name.toLowerCase() === String(CONFIG.dwgRenameFrom || "").toLowerCase());
+  if (dwgSource && !dwgSource.renamed) {
+    warnings.push(
+      `${dwgSource.name} could not be renamed — the customer name is empty, so it ` +
+      `will be copied under its original name.`);
   }
   if (exists) {
     warnings.push(`A folder named '${name}' already exists. Generation will refuse to touch it.`);
@@ -1545,11 +1614,11 @@ async function generateProject(state, project, plan, onProgress) {
   }
 
   let filesCopied = 0, bytesCopied = 0;
-  const failures = [];
+  const failures = [], renamed = [];
 
   for (const f of plan.files) {
     try {
-      const parts = f.rel.split("/");
+      const parts = (f.destRel || f.rel).split("/");
       const fileName = parts.pop();
       let cursor = projectDir;
       for (const part of parts) cursor = await getDir(cursor, part, true);
@@ -1567,6 +1636,7 @@ async function generateProject(state, project, plan, onProgress) {
 
       filesCopied++; bytesCopied += f.size;
       if (onProgress) onProgress(filesCopied, plan.files.length, fileName);
+      if (f.renamed) renamed.push(`${f.name} -> ${fileName}`);
     } catch (e) {
       failures.push(`${f.name}: ${e.message}`);
     }
@@ -1580,7 +1650,9 @@ async function generateProject(state, project, plan, onProgress) {
       tool_version: APP_VERSION,
       tool_build: APP_BUILD,
       folder_name_template: CONFIG.folderNameTemplate,
-      files_copied: filesCopied
+      files_copied: filesCopied,
+      drawing_file: (plan.files.find(f =>
+        (f.destName || f.name).toLowerCase().endsWith(".dwg")) || {}).destName || null
     }
   });
   const mf = await projectDir.getFileHandle("project.json", { create: true });
@@ -1588,7 +1660,7 @@ async function generateProject(state, project, plan, onProgress) {
   await w.write(JSON.stringify(manifest, null, 2));
   await w.close();
 
-  return { name: plan.name, filesCopied, dirsCreated, bytesCopied, failures };
+  return { name: plan.name, filesCopied, dirsCreated, bytesCopied, failures, renamed };
 }
 
 async function listProjects(state) {
@@ -1846,12 +1918,17 @@ async function doPreview() {
       `<div><span>Folders</span><span>${plan.dirs.length}</span></div>` +
       `<div><span>Files</span><span>${plan.files.length}</span></div>` +
       `<div><span>Size</span><span>${mb(plan.totalBytes)} MB</span></div>` +
-      `<div><span>Skipped</span><span>${plan.skipped.length}</span></div>`;
+      `<div><span>Skipped</span><span>${plan.skipped.length}</span></div>` +
+      (() => {
+        const r = plan.files.find(f => f.renamed);
+        return r ? `<div><span>Drawing renamed to</span><span>${r.destName}</span></div>` : "";
+      })();
 
     const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
     const lines = [plan.name + "\\"]
       .concat(plan.dirs.map(d => "  " + d + "\\"))
-      .concat(plan.files.map(f => "  " + f.rel));
+      .concat(plan.files.map(f =>
+        "  " + (f.destRel || f.rel) + (f.renamed ? "     <- renamed from " + f.name : "")));
     $("pvTree").innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join("");
 
     if (plan.warnings.length) showMsg(plan.warnings.join(" | "), "warn");
@@ -1877,6 +1954,7 @@ async function doGenerate() {
       (done, total, name) => { setProgress(done, total); busy(true, `copying ${name}…`); });
 
     let text = `Created '${result.name}': ${result.filesCopied} files, ${mb(result.bytesCopied)} MB.`;
+    if (result.renamed.length) text += ` Renamed ${result.renamed.join(", ")}.`;
     if (result.failures.length) {
       showMsg(text + " Some files were skipped: " + result.failures.join("; "), "warn");
     } else {

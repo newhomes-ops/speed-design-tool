@@ -53,6 +53,11 @@ These are deliberate and each has a regression test:
   cloned, so reference data is never forked.
 - Folder names are sanitised for illegal Windows characters, reserved device
   names (`CON`, `COM1`, …) and trailing dots and spaces.
+- **The working drawing is renamed to the customer** as it is copied, so a
+  project folder holds `BADER BOLAND.dwg` rather than a generic `MWD.dwg`. If the
+  customer name is empty the original filename is kept — a drawing called
+  `.dwg` would be worse. The final name is recorded in `project.json` as
+  `drawing_file`.
 
 ---
 
@@ -64,9 +69,23 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const APP_BUILD   = "2026-08-03";
 ```
+
+### Drawing rename
+
+`MWD.dwg` is renamed as it is copied. Both settings live in `CONFIG` near the top
+of the script:
+
+```js
+dwgRenameFrom:   "MWD.dwg",       // template filename to match, case-insensitive
+dwgNameTemplate: "{account_name}" // extension is preserved automatically
+```
+
+`{display_name}` would instead give `BADER BOLAND - 8961 Longbrook Dr.dwg`, which
+matches how the BOM and iPermit deliverables are named — change the template if
+you prefer that.
 
 ### Keep the filename stable
 
@@ -93,9 +112,9 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-76 tests covering path sanitisation, reserved Windows names, folder-name
-templating, CSV parsing, the report field mapping, the reference tables, and the
-NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
+85 tests covering path sanitisation, reserved Windows names, folder-name
+templating, the drawing rename, CSV parsing, the report field mapping, the
+reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.
 
 Filesystem and DOM code cannot be tested this way — that needs a real browser.

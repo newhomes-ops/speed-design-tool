@@ -3,6 +3,23 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.1.0 — 2026-08-03
+
+- **The working drawing is renamed to the customer as it is copied.**
+  `MWD.dwg` becomes `BADER BOLAND.dwg`, so a project folder no longer contains a
+  generically named drawing. Configurable via `CONFIG.dwgRenameFrom` and
+  `CONFIG.dwgNameTemplate`.
+- The rename is resolved during **Preview**, so the tree shows the destination
+  name and flags what it was renamed from. Preview stays truthful about what
+  generation will write.
+- Falls back to the original filename when the customer name is empty or reduces
+  to nothing after sanitisation — a file called `.dwg` would be worse than
+  `MWD.dwg`. A warning is raised so it is not silent.
+- The resulting filename is recorded in `project.json` as `drawing_file`, which
+  the eventual CAD handoff will need.
+- 9 new tests: case-insensitive matching, extension preservation, illegal
+  characters, reserved device names, trailing dots, long names, empty fallback.
+
 ## 1.0.0 — 2026-08-03
 
 First release.
