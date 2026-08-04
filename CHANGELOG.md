@@ -3,6 +3,30 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.2.0 — 2026-08-03
+
+### Reference data manager
+- New **Reference data** panel covering all ten tables (630 rows): browse, search,
+  edit cells, add and delete rows.
+- Search is essential for `RT_LOCATION` at 517 rows; the grid renders a 250-row
+  window and reports how many matches are hidden.
+- **Copy table code** emits the exact `const <TABLE> = [ … ];` declaration to paste
+  back into `SPEED.html`, so a data change is a one-line diff in git.
+- **Copy all changed** exports every table edited in the session.
+- **Reset table** restores the shipped data for one table.
+- Edits apply to calculations immediately, but are intentionally not persisted —
+  the source file is the single source of truth, so designers cannot drift apart.
+
+### Validation
+- **Ordering guards** on `RT_AMPACITY`, `RT_EGC` and `RT_BREAKERS`. These are
+  searched with `.find()`, so an out-of-order row silently returns the wrong
+  conductor or breaker. Export is blocked.
+- **Duplicate key detection**, case-insensitive — a duplicate makes the second row
+  unreachable by lookup.
+- Type and required-field checks, with nullable fields honoured.
+- Cross-table check: a module referencing an unknown microinverter warns.
+- 25 new tests, 110 total.
+
 ## 1.1.0 — 2026-08-03
 
 - **The working drawing is renamed to the customer as it is copied.**

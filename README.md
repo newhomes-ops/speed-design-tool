@@ -69,9 +69,57 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const APP_BUILD   = "2026-08-03";
 ```
+
+## Reference data
+
+The **Reference data** panel lists all ten tables, lets you search and edit them,
+and produces the exact code to paste back into `SPEED.html`.
+
+| Table | Rows | Contents |
+|---|---|---|
+| `RT_LOCATION` | 517 | Design temperatures by city |
+| `RT_AMPACITY` | 24 | Conductor ampacity and resistance |
+| `RT_EGC` | 19 | OCPD to grounding conductor |
+| `RT_BREAKERS` | 17 | Standard OCPD ratings |
+| `RT_TEMP_CORR` | 16 | Ambient correction factors |
+| `MODULE_DB` | 12 | PV modules |
+| `RT_ESS` | 7 | Storage configurations |
+| `RT_FILL_DERATING` | 7 | Conductor-count adjustment |
+| `RT_MI` | 6 | Microinverters |
+| `RT_HEIGHT_ADDER` | 5 | Rooftop temperature adder |
+
+### How editing works
+
+Edits apply immediately to calculations in the current browser session but are
+**not saved**. To make a change permanent for everyone: press **Copy table code**,
+then replace the matching `const <TABLE> = [ … ];` line in `SPEED.html` and commit.
+
+This is deliberate. IPlot-Tool saves table edits to `localStorage`, which means
+each designer can silently accumulate different reference data — two people
+calculating conductor sizes from different ampacity tables, with nothing to
+reveal it. Because the tool is served from one URL, editing at the source and
+committing gives everyone identical data and puts every change in git history.
+For data feeding PE-stamped drawings, that audit trail matters.
+
+### Validation blocks bad edits
+
+**Ordering.** `RT_AMPACITY`, `RT_EGC` and `RT_BREAKERS` are searched with
+`.find()`, which returns the *first* row meeting the requirement. A row inserted
+out of order silently yields the wrong conductor or breaker — no error, just an
+incorrect drawing. Export is blocked if the ordering is broken.
+
+**Duplicate keys.** Blocked for the same reason: the second row would be
+unreachable by lookup.
+
+**Types and required fields.** Numeric fields must parse as numbers; `int` fields
+round. `Wptc` and the temperature-correction factors may be null, since a null
+factor means that insulation rating is not permitted at that ambient.
+
+**Cross-references.** A module naming a microinverter absent from `RT_MI` raises a
+warning rather than an error — it may be intentional during a staged addition.
 
 ### Drawing rename
 
@@ -112,7 +160,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-85 tests covering path sanitisation, reserved Windows names, folder-name
+110 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.
