@@ -69,13 +69,26 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
+## Sections
+
+A tab bar under the header switches between three screens, matching IPlot-Tool's
+layout:
+
+| Section | Contents |
+|---|---|
+| **Project** | Folders, Salesforce import, project information, folder preview, existing projects |
+| **PV Calc** | PV / NEC calculations and results |
+| **Reference Data** | All ten reference tables |
+
+BOM and Spec Sheets appear as disabled tabs until they are built.
+
 ## Reference data
 
-The **Reference data** panel puts all ten tables on their own tabs. Each tab shows
+The **Reference Data** screen puts all ten tables on their own sub-tabs. Each tab shows
 its row count, a yellow dot when changed this session, and a red count when the
 table has validation errors — so a problem is visible without opening the tab.
 

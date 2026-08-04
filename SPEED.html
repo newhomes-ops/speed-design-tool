@@ -139,11 +139,44 @@
 
   /* ---------------------------------------------------------------- layout */
 
-  main {
-    max-width: 1240px; margin: 24px auto 72px; padding: 0 24px;
-    display: grid; grid-template-columns: minmax(0,1fr) 384px; gap: 24px; align-items: start;
+  main { max-width: 1240px; margin: 24px auto 72px; padding: 0 24px; }
+
+  /* ---------------------------------------------------------------- views */
+
+  .view { display: none; }
+  .view.active {
+    display: grid; grid-template-columns: minmax(0,1fr) 384px;
+    gap: 24px; align-items: start;
   }
-  @media (max-width: 1040px) { main { grid-template-columns: minmax(0,1fr); } }
+  .view.active:has(> .col.wide:only-child) { grid-template-columns: minmax(0,1fr); }
+  .col { min-width: 0; }
+  @media (max-width: 1040px) { .view.active { grid-template-columns: minmax(0,1fr); } }
+
+  /* ------------------------------------------------------------- tab bar */
+
+  .tab-bar {
+    background: var(--white); border-bottom: 1px solid var(--border);
+    position: sticky; top: 68px; z-index: 30; box-shadow: var(--shadow-sm);
+  }
+  .tab-bar-inner {
+    max-width: 1240px; margin: 0 auto; padding: 0 24px;
+    display: flex; gap: 2px; overflow-x: auto;
+  }
+  .tab-bar .tab {
+    border: 0; border-bottom: 3px solid transparent; border-radius: 0;
+    background: transparent; color: var(--muted);
+    font-size: 13px; font-weight: 700; letter-spacing: .01em;
+    padding: 13px 18px; cursor: pointer; white-space: nowrap;
+    transition: color .13s, background .13s, border-color .13s;
+  }
+  .tab-bar .tab:hover:not(.active):not(.disabled) {
+    color: var(--navy); background: #F4F8FD;
+  }
+  .tab-bar .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab-bar .tab.disabled { color: #AFBACB; cursor: not-allowed; }
+  .tab-bar .tab:focus-visible {
+    outline: none; box-shadow: inset 0 0 0 2px rgba(0,86,184,.3);
+  }
 
   .panel {
     background: var(--panel);
@@ -335,6 +368,9 @@
     display: flex; flex-wrap: wrap; gap: 4px;
     border-bottom: 2px solid var(--grey-l); padding-bottom: 0;
   }
+  /* Reference sub-tabs: table headers are sticky inside a scroll box, so
+     they must not slide beneath the sticky section bar. */
+  #view-reference thead th { top: 0; }
   .tabs button {
     border: 1px solid transparent; border-bottom: 0;
     border-radius: var(--r-sm) var(--r-sm) 0 0;
@@ -381,7 +417,7 @@
   ::selection { background: rgba(0,86,184,.16); }
 
   @media print {
-    .topbar, .actions, .phasebar { display: none !important; }
+    .topbar, .tab-bar, .actions, .phasebar { display: none !important; }
     main { grid-template-columns: 1fr; max-width: none; }
     .panel { break-inside: avoid; box-shadow: none; }
   }
@@ -400,16 +436,21 @@
       </div>
     </div>
     <div class="phasebar">
-      <span class="chip ready">Folders</span>
-      <span class="chip ready">Import</span>
-      <span class="chip ready">PV calcs</span>
-      <span class="chip">BOM</span>
-      <span class="chip">Spec sheets</span>
       <span class="chip version" id="appVersion" title="Tool version"></span>
     </div>
   </div>
 </div>
 <div class="accent-rule"></div>
+
+<nav class="tab-bar" id="tabBar" role="tablist" aria-label="Sections">
+  <div class="tab-bar-inner">
+    <button type="button" class="tab active" data-view="project"   role="tab">Project</button>
+    <button type="button" class="tab"        data-view="pvcalc"    role="tab">PV Calc</button>
+    <button type="button" class="tab"        data-view="reference" role="tab">Reference Data</button>
+    <button type="button" class="tab disabled" disabled title="Not built yet">BOM</button>
+    <button type="button" class="tab disabled" disabled title="Not built yet">Spec Sheets</button>
+  </div>
+</nav>
 
 <div id="unsupported" style="display:none">
   <div class="blocker">
@@ -426,9 +467,11 @@
 </div>
 
 <main id="app" style="display:none">
-  <div>
     <div id="msg" class="msg"></div>
 
+  <!-- ============ VIEW: Project ============ -->
+  <div class="view active" id="view-project">
+    <div class="col">
     <div class="panel">
       <h2>Folders</h2>
       <div class="body">
@@ -586,6 +629,45 @@
       </div>
     </div>
 
+    </div>
+    <div class="col">
+    <div class="panel">
+      <h2>Folder preview</h2>
+      <div class="body">
+        <div id="previewEmpty" class="hint">Choose the SPEED folder, fill in a
+          project number and name, then press Preview.</div>
+        <div id="previewBox" style="display:none">
+          <code class="path" id="pvPath"></code>
+          <div class="kv" style="margin:12px 0" id="pvStats"></div>
+          <div class="hint" style="margin-bottom:5px;font-weight:600">Contents to be created</div>
+          <div class="tree" id="pvTree"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Existing projects</h2>
+      <div class="body">
+        <div class="plist" id="plist"><div class="hint">None yet.</div></div>
+        <div style="margin-top:12px"><button id="btnRefresh" type="button">Refresh</button></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Field mapping</h2>
+      <div class="body">
+        <div class="hint" style="margin-bottom:8px">
+          Report column &rarr; project field. Verified against the Ambia CRM.
+        </div>
+        <div class="kv" id="mapKv"></div>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- ============ VIEW: PV Calc ============ -->
+  <div class="view" id="view-pvcalc">
+    <div class="col wide">
     <div class="panel">
       <h2>PV &amp; NEC calculations</h2>
       <div class="body">
@@ -752,6 +834,12 @@
       </div>
     </div>
 
+    </div>
+  </div>
+
+  <!-- ============ VIEW: Reference data ============ -->
+  <div class="view" id="view-reference">
+    <div class="col wide">
     <div class="panel">
       <h2>Reference data</h2>
       <div class="body">
@@ -810,41 +898,10 @@
         </details>
       </div>
     </div>
-  </div>
 
-  <div>
-    <div class="panel">
-      <h2>Folder preview</h2>
-      <div class="body">
-        <div id="previewEmpty" class="hint">Choose the SPEED folder, fill in a
-          project number and name, then press Preview.</div>
-        <div id="previewBox" style="display:none">
-          <code class="path" id="pvPath"></code>
-          <div class="kv" style="margin:12px 0" id="pvStats"></div>
-          <div class="hint" style="margin-bottom:5px;font-weight:600">Contents to be created</div>
-          <div class="tree" id="pvTree"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Existing projects</h2>
-      <div class="body">
-        <div class="plist" id="plist"><div class="hint">None yet.</div></div>
-        <div style="margin-top:12px"><button id="btnRefresh" type="button">Refresh</button></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h2>Field mapping</h2>
-      <div class="body">
-        <div class="hint" style="margin-bottom:8px">
-          Report column &rarr; project field. Verified against the Ambia CRM.
-        </div>
-        <div class="kv" id="mapKv"></div>
-      </div>
     </div>
   </div>
+
 </main>
 
 <script>
@@ -857,7 +914,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -2457,6 +2514,7 @@ async function init() {
 
   pvInit();
   rdInit();
+  initViews();
 }
 /* =====================================================================
    Phase 3 UI wiring
@@ -2473,6 +2531,31 @@ const RD_SHIPPED = {};          // deep copies of the as-shipped tables
 const RD_DIRTY = new Set();     // tables changed this session
 let rdCurrent = "MODULE_DB";
 const RD_MAX_ROWS = 250;        // RT_LOCATION has 517; render a window
+
+/* ---------------------------------------------------------------- views */
+
+/**
+ * Swap the visible section. Views are separate screens, matching IPlot-Tool's
+ * tab bar, rather than panels stacked on one long page.
+ */
+function showView(name) {
+  document.querySelectorAll(".view").forEach(v => {
+    v.classList.toggle("active", v.id === "view-" + name);
+  });
+  document.querySelectorAll("#tabBar .tab[data-view]").forEach(b => {
+    const on = b.dataset.view === name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  // Scroll to the top of the section, not wherever the previous view was.
+  window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+}
+
+function initViews() {
+  document.querySelectorAll("#tabBar .tab[data-view]").forEach(btn => {
+    btn.addEventListener("click", () => showView(btn.dataset.view));
+  });
+}
 
 function rdSnapshotShipped() {
   for (const name of Object.keys(TABLE_SCHEMAS)) {

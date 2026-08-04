@@ -3,6 +3,20 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.4.0 — 2026-08-03
+
+- **Sections are now separate screens**, switched by a tab bar under the header:
+  **Project**, **PV Calc**, **Reference Data**. Matches IPlot-Tool's layout rather
+  than stacking everything on one long page.
+- BOM and Spec Sheets show as disabled tabs, which communicates "not built" more
+  directly than the status chips did.
+- The phase chips are gone from the header; the tab bar carries navigation and the
+  version badge stands alone.
+- Reference Data gets the full page width, so wide tables no longer compete with
+  the sidebar.
+- The tab bar is sticky beneath the header, so switching sections is reachable
+  from anywhere on a long page.
+
 ## 1.3.0 — 2026-08-03
 
 - Reference data tables moved from a dropdown onto **tabs**. All ten are visible
