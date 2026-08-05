@@ -446,6 +446,7 @@
   <div class="tab-bar-inner">
     <button type="button" class="tab active" data-view="project"   role="tab">Project</button>
     <button type="button" class="tab"        data-view="pvcalc"    role="tab">PV Calc</button>
+    <button type="button" class="tab"        data-view="files"     role="tab">Files</button>
     <button type="button" class="tab"        data-view="reference" role="tab">Reference Data</button>
     <button type="button" class="tab disabled" disabled title="Not built yet">BOM</button>
     <button type="button" class="tab disabled" disabled title="Not built yet">Spec Sheets</button>
@@ -485,7 +486,20 @@
           <button id="btnPickReports" type="button">Choose reports folder</button>
           <button id="btnForget" type="button">Forget</button>
         </div>
-        <div class="hint" style="margin-top:8px">
+        <div style="margin-top:14px">
+          <label for="rootPath">Full path to the SPEED folder <span class="hint"
+            style="display:inline; font-weight:400">— optional, enables Copy path</span></label>
+          <input id="rootPath" placeholder="C:\Users\you\...\SPEED" autocomplete="off"
+                 spellcheck="false">
+          <div class="hint">
+            Browsers never reveal a folder's real path for privacy reasons, so the
+            tool cannot work it out. Paste it once from Explorer's address bar and
+            <strong>Copy path</strong> on each project will give you a full,
+            pasteable path. Saved on this machine only.
+          </div>
+        </div>
+
+        <div class="hint" style="margin-top:12px">
           The <strong>SPEED folder</strong> must contain <code>Project Template</code>.
           Projects are created in a <code>Projects</code> subfolder.
           The <strong>reports folder</strong> is where
@@ -863,6 +877,60 @@
     </div>
   </div>
 
+  <!-- ============ VIEW: Files ============ -->
+  <div class="view" id="view-files">
+    <div class="col wide">
+      <div class="panel">
+        <h2>Project files</h2>
+        <div class="body">
+          <div id="browseEmpty" class="hint">
+            Pick a project on the <strong>Project</strong> tab and press
+            <strong>Browse</strong> to see its contents here.
+          </div>
+          <div id="browseBox" style="display:none">
+            <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+              <div style="flex:1 1 240px">
+                <label for="browseSearch">Search</label>
+                <input id="browseSearch" placeholder="filter files…" autocomplete="off">
+              </div>
+              <div class="actions">
+                <button id="btnBrowseRefresh" type="button">Refresh</button>
+                <button id="btnBrowsePicker" type="button">Open in picker</button>
+                <button id="btnBrowseCopyRoot" type="button">Copy folder path</button>
+              </div>
+            </div>
+
+            <div class="kv" style="margin-top:12px">
+              <div><span>Project</span><span id="browseTitle"></span></div>
+              <div><span>Contents</span><span id="browseStats"></span></div>
+            </div>
+            <code class="path" id="browsePath" style="margin-top:10px"></code>
+
+            <div style="overflow-x:auto; margin-top:12px; max-height:520px; overflow-y:auto">
+              <table>
+                <thead><tr>
+                  <th>Name</th>
+                  <th class="num">Size</th>
+                  <th>Modified</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="browseBody"></tbody>
+              </table>
+            </div>
+
+            <div class="hint" style="margin-top:10px">
+              <strong>View</strong> opens PDFs, images and text in a new tab.
+              <strong>Download</strong> is used for everything else — on Windows a
+              <code>.dwg</code> handed to the downloads bar opens in AutoCAD.
+              <strong>Open in picker</strong> jumps the native folder dialog to this
+              project, which is the closest the browser allows to opening Explorer.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ VIEW: Reference data ============ -->
   <div class="view" id="view-reference">
     <div class="col wide">
@@ -959,7 +1027,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.9.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -2153,6 +2221,17 @@ async function loadHandle(key) {
   } catch (e) { console.warn("Could not read folder handle:", e); return null; }
 }
 
+async function saveSetting(key, value) {
+  try {
+    const db = await openDb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) { captureError("saveSetting", (e && e.message) || String(e)); }
+}
+
 async function clearHandles() {
   try {
     const db = await openDb();
@@ -2398,6 +2477,7 @@ async function listProjects(state) {
   const projectsDir = await getDir(state.root, CONFIG.projectsFolder, false);
   if (!projectsDir) return [];
   const out = [];
+  PROJECT_HANDLES.clear();
 
   /** Read one project folder, if it looks like one. */
   async function readProject(handle, name, group) {
@@ -2409,6 +2489,7 @@ async function listProjects(state) {
       entry.project_number = data.project_number || "";
       entry.display = displayName(data);
       entry.installer = data.installer || "";
+      entry.manifest = data;                 // keep it: clicking loads from this
       isProject = true;
     } catch (e) { /* no manifest */ }
     return { entry, isProject };
@@ -2418,7 +2499,11 @@ async function listProjects(state) {
     if (handle.kind !== "directory") continue;
 
     const { entry, isProject } = await readProject(handle, name, "");
-    if (isProject) { out.push(entry); continue; }
+    if (isProject) {
+      entry.id = "p" + out.length;
+      PROJECT_HANDLES.set(entry.id, handle);
+      out.push(entry); continue;
+    }
 
     // No manifest: it is either an installer root, or a project folder whose
     // manifest is missing. Look one level down before deciding.
@@ -2428,6 +2513,8 @@ async function listProjects(state) {
         if (childHandle.kind !== "directory") continue;
         childCount++;
         const child = await readProject(childHandle, childName, name);
+        child.entry.id = "p" + out.length;
+        PROJECT_HANDLES.set(child.entry.id, childHandle);
         out.push(child.entry);
       }
     } catch (e) { /* unreadable */ }
@@ -2480,7 +2567,11 @@ if (typeof window !== "undefined") {
   });
 }
 const state = { root: null, reports: null, csv: null, plan: null,
-                canGenerate: false, pvResult: null };
+                canGenerate: false, pvResult: null, rootPath: "" };
+
+/** Folder handles for the listed projects, so a row can load or locate one. */
+const PROJECT_HANDLES = new Map();
+let LAST_PROJECT_LIST = [];
 
 function showMsg(text, kind) {
   const m = $("msg");
@@ -2783,15 +2874,124 @@ async function doGenerate() {
 async function refreshProjects() {
   try {
     const projects = await listProjects(state);
+    LAST_PROJECT_LIST = projects;
     $("plist").innerHTML = projects.length
-      ? projects.map(p => `<div class="row">
-           <div class="nm">${p.project_number || p.folder}</div>
-           <div class="mt">${p.display || p.folder}</div>
-           ${p.group ? `<div class="mt" style="color:var(--blue)">${p.group}</div>` : ""}
-         </div>`).join("")
+      ? projects.map(p => {
+          const loadable = !!p.manifest;
+          return `<div class="row" data-pid="${p.id || ""}">
+            <div class="nm">${p.project_number || p.folder}</div>
+            <div class="mt">${p.display || p.folder}</div>
+            ${p.group ? `<div class="mt" style="color:var(--blue)">${p.group}</div>` : ""}
+            ${loadable ? "" : `<div class="mt" style="color:var(--warn)">no project.json — cannot load</div>`}
+            <div class="actions" style="margin-top:6px">
+              <button type="button" class="small proj-load" data-pid="${p.id || ""}"
+                ${loadable ? "" : "disabled"}>Load</button>
+              <button type="button" class="small proj-browse" data-pid="${p.id || ""}">Browse</button>
+              <button type="button" class="small proj-path" data-pid="${p.id || ""}">Copy path</button>
+            </div>
+          </div>`;
+        }).join("")
       : '<div class="hint">None yet.</div>';
+
+    $("plist").querySelectorAll(".proj-load").forEach(b =>
+      b.addEventListener("click", () => loadProject(b.dataset.pid)));
+    $("plist").querySelectorAll(".proj-browse").forEach(b =>
+      b.addEventListener("click", () => browseProject(b.dataset.pid)));
+    $("plist").querySelectorAll(".proj-path").forEach(b =>
+      b.addEventListener("click", () => copyProjectPath(b.dataset.pid)));
   } catch (e) {
     $("plist").innerHTML = `<div class="hint">Could not list projects: ${e.message}</div>`;
+  }
+}
+
+/**
+ * Load a previously generated project back into the form.
+ *
+ * Reads project.json fresh rather than trusting the cached listing, so an edit
+ * made outside the tool is picked up.
+ */
+async function loadProject(pid) {
+  const entry = (LAST_PROJECT_LIST || []).find(p => p.id === pid);
+  const handle = PROJECT_HANDLES.get(pid);
+  if (!entry || !handle) { showMsg("That project is no longer in the list — press Refresh.", "err"); return; }
+
+  busy(true, "loading…");
+  try {
+    let data;
+    try {
+      const fh = await handle.getFileHandle("project.json", { create: false });
+      data = JSON.parse(await (await fh.getFile()).text());
+    } catch (e) {
+      showMsg(`Could not read project.json in '${entry.folder}' (${e.message}). ` +
+              `It may have been created by an older tool or edited by hand.`, "err");
+      return;
+    }
+
+    // Populate only the fields the form owns; ignore the _generated block.
+    let filled = 0, skipped = [];
+    for (const f of FORM_FIELDS) {
+      const el = $(f);
+      if (!el) continue;
+      const v = data[f];
+      if (v === undefined || v === null || v === "") continue;
+      if (el.tagName === "SELECT" &&
+          !Array.from(el.options).some(o => o.value === String(v))) {
+        const opt = document.createElement("option");
+        opt.value = opt.textContent = String(v);
+        el.appendChild(opt);
+        skipped.push(`${f}='${v}' (added as an option)`);
+      }
+      el.value = v;
+      filled++;
+    }
+
+    // Loading is not the same as being ready to generate — that folder exists.
+    state.plan = null;
+    state.canGenerate = false;
+    $("btnGenerate").disabled = true;
+    $("previewBox").style.display = "none";
+    $("previewEmpty").style.display = "block";
+    $("importReport").style.display = "none";
+
+    // Pull the equipment across to the calculator too.
+    if (typeof pvSyncFromProject === "function") pvSyncFromProject();
+
+    showView("project");
+    const gen = data._generated || {};
+    const parts = [`Loaded ${entry.project_number || entry.folder} — ${filled} fields.`];
+    if (gen.tool_version) parts.push(`Created by v${gen.tool_version}.`);
+    if (gen.drawing_file) parts.push(`Drawing: ${gen.drawing_file}.`);
+    parts.push("Generate is disabled — this folder already exists.");
+    showMsg(parts.join(" "), skipped.length ? "warn" : "ok");
+    if (skipped.length) console.warn("Non-standard values:", skipped);
+  } finally {
+    busy(false);
+  }
+}
+
+/**
+ * Put the project's path on the clipboard.
+ *
+ * Browsers never expose a folder's absolute path, so the SPEED root has to be
+ * supplied once by hand. Without it, only the relative path can be offered.
+ */
+async function copyProjectPath(pid) {
+  const entry = (LAST_PROJECT_LIST || []).find(p => p.id === pid);
+  if (!entry) { showMsg("That project is no longer in the list — press Refresh.", "err"); return; }
+
+  const rel = [CONFIG.projectsFolder, entry.group, entry.folder]
+    .filter(Boolean).join("\\");
+  const root = (state.rootPath || "").replace(/[\\/]+$/, "");
+  const full = root ? root + "\\" + rel : rel;
+
+  try {
+    await navigator.clipboard.writeText(full);
+    showMsg(root
+      ? `Copied: ${full} — paste into Explorer's address bar.`
+      : `Copied the relative path: ${rel}. Set "Full path to the SPEED folder" ` +
+        `in the Folders panel to get a complete path.`, root ? "ok" : "warn");
+  } catch (e) {
+    showMsg("Could not copy to the clipboard. Path: " + full, "warn");
   }
 }
 
@@ -2903,6 +3103,25 @@ function wireControls() {
   $("lookupNumber").addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); doImport(); }
   });
+  $("btnBrowseRefresh").addEventListener("click", browseRender);
+  $("btnBrowsePicker").addEventListener("click", browseInPicker);
+  $("btnBrowseCopyRoot").addEventListener("click", async () => {
+    const root = (state.rootPath || "").replace(/[\\/]+$/, "");
+    const full = root ? root + "\\" + BROWSE_REL : BROWSE_REL;
+    try {
+      await navigator.clipboard.writeText(full);
+      showMsg(`Copied: ${full}`, root ? "ok" : "warn");
+    } catch (e) { showMsg("Could not copy. Path: " + full, "warn"); }
+  });
+  $("browseSearch").addEventListener("input", browseRender);
+
+  $("rootPath").addEventListener("change", () => {
+    state.rootPath = $("rootPath").value.trim();
+    saveSetting("rootPath", state.rootPath);
+    showMsg(state.rootPath
+      ? "Saved. Copy path will now give a full path."
+      : "Cleared. Copy path will give a relative path only.", "ok");
+  });
   $("btnDiag").addEventListener("click", () => {
     const box = $("diagOut");
     box.style.display = box.style.display === "none" ? "block" : "none";
@@ -2962,6 +3181,11 @@ async function init() {
     if (savedReports && await ensurePermission(savedReports, "read")) {
       state.reports = savedReports;
     }
+    const savedPath = await loadHandle("rootPath");
+    if (typeof savedPath === "string" && savedPath) {
+      state.rootPath = savedPath;
+      $("rootPath").value = savedPath;
+    }
   } catch (e) {
     // Storage or the permission API is unavailable — often enterprise policy.
     // The tool still works; the folder just has to be chosen each session.
@@ -3007,6 +3231,211 @@ const RD_MAX_ROWS = 250;        // RT_LOCATION has 517; render a window
  * Swap the visible section. Views are separate screens, matching IPlot-Tool's
  * tab bar, rather than panels stacked on one long page.
  */
+
+/* =====================================================================
+   Project file browser
+
+   The directory handle is already held, so the whole tree can be listed and
+   files opened directly. Viewable types (PDF, images, text) open in a new tab
+   from a blob URL; anything else downloads, which on Windows hands a .dwg
+   straight to AutoCAD.
+
+   What is NOT possible: launching Windows Explorer. There is no API to start a
+   process, and file:// navigation is blocked from an https origin. Everything
+   else about browsing works.
+   ===================================================================== */
+
+/** Extensions that a browser can display rather than download. */
+const VIEWABLE = {
+  pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml",
+  txt: "text/plain", json: "application/json", csv: "text/plain",
+  md: "text/plain", log: "text/plain", lsp: "text/plain", scr: "text/plain"
+};
+
+let BROWSE_HANDLE = null;    // folder currently shown
+let BROWSE_LABEL = "";
+let BROWSE_REL = "";         // path under the SPEED folder, for Copy path
+const BROWSE_FILES = new Map();
+
+const extOf = name => {
+  const i = String(name).lastIndexOf(".");
+  return i < 0 ? "" : name.slice(i + 1).toLowerCase();
+};
+
+const fmtBytes = n => {
+  if (!n) return "0 B";
+  if (n < 1024) return n + " B";
+  if (n < 1048576) return (n / 1024).toFixed(0) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+};
+
+/** Recursively read a folder into a flat, sorted list. */
+async function browseWalk(dirHandle, prefix, depth) {
+  prefix = prefix || ""; depth = depth || 0;
+  const rows = [];
+  if (depth > 6) return rows;                 // guard against pathological trees
+
+  const entries = [];
+  for await (const [name, handle] of dirHandle.entries()) entries.push([name, handle]);
+  // Folders first, then files, each alphabetical — matches Explorer.
+  entries.sort((a, b) => {
+    if (a[1].kind !== b[1].kind) return a[1].kind === "directory" ? -1 : 1;
+    return a[0].localeCompare(b[0], undefined, { numeric: true });
+  });
+
+  for (const [name, handle] of entries) {
+    const rel = prefix ? prefix + "/" + name : name;
+    if (handle.kind === "directory") {
+      rows.push({ kind: "dir", name, rel, depth });
+      rows.push(...await browseWalk(handle, rel, depth + 1));
+    } else {
+      let size = 0, modified = 0;
+      try {
+        const f = await handle.getFile();
+        size = f.size; modified = f.lastModified;
+      } catch (e) { /* cloud-only or locked */ }
+      rows.push({ kind: "file", name, rel, depth, size, modified, handle });
+    }
+  }
+  return rows;
+}
+
+/** Show a project's contents. */
+async function browseProject(pid) {
+  const entry = (LAST_PROJECT_LIST || []).find(p => p.id === pid);
+  const handle = PROJECT_HANDLES.get(pid);
+  if (!entry || !handle) {
+    showMsg("That project is no longer in the list — press Refresh.", "err");
+    return;
+  }
+  BROWSE_HANDLE = handle;
+  BROWSE_LABEL = entry.folder;
+  BROWSE_REL = [CONFIG.projectsFolder, entry.group, entry.folder].filter(Boolean).join("\\");
+  await browseRender();
+  showView("files");
+}
+
+/** Re-read and draw the tree. */
+async function browseRender() {
+  if (!BROWSE_HANDLE) {
+    $("browseEmpty").style.display = "block";
+    $("browseBox").style.display = "none";
+    return;
+  }
+  $("browseEmpty").style.display = "none";
+  $("browseBox").style.display = "block";
+  $("browseTitle").textContent = BROWSE_LABEL;
+
+  const root = (state.rootPath || "").replace(/[\\/]+$/, "");
+  $("browsePath").textContent = root ? root + "\\" + BROWSE_REL : BROWSE_REL;
+
+  let rows;
+  try {
+    rows = await browseWalk(BROWSE_HANDLE);
+  } catch (e) {
+    $("browseBody").innerHTML =
+      `<tr><td colspan="4" class="hint" style="padding:10px">Could not read the folder: ${e.message}</td></tr>`;
+    return;
+  }
+
+  BROWSE_FILES.clear();
+  const files = rows.filter(r => r.kind === "file");
+  const bytes = files.reduce((s, f) => s + f.size, 0);
+  $("browseStats").textContent =
+    `${files.length} files, ${rows.length - files.length} folders, ${fmtBytes(bytes)}`;
+
+  const filter = $("browseSearch").value.trim().toLowerCase();
+  const shown = filter ? rows.filter(r => r.rel.toLowerCase().includes(filter)) : rows;
+
+  $("browseBody").innerHTML = shown.map((r, i) => {
+    const pad = 8 + r.depth * 18;
+    if (r.kind === "dir") {
+      return `<tr><td style="padding-left:${pad}px; font-weight:700; color:var(--navy)">` +
+             `${r.name}\\</td><td></td><td></td><td></td></tr>`;
+    }
+    const id = "f" + i;
+    BROWSE_FILES.set(id, r);
+    const viewable = !!VIEWABLE[extOf(r.name)];
+    return `<tr>
+      <td style="padding-left:${pad}px">${r.name}</td>
+      <td class="num">${fmtBytes(r.size)}</td>
+      <td class="hint" style="white-space:nowrap">${
+        r.modified ? new Date(r.modified).toLocaleDateString() : "—"}</td>
+      <td style="white-space:nowrap">
+        <button type="button" class="small br-open" data-f="${id}">${
+          viewable ? "View" : "Download"}</button>
+        <button type="button" class="small br-path" data-f="${id}">Path</button>
+      </td></tr>`;
+  }).join("") ||
+  `<tr><td colspan="4" class="hint" style="padding:10px">Nothing matches "${filter}".</td></tr>`;
+
+  $("browseBody").querySelectorAll(".br-open").forEach(b =>
+    b.addEventListener("click", () => browseOpen(b.dataset.f)));
+  $("browseBody").querySelectorAll(".br-path").forEach(b =>
+    b.addEventListener("click", () => browseCopyPath(b.dataset.f)));
+}
+
+/**
+ * Open a file. Viewable types render in a new tab; everything else downloads,
+ * which is how a .dwg reaches AutoCAD.
+ */
+async function browseOpen(fid) {
+  const row = BROWSE_FILES.get(fid);
+  if (!row) return;
+  busy(true, "opening…");
+  try {
+    const file = await row.handle.getFile();
+    const type = VIEWABLE[extOf(row.name)];
+    const blob = type ? new Blob([await file.arrayBuffer()], { type }) : file;
+    const url = URL.createObjectURL(blob);
+
+    if (type) {
+      const w = window.open(url, "_blank");
+      if (!w) showMsg("The browser blocked the new tab — allow pop-ups for this site.", "warn");
+      else showMsg(`Opened ${row.name}.`, "ok");
+    } else {
+      const a = document.createElement("a");
+      a.href = url; a.download = row.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      showMsg(`Downloading ${row.name} — open it from the downloads bar ` +
+              `(a .dwg will hand off to AutoCAD).`, "ok");
+    }
+    // Give the tab or download time to take the URL before revoking it.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    showMsg(`Could not open ${row.name}: ${e.message}`, "err");
+  } finally {
+    busy(false);
+  }
+}
+
+async function browseCopyPath(fid) {
+  const row = BROWSE_FILES.get(fid);
+  if (!row) return;
+  const root = (state.rootPath || "").replace(/[\\/]+$/, "");
+  const rel = BROWSE_REL + "\\" + row.rel.replace(/\//g, "\\");
+  const full = root ? root + "\\" + rel : rel;
+  try {
+    await navigator.clipboard.writeText(full);
+    showMsg(`Copied: ${full}`, root ? "ok" : "warn");
+  } catch (e) {
+    showMsg("Could not copy. Path: " + full, "warn");
+  }
+}
+
+/** Jump the native folder picker straight to this project. */
+async function browseInPicker() {
+  if (!BROWSE_HANDLE) return;
+  try {
+    await window.showDirectoryPicker({ mode: "read", startIn: BROWSE_HANDLE });
+    showMsg("Closed the picker. Nothing was changed.", "ok");
+  } catch (e) {
+    if (e.name !== "AbortError") showMsg("Could not open the picker: " + e.message, "warn");
+  }
+}
+
 function showView(name) {
   document.querySelectorAll(".view").forEach(v => {
     v.classList.toggle("active", v.id === "view-" + name);

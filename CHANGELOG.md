@@ -3,6 +3,65 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.9.0 — 2026-08-03
+
+### Files tab — browse a project inside the tool
+
+I previously said browsing a folder from a web page was not possible. **That was
+wrong**, and it conflated two different things. The tool already holds the
+directory handle, so listing and reading the tree works fine. Only *launching
+Explorer* is impossible.
+
+- New **Files** tab and a **Browse** button on every project row.
+- Full recursive tree, folders first then files, each alphabetical with natural
+  number ordering — matching Explorer. Sizes and modified dates included.
+- Search filters the whole tree by path.
+- **View** opens PDFs, images and text in a new tab from a blob URL.
+- **Download** handles everything else; on Windows a `.dwg` from the downloads bar
+  opens in AutoCAD.
+- **Path** copies any individual file's full path; **Copy folder path** does the
+  project folder.
+- **Open in picker** jumps the native folder dialog to the project via
+  `showDirectoryPicker({ startIn })` — a picker, not Explorer, but the closest the
+  platform allows.
+- Recursion is depth-capped at 6 and unreadable files (cloud-only, locked) are
+  listed rather than aborting the walk.
+
+### Still not possible
+Launching Windows Explorer. No API exists to start a process, and `file://`
+navigation is blocked from an https origin.
+
+## 1.8.0 — 2026-08-03
+
+### Existing projects is now interactive
+- **Load** on any project reads its `project.json` and repopulates the whole form,
+  then syncs the module and location into PV Calc. Reads the file fresh rather
+  than the cached listing, so an edit made outside the tool is picked up.
+- Loading reports which tool version created the project and the drawing filename
+  from the manifest.
+- **Generate stays disabled after loading** — that folder already exists and the
+  tool never overwrites one. Preview is cleared so nothing stale is shown.
+- A value in `project.json` that is not a standard dropdown option is added as an
+  option rather than silently dropped.
+- Rows with no `project.json` are labelled *cannot load* with Load disabled,
+  rather than failing when clicked.
+
+### Copy path
+- **Copy path** puts the project's folder path on the clipboard.
+- New optional field in **Folders**: the SPEED folder's absolute path, stored on
+  that machine only. **Browsers never expose a folder's real path** — the File
+  System Access API deliberately gives only the folder name — so it has to be
+  entered once. Without it, a relative path is copied and the tool says so.
+- Handles trailing separators and a missing installer group without producing a
+  malformed path.
+
+### Not possible, stated plainly
+A web page **cannot** launch Explorer: no API exists, and `file://` links are
+blocked from an https origin. Copy-and-paste into the address bar is as close as
+the platform allows.
+
+- 7 new tests, 139 total.
+
 ## 1.7.0 — 2026-08-03
 
 ### Startup can no longer fail silently

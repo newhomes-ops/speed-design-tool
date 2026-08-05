@@ -73,9 +73,48 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.9.0";
 const APP_BUILD   = "2026-08-03";
 ```
+
+## Reopening a project
+
+**Existing projects** lists every generated project, grouped by installer. Each row has:
+
+- **Load** — reads that project's `project.json` and fills the form, then pulls the
+  module and location across into PV Calc. Generate stays disabled, because the
+  folder already exists and the tool never overwrites one.
+- **Copy path** — puts the folder path on the clipboard to paste into Explorer.
+
+A row without a `project.json` shows *cannot load* and its Load button is
+disabled — those are folders created by hand or by an older tool.
+
+- **Browse** — opens the project on the **Files** tab.
+
+## Browsing project files
+
+The **Files** tab lists a project's whole tree — folders first, then files, with
+sizes and modified dates, and a search box. Per file:
+
+- **View** — PDFs, images and text open in a new tab.
+- **Download** — everything else. On Windows a `.dwg` handed to the downloads bar
+  **opens in AutoCAD**, which for the common case is more direct than Explorer.
+- **Path** — copies that file's full path.
+
+**Open in picker** jumps the native folder dialog straight to the project. It is a
+picker rather than Explorer, but it is the closest the browser allows.
+
+### What is genuinely not possible
+
+Launching **Windows Explorer** itself. There is no API to start a process, and
+`file://` navigation is blocked from an https origin. That is the only real
+limitation — browsing, reading and opening files all work.
+
+Separately, **browsers never expose a folder's real path** — the File System Access
+API deliberately gives the folder *name* only. That is why the SPEED folder's path
+has to be entered once in the **Folders** panel for Copy path to produce a full
+path. Without it you get a relative path like
+`Projects\Cobalt\8961BOLA - BADER BOLAND`.
 
 ## If the buttons do nothing
 
@@ -103,6 +142,7 @@ layout:
 |---|---|
 | **Project** | Folders, Salesforce import, project information, folder preview, existing projects |
 | **PV Calc** | PV / NEC calculations and results |
+| **Files** | Browse a project's contents and open files |
 | **Reference Data** | All ten reference tables |
 
 BOM and Spec Sheets appear as disabled tabs until they are built.
@@ -242,7 +282,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-132 tests covering path sanitisation, reserved Windows names, folder-name
+139 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.
