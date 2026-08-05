@@ -73,9 +73,26 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const APP_BUILD   = "2026-08-03";
 ```
+
+## If the buttons do nothing
+
+Open the **Diagnostics** panel at the bottom of the Project tab, press **Show
+diagnostics**, then **Copy**, and send that text. It reports the browser, which
+APIs are available, whether the page is a secure context, the loaded reference
+data, and any errors captured during the session.
+
+Most likely causes, in order:
+
+1. **Firefox or Safari.** Neither implements the File System Access API. The tool
+   shows a blocking screen rather than a broken page, and prints why.
+2. **Enterprise policy blocking the File System Access API.** `showDirectoryPicker`
+   still exists, so the tool starts, but permission checks throw. As of 1.7.0 this
+   is caught and reported instead of killing startup.
+3. **A stale cached copy.** Check the version in the header against this README
+   and hard-refresh with Ctrl+F5.
 
 ## Sections
 

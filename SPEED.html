@@ -461,12 +461,16 @@
     <p><strong>Use Microsoft Edge or Google Chrome.</strong> Firefox and Safari
     do not support it, and there is no workaround.</p>
     <p class="hint">If you are already in Edge or Chrome and see this message,
-    the file may be opened from a location the browser treats as untrusted.
-    Copy it to a local folder and open it again.</p>
+    the API may be blocked by company policy, or the page may be served from a
+    location the browser does not treat as secure.</p>
+    <pre id="unsupportedDetail" style="font-size:11px; white-space:pre-wrap;
+      background:#F7F9FC; border:1px solid var(--border); border-radius:6px;
+      padding:10px; margin-top:14px"></pre>
   </div>
 </div>
 
 <main id="app" style="display:none">
+  <div id="startupError" style="display:none; margin-bottom:18px"></div>
     <div id="msg" class="msg"></div>
 
   <!-- ============ VIEW: Project ============ -->
@@ -653,6 +657,25 @@
       <div class="body">
         <div class="plist" id="plist"><div class="hint">None yet.</div></div>
         <div style="margin-top:12px"><button id="btnRefresh" type="button">Refresh</button></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Diagnostics</h2>
+      <div class="body">
+        <div class="hint">
+          If the tool misbehaves, open this and send Kevin the text. It reports
+          the browser, which APIs are available, and the version you are running.
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button id="btnDiag" type="button">Show diagnostics</button>
+          <button id="btnDiagCopy" type="button">Copy</button>
+        </div>
+        <div id="diagOut" style="display:none; margin-top:12px">
+          <pre id="diagText" style="font-size:11px; white-space:pre-wrap;
+            background:#F7F9FC; border:1px solid var(--border); border-radius:6px;
+            padding:10px; max-height:320px; overflow:auto; margin:0"></pre>
+        </div>
       </div>
     </div>
 
@@ -936,7 +959,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -2144,8 +2167,17 @@ async function clearHandles() {
 async function ensurePermission(handle, mode) {
   if (!handle) return false;
   const opts = { mode: mode || "readwrite" };
-  if ((await handle.queryPermission(opts)) === "granted") return true;
-  return (await handle.requestPermission(opts)) === "granted";
+  try {
+    // These can throw outright when the File System Access API is restricted by
+    // enterprise policy, or when a stored handle no longer resolves.
+    if (typeof handle.queryPermission !== "function") return false;
+    if ((await handle.queryPermission(opts)) === "granted") return true;
+    if (typeof handle.requestPermission !== "function") return false;
+    return (await handle.requestPermission(opts)) === "granted";
+  } catch (e) {
+    captureError("permission check", (e && e.message) || String(e));
+    return false;
+  }
 }
 
 async function getDir(parent, name, create) {
@@ -2429,6 +2461,24 @@ async function findReportCsvs(state) {
    ===================================================================== */
 
 const $ = id => document.getElementById(id);
+
+/* Anything that escapes a handler lands here, so it shows up in Diagnostics
+   instead of only in a console nobody opens. */
+const CAPTURED_ERRORS = [];
+function captureError(kind, detail) {
+  const line = `[${new Date().toLocaleTimeString()}] ${kind}: ${detail}`;
+  CAPTURED_ERRORS.push(line);
+  if (CAPTURED_ERRORS.length > 40) CAPTURED_ERRORS.shift();
+  console.error(line);
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("error", e =>
+    captureError("error", `${e.message} (${e.filename || "?"}:${e.lineno || "?"})`));
+  window.addEventListener("unhandledrejection", e => {
+    const r = e.reason;
+    captureError("unhandled promise", (r && (r.stack || r.message)) || String(r));
+  });
+}
 const state = { root: null, reports: null, csv: null, plan: null,
                 canGenerate: false, pvResult: null };
 
@@ -2765,34 +2815,80 @@ function clearForm() {
 
 /* ---------------------------------------------------------------- init */
 
-async function init() {
-  if (!SUPPORTED) {
-    $("unsupported").style.display = "block";
-    return;
+/**
+ * Report a startup failure where the user can see it.
+ *
+ * A dead page with no message is the worst possible outcome — it looks like the
+ * tool simply does not work, with nothing to act on or report.
+ */
+/**
+ * Environment report. Deliberately verbose — this is what gets pasted into a
+ * bug report, and "buttons do not work" is unactionable without it.
+ */
+function renderDiagnostics() {
+  const yn = v => v ? "yes" : "NO";
+  const L = [];
+  L.push(`SPEED ${APP_VERSION} (built ${APP_BUILD})`);
+  L.push(`URL              ${location.href}`);
+  L.push(`Time             ${new Date().toString()}`);
+  L.push("");
+  L.push("--- browser ---");
+  L.push(`User agent       ${navigator.userAgent}`);
+  L.push(`Platform         ${navigator.platform || "(unknown)"}`);
+  L.push(`Language         ${navigator.language}`);
+  L.push("");
+  L.push("--- required APIs ---");
+  L.push(`showDirectoryPicker   ${yn(typeof window.showDirectoryPicker === "function")}`);
+  L.push(`showOpenFilePicker    ${yn(typeof window.showOpenFilePicker === "function")}`);
+  L.push(`FileSystemFileHandle  ${yn(typeof window.FileSystemFileHandle !== "undefined")}`);
+  L.push(`createWritable        ${yn(typeof window.FileSystemFileHandle !== "undefined" &&
+      typeof window.FileSystemFileHandle.prototype.createWritable === "function")}`);
+  L.push(`indexedDB             ${yn(typeof indexedDB !== "undefined")}`);
+  L.push(`clipboard.writeText   ${yn(!!(navigator.clipboard && navigator.clipboard.writeText))}`);
+  L.push(`secure context        ${yn(window.isSecureContext)}`);
+  L.push("");
+  L.push("--- state ---");
+  L.push(`SPEED folder     ${state.root ? state.root.name : "(not chosen)"}`);
+  L.push(`Reports folder   ${state.reports ? state.reports.name : "(not set)"}`);
+  L.push(`Report loaded    ${state.csv ? state.csv.name + " (" + state.csv.records.length + " rows)" : "(none)"}`);
+  L.push(`Active view      ${(document.querySelector(".view.active") || {}).id || "(none)"}`);
+  L.push("");
+  L.push("--- reference data ---");
+  for (const name of Object.keys(TABLE_SCHEMAS)) {
+    const errs = validateTable(name, getTable(name)).errors.length;
+    L.push(`${name.padEnd(18)} ${String(getTable(name).length).padStart(4)} rows  ` +
+           `${(RD_SOURCE[name] === "folder" ? "folder" : "built-in").padEnd(9)}` +
+           `${errs ? "  " + errs + " ERRORS" : ""}`);
   }
-  $("app").style.display = "grid";
-  $("date_drawn").value = new Date().toISOString().slice(0, 10);
-  $("installer").innerHTML = '<option value="">(choose)</option>' +
-    CONFIG.installers.map(i => `<option value="${i}">${i}</option>`).join("");
-  $("appVersion").textContent = "v" + APP_VERSION;
-  $("appVersion").title = `SPEED ${APP_VERSION} — built ${APP_BUILD}`;
-  renderMapping();
+  L.push("");
+  L.push("--- errors captured this session ---");
+  L.push(CAPTURED_ERRORS.length
+    ? CAPTURED_ERRORS.map((e, i) => `${i + 1}. ${e}`).join("\n")
+    : "(none)");
+  $("diagText").textContent = L.join("\n");
+}
 
-  // Restore previously chosen folders. Permission must be re-confirmed per
-  // session by the browser's security model, so this can legitimately fail.
-  const savedRoot = await loadHandle("root");
-  if (savedRoot && await ensurePermission(savedRoot, "readwrite")) state.root = savedRoot;
-  const savedReports = await loadHandle("reports");
-  if (savedReports && await ensurePermission(savedReports, "read")) state.reports = savedReports;
+function fatal(where, err) {
+  const box = $("startupError");
+  if (!box) { console.error(where, err); return; }
+  box.style.display = "block";
+  const detail = err && err.stack ? err.stack : String(err);
+  box.innerHTML =
+    `<div class="msg show err" style="margin:0">` +
+    `<strong>Something failed while starting (${where}).</strong><br>` +
+    `${err && err.message ? err.message : err}<br><br>` +
+    `Open the <strong>Diagnostics</strong> panel at the bottom of the Project ` +
+    `tab and send Kevin what it says.` +
+    `</div>` +
+    `<pre style="margin-top:10px; font-size:11px; white-space:pre-wrap; ` +
+    `background:#F7F9FC; border:1px solid var(--border); border-radius:6px; ` +
+    `padding:10px; max-height:200px; overflow:auto">${
+      String(detail).replace(/&/g, "&amp;").replace(/</g, "&lt;")}</pre>`;
+  console.error(where, err);
+}
 
-  await renderFolderStatus();
-  if (state.root) {
-    await rdApplyFolderData();
-    await Promise.all([refreshProjects(), reloadReports()]);
-  } else if (savedRoot) {
-    showMsg("Folder access needs re-confirming. Press 'Choose SPEED folder'.", "warn");
-  }
-
+/** Wire every control. Runs before any async work so buttons always respond. */
+function wireControls() {
   $("btnPickRoot").addEventListener("click", pickRoot);
   $("btnPickReports").addEventListener("click", pickReports);
   $("btnForget").addEventListener("click", forgetFolders);
@@ -2807,10 +2903,87 @@ async function init() {
   $("lookupNumber").addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); doImport(); }
   });
+  $("btnDiag").addEventListener("click", () => {
+    const box = $("diagOut");
+    box.style.display = box.style.display === "none" ? "block" : "none";
+    if (box.style.display === "block") renderDiagnostics();
+  });
+  $("btnDiagCopy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText($("diagText").textContent);
+      showMsg("Diagnostics copied to the clipboard.", "ok");
+    } catch (e) { showMsg("Could not copy — select the text manually.", "warn"); }
+  });
+}
 
-  pvInit();
-  rdInit();
-  initViews();
+async function init() {
+  if (!SUPPORTED) {
+    $("unsupported").style.display = "block";
+    const d = $("unsupportedDetail");
+    if (d) d.textContent = [
+      `SPEED ${APP_VERSION} (built ${APP_BUILD})`,
+      `URL                 ${location.href}`,
+      `secure context      ${window.isSecureContext ? "yes" : "NO"}`,
+      `showDirectoryPicker ${typeof window.showDirectoryPicker}`,
+      `indexedDB           ${typeof indexedDB}`,
+      `User agent          ${navigator.userAgent}`
+    ].join("\n");
+    return;
+  }
+  $("app").style.display = "block";
+
+  // ---- Phase A: everything that cannot fail on a supported browser ----
+  // Wired first and inside its own guard, so a later failure can never leave
+  // the page rendered-but-dead. That was the cause of "buttons do nothing".
+  try {
+    $("date_drawn").value = new Date().toISOString().slice(0, 10);
+    $("installer").innerHTML = '<option value="">(choose)</option>' +
+      CONFIG.installers.map(i => `<option value="${i}">${i}</option>`).join("");
+    $("appVersion").textContent = "v" + APP_VERSION;
+    $("appVersion").title = `SPEED ${APP_VERSION} — built ${APP_BUILD}`;
+    renderMapping();
+    wireControls();
+    pvInit();
+    rdInit();
+    initViews();
+  } catch (e) {
+    fatal("wiring the interface", e);
+    return;                       // nothing below will work either
+  }
+
+  // ---- Phase B: restoring the saved folders. Allowed to fail. ---------
+  let savedRoot = null;
+  try {
+    savedRoot = await loadHandle("root");
+    if (savedRoot && await ensurePermission(savedRoot, "readwrite")) {
+      state.root = savedRoot;
+    }
+    const savedReports = await loadHandle("reports");
+    if (savedReports && await ensurePermission(savedReports, "read")) {
+      state.reports = savedReports;
+    }
+  } catch (e) {
+    // Storage or the permission API is unavailable — often enterprise policy.
+    // The tool still works; the folder just has to be chosen each session.
+    console.warn("Could not restore saved folders:", e);
+    showMsg("Could not restore your saved folder (" + (e.message || e) + "). " +
+            "Press 'Choose SPEED folder' — everything else works normally.", "warn");
+  }
+
+  // ---- Phase C: reading the folder. Also allowed to fail. -------------
+  try {
+    await renderFolderStatus();
+    if (state.root) {
+      await rdApplyFolderData();
+      await Promise.all([refreshProjects(), reloadReports()]);
+    } else if (savedRoot) {
+      showMsg("Folder access needs re-confirming. Press 'Choose SPEED folder'.", "warn");
+    }
+  } catch (e) {
+    console.warn("Could not read the SPEED folder:", e);
+    showMsg("Could not read the SPEED folder (" + (e.message || e) + "). " +
+            "Try 'Choose SPEED folder' again.", "err");
+  }
 }
 /* =====================================================================
    Phase 3 UI wiring

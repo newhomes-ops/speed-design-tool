@@ -3,6 +3,36 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.7.0 — 2026-08-03
+
+### Startup can no longer fail silently
+
+Two users on the same URL, one with working buttons and one without. The cause
+was structural, not environmental: **every `await` in `init()` ran before the
+event listeners were attached**, and `init()` had no error handling. Any failure
+while restoring the saved folder left a fully rendered page with dead controls
+and no message at all.
+
+- **Controls are wired first**, before any async work. A later failure can no
+  longer leave the interface unresponsive.
+- `init()` is split into three guarded phases — wiring, folder restore, folder
+  read. Only the first is fatal, and it reports itself on screen with a stack
+  trace rather than dying quietly.
+- `ensurePermission` no longer throws. `queryPermission` and `requestPermission`
+  can fail outright when the File System Access API is restricted by enterprise
+  policy, or when a stored handle no longer resolves — both are now caught and
+  reported.
+- Global `error` and `unhandledrejection` handlers capture anything that escapes,
+  so failures appear in Diagnostics rather than only in a console nobody opens.
+
+### Diagnostics panel
+- New panel on the Project tab: version, user agent, platform, every required API
+  with a yes/no, secure-context status, current folder and report state, per-table
+  row counts and source, and every error captured this session. **Copy** puts it
+  on the clipboard for a bug report.
+- The unsupported-browser screen now prints the same detail, so a blocked user
+  can say *why* rather than just "it does not work".
+
 ## 1.6.0 — 2026-08-03
 
 - **Installer is now a dropdown** with two options, Direct and Cobalt, starting
