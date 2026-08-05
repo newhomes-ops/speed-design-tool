@@ -3,6 +3,118 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.6.0 — 2026-08-05
+
+### One microinverter model, two Vac variants
+
+The table previously faked variants by putting the voltage in the model name —
+`IQ7HS-66-M-US` and `IQ7HS-66-M-US (208V)` as two unrelated part numbers. Now
+there is one row per model per voltage, and **identity is `miModel` + `Vac`**.
+
+`Display label` removed.
+
+| Model | AC size | Eff | Min | Max | Iac | Vac |
+|---|---|---|---|---|---|---|
+| IQ7XS | 315 | 0.975 | 2 | 12 | 1.31 | 240 |
+| IQ7XS | 315 | 0.97 | 2 | 10 | 1.51 | 208 |
+| IQ7HS-66-M-US | 384 | 0.97 | 2 | 10 | 1.6 | 240 |
+| IQ7HS-66-M-US | 367 | 0.97 | 2 | 9 | 1.77 | 208 |
+| IQ8MC-72-M-US | 320 | 0.97 | 2 | 12 | 1.33 | 240 |
+| IQ8MC-72-M-US | 310 | 0.97 | 2 | 10 | 1.49 | 208 |
+
+The variants are not cosmetic: the 208 V IQ7HS draws **1.77 A against 1.6 A**
+and allows **9 modules per branch against 10**. Picking the wrong one changes
+the conductor and the OCPD.
+
+### Composite keys
+
+`TABLE_SCHEMAS` gained `keyFields`, and the duplicate-key check and the import
+differ both work through one `rowKeyOf` helper. So the same model twice is now
+legal, while the same model *at the same voltage* is still an error — the
+duplicate check has not been weakened, only made two-column.
+
+### Ambiguity is reported, never guessed
+
+The microinverter dropdown carries `MODEL @ 240V` as its value, so a selection
+made in the tool is always unambiguous. `miResolve` accepts, in order:
+
+1. `IQ8MC-72-M-US @ 240V` — the composite key.
+2. `IQ8MC-72-M-US (208V)` — the pre-2.6.0 spelling, still in saved projects.
+3. `IQ8MC-72-M-US` — a bare model, resolved only if the part has one variant,
+   or if the service voltage picks one.
+
+A bare two-variant model with no voltage returns **ambiguous**. PV Calc stops
+with *"sold in 240 V and 208 V. Choose the voltage"* and the spec-sheet package
+attaches nothing rather than taking whichever row came first. Falling back to
+row order would silently staple a 240 V datasheet to a 208 V system.
+
+### Also
+
+- PV Calc results and the spec-sheet row both name the voltage, so a built
+  package can be audited.
+- The dropdown now reads `IQ7HS-66-M-US — 240 V, 384 W, 1.6 A, 2-10/branch`.
+
+### Tests
+
+198 passing, up from 181. Seventeen new, including one asserting the two
+variants genuinely differ (otherwise the change is pointless), one that a
+voltage hint matching no variant stays ambiguous instead of falling back, and
+one that the two variants produce different branch currents — proving the
+distinction reaches conductor sizing rather than stopping at the table.
+
+## 2.5.0 — 2026-08-05
+
+### Spec sheet PDF column on Microinverters
+
+Same treatment as PV modules: a dropdown of the files actually in `Spec Sheets`,
+filtered to names starting with **`Inverter_`**. Matching ignores case, so
+`Inverter_IQ8HC.pdf` and `inverter_iq8hc.pdf` both appear.
+
+An off-convention filename still merges — it just will not show in the dropdown,
+and the table says so. A filename missing from the folder warns at data-entry
+time rather than mid-build.
+
+### Bug found while adding it
+
+The spec-sheet validation read **`MODULE_DB`'s prefix unconditionally**, for
+every table. Left alone, a correctly named `Inverter_*.pdf` would have been
+reported as off-convention because it does not start with `module_`. The check
+is now driven by each table's own schema, so any table that gains a `specfile`
+column is validated against its own prefix with no further code.
+
+### The inverter datasheet now reaches the package
+
+`equipmentSheets` resolves the microinverter and contributes its sheet at merge
+order 20, immediately after the module at 10.
+
+Resolution is **exact**, in this order:
+
+1. `mi_model` in `project.json` — written by the tool from the PV Calc choice,
+   so it is always a real `RT_MI` key.
+2. `inverter_model` from the CRM, matched exactly against either `miModel` or
+   its display label.
+
+No substring fallback, and the reason is concrete: `IQ8MC-72-M-US` is a
+substring of `IQ8MC-72-M-US (208V)`. A loose matcher could staple a 208 V
+datasheet to a 240 V system on a stamped drawing. There is a test for exactly
+that case.
+
+A microinverter that is in the table but has no sheet set is **flagged**, not
+skipped silently — the same treatment modules already had.
+
+### Also
+
+`project.json` now records `mi_model`, and loading a project restores the
+microinverter along with everything else. Older `project.json` files without
+the key fall back to `inverter_model` as before.
+
+### Tests
+
+181 passing, up from 166. Fifteen new tests, including the prefix-isolation
+regression above and the 240/208 V substring case. `equipmentSheets` sits below
+the logic/filesystem cut in the test harness, so it is extracted and exercised
+directly rather than left unverified.
+
 ## 2.4.0 — 2026-08-05
 
 ### Module type is now the source of truth

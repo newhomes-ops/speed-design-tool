@@ -1118,7 +1118,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.4.0";
+const APP_VERSION = "2.6.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1455,15 +1455,15 @@ let RT_ESS = [{"config":"5 kWh w/o Backup","battCurrent":16,"ampacity":31.64,"br
 let RT_BREAKERS = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
 
 let RT_MI = [
-  // ── IQ7XS (E-series) ──────────────────────────────────────────
-  {miModel:"IQ7XS",               mi:"TYPE E (IQ 7XS) 240V",   acSize:315, invEff:0.975, minBranch:2, maxBranch:12, Iac:1.31, Vac:240},
-  {miModel:"IQ7XS (208V)",        mi:"TYPE E (IQ 7XS) 208V",   acSize:315, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.51, Vac:208},
-  // ── IQ7HS-66-M-US ─────────────────────────────────────────────
-  {miModel:"IQ7HS-66-M-US",       mi:"IQ7HS-66-M-US 240V",     acSize:384, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.6,  Vac:240},
-  {miModel:"IQ7HS-66-M-US (208V)",mi:"IQ7HS-66-M-US 208V",     acSize:367, invEff:0.97,  minBranch:2, maxBranch:9,  Iac:1.77, Vac:208},
-  // ── IQ8MC-72-M-US ─────────────────────────────────────────────
-  {miModel:"IQ8MC-72-M-US",       mi:"IQ8MC-72-M-US 240V",     acSize:320, invEff:0.97,  minBranch:2, maxBranch:12, Iac:1.33, Vac:240},
-    {miModel:"IQ8MC-72-M-US (208V)",mi:"IQ8MC-72-M-US 208V",     acSize:310, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.49, Vac:208},
+  // One model, one row per AC voltage. Identity is (miModel, Vac) — see
+  // keyFields on the RT_MI schema. acSize, Iac, invEff and the branch limits
+  // all differ between the 240 V and 208 V variants of the same part.
+  {miModel:"IQ7XS",         acSize:315, invEff:0.975, minBranch:2, maxBranch:12, Iac:1.31, Vac:240, specSheet:""},
+  {miModel:"IQ7XS",         acSize:315, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.51, Vac:208, specSheet:""},
+  {miModel:"IQ7HS-66-M-US", acSize:384, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.6,  Vac:240, specSheet:""},
+  {miModel:"IQ7HS-66-M-US", acSize:367, invEff:0.97,  minBranch:2, maxBranch:9,  Iac:1.77, Vac:208, specSheet:""},
+  {miModel:"IQ8MC-72-M-US", acSize:320, invEff:0.97,  minBranch:2, maxBranch:12, Iac:1.33, Vac:240, specSheet:""},
+  {miModel:"IQ8MC-72-M-US", acSize:310, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.49, Vac:208, specSheet:""}
 ];
 
 /* Spec sheet database: which PDF in the "Spec Sheets" folder covers which
@@ -1633,6 +1633,51 @@ function pvSizeBranch(o) {
 }
 
 /**
+ * The value that identifies one microinverter row: model plus AC voltage.
+ * Used as the <option> value so a selection can never be ambiguous.
+ */
+function miKey(row) {
+  return `${row.miModel} @ ${row.Vac}V`;
+}
+
+/**
+ * Resolve a microinverter selection to exactly one RT_MI row.
+ *
+ * Accepts, in order of preference:
+ *   "IQ8MC-72-M-US @ 240V"   the composite key this tool writes
+ *   "IQ8MC-72-M-US (208V)"   the pre-2.6.0 spelling, still in saved projects
+ *   "IQ8MC-72-M-US"          a bare model, resolved only if unambiguous or if
+ *                            vacHint picks one of the variants
+ *
+ * Returns { row, state } where state is "ok", "none", "unknown" or "ambiguous".
+ * Ambiguity is reported rather than resolved by guessing: the 240 V and 208 V
+ * builds of the same part have different Iac, and picking the wrong one sizes
+ * conductors and the OCPD incorrectly.
+ */
+function miResolve(value, vacHint) {
+  const raw = String(value === undefined || value === null ? "" : value).trim();
+  if (!raw) return { row: null, state: "none", candidates: [] };
+
+  // 1. composite key
+  let row = RT_MI.find(r => miKey(r).toUpperCase() === raw.toUpperCase());
+  if (row) return { row, state: "ok", candidates: [row] };
+
+  // 2. legacy "MODEL (208V)" — the suffix was how variants used to be spelled
+  let model = raw, vac = vacHint;
+  const legacy = raw.match(/^(.*?)\s*\((\d{2,4})\s*V\)\s*$/i);
+  if (legacy) { model = legacy[1].trim(); vac = Number(legacy[2]); }
+
+  const candidates = RT_MI.filter(r =>
+    String(r.miModel).trim().toUpperCase() === model.toUpperCase());
+  if (!candidates.length) return { row: null, state: "unknown", candidates: [] };
+  if (candidates.length === 1) return { row: candidates[0], state: "ok", candidates };
+
+  const hinted = vac ? candidates.filter(r => Number(r.Vac) === Number(vac)) : [];
+  if (hinted.length === 1) return { row: hinted[0], state: "ok", candidates };
+  return { row: null, state: "ambiguous", candidates };
+}
+
+/**
  * Full system calculation.
  *
  * @param {object} input
@@ -1645,8 +1690,13 @@ function pvCalculate(input) {
   const mod = MODULE_DB.find(m => m.name === input.moduleName) || null;
   if (input.moduleName && !mod) errors.push(`Module '${input.moduleName}' not in the database.`);
 
-  const miRow = input.miModel ? RT_MI.find(r => r.miModel === input.miModel) : null;
-  if (input.miModel && !miRow) {
+  const miHit = miResolve(input.miModel, input.vac);
+  const miRow = miHit.row;
+  if (miHit.state === "ambiguous") {
+    errors.push(`'${input.miModel}' is sold in ` +
+      miHit.candidates.map(c => c.Vac + " V").join(" and ") +
+      `. Choose the voltage — Iac and the branch limits differ between them.`);
+  } else if (miHit.state === "unknown") {
     errors.push(`Microinverter '${input.miModel}' is not in the Microinverters table.`);
   } else if (!miRow) {
     errors.push("Choose a microinverter — AC current, voltage and branch limits all " +
@@ -1948,8 +1998,7 @@ function rdDiffRows(name, incoming) {
       changed: []
     };
   }
-  const key = schema.key;
-  const idx = rs => new Map(rs.map(r => [String(r[key] ?? "").trim().toLowerCase(), r]));
+  const idx = rs => new Map(rs.map(r => [rowKeyOf(schema, r), r]));
   const a = idx(current), b = idx(incoming);
   const added = [...b.keys()].filter(k => !a.has(k));
   const removed = [...a.keys()].filter(k => !b.has(k));
@@ -1960,7 +2009,7 @@ function rdDiffRows(name, incoming) {
     const fields = schema.fields
       .map(f => f.name)
       .filter(f => JSON.stringify(before[f] ?? null) !== JSON.stringify(row[f] ?? null));
-    if (fields.length) changed.push({ key: row[key], fields });
+    if (fields.length) changed.push({ key: rowKeyLabel(schema, row), fields });
   }
   return { added, removed, changed };
 }
@@ -2011,17 +2060,28 @@ const TABLE_SCHEMAS = {
   },
   RT_MI: {
     label: "Microinverters",
-    note: "Iac drives every branch-current calculation. minBranch and maxBranch limit modules per branch.",
-    key: "miModel",
+    note: "One row per model per AC voltage — the same part number in 240 V and " +
+          "208 V has different Iac and branch limits, so both columns together " +
+          "identify a row. Iac drives every branch-current calculation. " +
+          "minBranch and maxBranch " +
+          "limit modules per branch. 'Spec sheet PDF' names the datasheet in the " +
+          "Spec Sheets folder — set it and the right sheet is picked automatically " +
+          "whenever this microinverter is used. The dropdown lists only files whose " +
+          "name starts with 'Inverter_' (matching ignores case).",
+    // Identity is the model AND the AC voltage: the same part number is sold in
+    // 240 V and 208 V builds with different Iac and branch limits, so neither
+    // column alone is unique.
+    keyFields: ["miModel", "Vac"],
     fields: [
       { name: "miModel",   type: "text", required: true, label: "Model" },
-      { name: "mi",        type: "text", label: "Display label" },
       { name: "acSize",    type: "number", required: true, label: "AC size (W)" },
       { name: "invEff",    type: "number", label: "Efficiency" },
       { name: "minBranch", type: "int", required: true, label: "Min per branch" },
       { name: "maxBranch", type: "int", required: true, label: "Max per branch" },
       { name: "Iac",       type: "number", required: true, label: "Iac (A)" },
-      { name: "Vac",       type: "int", required: true, label: "Vac (V)" }
+      { name: "Vac",       type: "int", required: true, label: "Vac (V)" },
+      { name: "specSheet", type: "specfile", prefix: "Inverter_",
+        label: "Spec sheet PDF" }
     ]
   },
   RT_LOCATION: {
@@ -2124,6 +2184,27 @@ function coerceCell(raw, field) {
 }
 
 /**
+ * A row's identity as a single comparable string.
+ *
+ * Most tables have one key column. RT_MI needs two: the same microinverter part
+ * number ships as a 240 V and a 208 V build with different Iac and branch
+ * limits, so neither the model nor the voltage is unique on its own.
+ */
+function rowKeyOf(schema, row) {
+  const cols = schema.keyFields || (schema.key ? [schema.key] : []);
+  if (!cols.length) return "";
+  const parts = cols.map(c => String(row[c] ?? "").trim().toLowerCase());
+  return parts.every(p => p === "") ? "" : parts.join(" | ");
+}
+
+/** How to describe that identity to a person. */
+function rowKeyLabel(schema, row) {
+  const cols = schema.keyFields || (schema.key ? [schema.key] : []);
+  return cols.map(c => row[c]).filter(v => v !== undefined && v !== null && v !== "")
+             .join(" @ ");
+}
+
+/**
  * Validate one table. Returns { errors, warnings }.
  * Errors block export; warnings do not.
  */
@@ -2180,13 +2261,14 @@ function validateTable(name, rows) {
 
   // Duplicate keys are a real hazard: lookups use find() and would silently
   // return the first match, making the second row unreachable.
-  if (schema.key) {
+  if (schema.key || schema.keyFields) {
+    const cols = (schema.keyFields || [schema.key]).join(" + ");
     const seen = new Map();
     rows.forEach((row, i) => {
-      const k = String(row[schema.key] ?? "").trim().toLowerCase();
+      const k = rowKeyOf(schema, row);
       if (!k) return;
       if (seen.has(k)) {
-        errors.push(`Row ${i + 1}: duplicate ${schema.key} '${row[schema.key]}' ` +
+        errors.push(`Row ${i + 1}: duplicate ${cols} '${rowKeyLabel(schema, row)}' ` +
                     `(already on row ${seen.get(k) + 1}). Lookups would never reach this row.`);
       } else seen.set(k, i);
     });
@@ -2205,31 +2287,36 @@ function validateTable(name, rows) {
     }
   }
 
-  // Cross-table sanity: a module or microinverter reference that does not exist.
-  if (name === "MODULE_DB") {
+  // Spec-sheet columns: check every table that has one, not just MODULE_DB.
+  // This block used to read MODULE_DB's prefix unconditionally, which would have
+  // judged the Microinverters tab against 'module_'.
+  (schema.fields || []).filter(f => f.type === "specfile").forEach(f => {
+    // Keep the prefix in its declared case for messages; compare in lower case,
+    // so 'Inverter_IQ8HC.pdf' and 'inverter_iq8hc.pdf' are both accepted.
+    const pre = String(f.prefix || "");
+    const preLc = pre.toLowerCase();
+    // typeof guard: the folder listing is declared later in the file, and this
+    // function is also exercised by the test harness in isolation.
+    const known = (typeof SPEC_FOLDER_FILES !== "undefined" &&
+                   Array.isArray(SPEC_FOLDER_FILES)) ? SPEC_FOLDER_FILES : null;
     rows.forEach((row, i) => {
+      const sheet = String(row[f.name] || "").trim();
+      if (!sheet) return;
       // A named datasheet that is not in the folder would block a package build,
       // so surface it here rather than at build time.
-      const sheet = String(row.specSheet || "").trim();
-      // typeof guard: the folder listing is declared later in the file, and this
-      // function is also exercised by the test harness in isolation.
-      const known = (typeof SPEC_FOLDER_FILES !== "undefined" &&
-                     Array.isArray(SPEC_FOLDER_FILES)) ? SPEC_FOLDER_FILES : null;
-      if (sheet && known &&
-          !known.some(f => f.name.toLowerCase() === sheet.toLowerCase())) {
+      if (known && !known.some(x => x.name.toLowerCase() === sheet.toLowerCase())) {
         warnings.push(`Row ${i + 1}: spec sheet '${sheet}' is not in the ` +
                       `Spec Sheets folder.`);
       }
       // Convention check, not a hard rule — an off-convention file still merges,
       // it just will not appear in the filtered dropdown.
-      const pre = ((TABLE_SCHEMAS.MODULE_DB.fields
-        .find(f => f.name === "specSheet") || {}).prefix || "").toLowerCase();
-      if (sheet && pre && !sheet.toLowerCase().startsWith(pre)) {
+      if (preLc && !sheet.toLowerCase().startsWith(preLc)) {
         warnings.push(`Row ${i + 1}: '${sheet}' does not start with '${pre}', so it ` +
                       `will not show in the dropdown. Rename it to follow the convention.`);
       }
     });
-  }
+  });
+
   if (name === "RT_LOCATION") {
     rows.forEach((row, i) => {
       const expect = `${row.city}, ${row.state}`;
@@ -2315,7 +2402,8 @@ if (typeof module !== "undefined" && module.exports) {
     RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB,
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
-    pvSizeBranch, pvCalculate, pvAutoDistribute,
+    pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
+    rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
     rdParsePasted, rdDiffRows
@@ -2751,6 +2839,11 @@ function collect() {
     if (!el) continue;
     o[f] = f === "module_quantity" ? toInt(el.value) : el.value;
   }
+  // The microinverter lives on PV Calc, not the project form, but the spec-sheet
+  // package needs an exact model to link a datasheet to. Recording it here makes
+  // that link exact instead of guessing from the free-text inverter_model.
+  const mi = $("pv_mi");
+  if (mi && mi.value) o.mi_model = mi.value;
   return o;
 }
 
@@ -3112,6 +3205,18 @@ async function loadProject(pid) {
       }
       el.value = v;
       filled++;
+    }
+
+    // Restore the microinverter too; it is not a FORM_FIELDS entry.
+    if (data.mi_model && $("pv_mi")) {
+      const miSel = $("pv_mi");
+      if (!Array.from(miSel.options).some(o => o.value === data.mi_model)) {
+        const opt = document.createElement("option");
+        opt.value = opt.textContent = data.mi_model + "  — not in the Microinverters table";
+        opt.value = data.mi_model;
+        miSel.appendChild(opt);
+      }
+      miSel.value = data.mi_model;
     }
 
     moduleSyncDownstream();
@@ -3706,8 +3811,9 @@ async function findPlotPdf(projectHandle, project) {
  * Sheets linked directly to a piece of equipment.
  *
  * An exact link on the equipment record beats fuzzy model matching: choosing a
- * module determines its datasheet with no ambiguity. Currently modules; the same
- * pattern extends to RT_MI and the racking tables.
+ * module or a microinverter determines its datasheet with no ambiguity. Racking,
+ * combiners and attachments follow the same pattern when their tables gain a
+ * specSheet column.
  */
 function equipmentSheets(project) {
   const out = [];
@@ -3738,6 +3844,33 @@ function equipmentSheets(project) {
       });
     }
   }
+
+  // ---- microinverter ---------------------------------------------------
+  // mi_model is written by this tool and is a composite RT_MI key.
+  // inverter_model is free text from the CRM, so it is resolved the same way and
+  // the project's service voltage disambiguates a bare model. Never a substring
+  // match — that could attach a 208 V datasheet to a 240 V system.
+  const vacHint = Number(project.service_voltage) || undefined;
+  let mi = miResolve(project.mi_model, vacHint).row;
+  if (!mi) mi = miResolve(project.inverter_model, vacHint).row;
+  if (mi && String(mi.specSheet || "").trim()) {
+    out.push({
+      category: "Inverter",
+      model: `${mi.miModel} (${mi.Vac} V)`,
+      file: String(mi.specSheet).trim(),
+      order: 20,
+      source: "RT_MI",
+      why: `linked to microinverter "${mi.miModel}" (${mi.Vac} V)`
+    });
+  } else if (mi) {
+    out.push({
+      category: "Inverter", model: `${mi.miModel} (${mi.Vac} V)`, file: "", order: 20,
+      source: "RT_MI",
+      why: `"${mi.miModel}" has no spec sheet set — add one on the Microinverters tab`,
+      problem: true
+    });
+  }
+
   return out;
 }
 
@@ -4557,7 +4690,7 @@ function moduleSyncDownstream() {
   // user has not set it by hand, so a deliberate override is never clobbered.
   const miSel = $("pv_mi"), sv = $("service_voltage");
   if (miSel && miSel.value && sv && !sv.dataset.userSet) {
-    const mi = RT_MI.find(m => m.miModel === miSel.value);
+    const mi = miResolve(miSel.value).row;
     if (mi && mi.Vac && String(mi.Vac) !== sv.value) sv.value = String(mi.Vac);
   }
 
@@ -4574,9 +4707,12 @@ function pvPopulateSelectors() {
     MODULE_DB.map(m =>
       `<option value="${m.name}">${m.name} — ${m.Wpeak}W ${m.brand}</option>`).join("");
 
+  // The option value is model + voltage, because the same part number ships in
+  // 240 V and 208 V builds with different Iac. A bare model would be ambiguous.
   $("pv_mi").innerHTML = '<option value="">(choose a microinverter)</option>' +
     RT_MI.map(r =>
-      `<option value="${r.miModel}">${r.miModel} — ${r.acSize}W, ${r.Iac}A @ ${r.Vac}V</option>`).join("");
+      `<option value="${miKey(r)}">${r.miModel} — ${r.Vac} V, ${r.acSize} W, ` +
+      `${r.Iac} A, ${r.minBranch}-${r.maxBranch}/branch</option>`).join("");
 
   $("pv_conduit_height").innerHTML = RT_HEIGHT_ADDER.map(h =>
     `<option value="${h.height}"${h.height === "0.5-3.5" ? " selected" : ""}>` +
@@ -4635,6 +4771,8 @@ function pvReadInput() {
   return {
     moduleName: $("pv_module").value,
     miModel: $("pv_mi").value,
+    // Disambiguates a bare model coming from an older saved project.
+    vac: Number(($("service_voltage") || {}).value) || undefined,
     locationDisplay: $("pv_location").value,
     conduitHeight: $("pv_conduit_height").value,
     wireTempSel: $("pv_wire_type").value,
@@ -4667,8 +4805,15 @@ function pvDoAutoDistribute() {
   const miVal = $("pv_mi").value;
   const modVal = $("pv_module").value;
   const mod = MODULE_DB.find(m => m.name === modVal);
-  const mi = miVal ? RT_MI.find(r => r.miModel === miVal) : null;
-  if (!mi) { showMsg("Choose a microinverter first — the per-branch limits come from it.", "err"); return; }
+  const miHit = miResolve(miVal, Number(($("service_voltage") || {}).value) || undefined);
+  const mi = miHit.row;
+  if (!mi) {
+    showMsg(miHit.state === "ambiguous"
+      ? `'${miVal}' is sold in ` + miHit.candidates.map(c => c.Vac + " V").join(" and ") +
+        `. Choose the voltage — the per-branch limits differ.`
+      : "Choose a microinverter first — the per-branch limits come from it.", "err");
+    return;
+  }
 
   const dist = pvAutoDistribute(qty, mi.maxBranch, mi.minBranch);
   $("pv_branch_body").innerHTML = ""; pvBranchCount = 0;
@@ -4692,7 +4837,8 @@ function pvRenderResults(r) {
 
   $("pv_kv_system").innerHTML =
     `<div><span>Module</span><span>${r.module ? r.module.name : "—"}</span></div>` +
-    `<div><span>Microinverter</span><span>${r.mi ? r.mi.miModel : "—"}</span></div>` +
+    `<div><span>Microinverter</span><span>${
+      r.mi ? r.mi.miModel + " (" + r.mi.Vac + " V)" : "—"}</span></div>` +
     `<div><span>Modules</span><span>${r.totalMods}</span></div>` +
     `<div><span>Branches</span><span>${r.activeBranches} (max ${r.maxBranch}/branch)</span></div>` +
     `<div><span>Nominal AC</span><span>${r.vac} V, ${r.phase === 3 ? "3-phase" : "1-phase"}</span></div>` +
