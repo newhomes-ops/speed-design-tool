@@ -3,6 +3,61 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.3.0 — 2026-08-03
+
+### Equipment data moved to where it belongs
+- **`Iac (A)` and `Paired microinverter` removed from the PV modules tab.** AC
+  output current and branch limits are properties of the microinverter, not the
+  module — a module has no AC current. They live on the **Microinverters** tab,
+  which already held them.
+- PV Calc now takes `Iac`, `Vac` and the branch limits **only** from the selected
+  microinverter.
+- **The microinverter must be chosen explicitly.** It is no longer implied by the
+  module. Rather than silently sizing against a zero, the calculation stops with
+  "Choose a microinverter — AC current, voltage and branch limits all come from it".
+- An unknown microinverter is named in the error instead of falling through.
+- Auto-distribute requires a microinverter, since the per-branch limits come from it.
+- The redundant second "Iac is zero" error no longer fires alongside the first —
+  it now only appears when a real microinverter has no `Iac` set, which is a
+  genuinely different problem.
+
+### Tests
+Two tests asserting the old fallback were **replaced, not deleted** — they now
+assert the new contract, including that exactly one error is raised rather than two.
+
+- 157 total.
+
+## 2.2.0 — 2026-08-03
+
+### Modules link directly to their spec sheet
+- New **Spec sheet PDF** column on the **PV modules** tab. Set it once per module
+  and that datasheet is chosen automatically whenever the module is used — an
+  exact link rather than fuzzy model matching.
+- Equipment-linked sheets take priority over the `SPEC_SHEETS` table, and a table
+  row naming the same file is dropped so nothing is merged twice.
+- Module matching tolerates the wattage prefix that Salesforce report values carry,
+  so `410W Q.PEAK DUO BLK ML-G10+ (410)` still resolves.
+- If the project's module has no sheet linked, the package builder says so against
+  that row instead of quietly omitting the datasheet.
+
+### The column is a filtered picker, not free text
+- Rendered as a **dropdown of the files actually present** in the Spec Sheets
+  folder, so a filename cannot be mistyped.
+- Filtered to names starting with **`module_`** so the list stays usable as the
+  folder grows. The prefix is declared on the field, so `inverter_`, `racking_` and
+  the rest follow the same pattern.
+- A value that is set but off-convention, or missing from the folder, is preserved
+  and flagged rather than silently dropped — with a warning at data-entry time
+  rather than mid-build.
+- Empty is valid: linking is optional.
+
+### Fixed
+- `validateTable` referenced the Spec Sheets folder listing, which is declared
+  later in the file. It worked in the browser by declaration order but was fragile
+  and broke the test harness. Now guarded.
+
+- 7 new tests, 155 total.
+
 ## 2.0.0 — 2026-08-03
 
 ### Phase 5 — iPermit package

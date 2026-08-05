@@ -73,7 +73,7 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.3.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
@@ -118,8 +118,49 @@ path. Without it you get a relative path like
 
 ## Building the iPermit package
 
-Put the datasheet PDFs in a **`Spec Sheets`** folder inside the SPEED folder.
-Map them to equipment on the **Reference Data → Spec sheets** tab:
+Put every datasheet PDF in a **`Spec Sheets`** folder inside the SPEED folder.
+Nothing is ever fetched from the internet.
+
+### Linking a sheet to a module (preferred)
+
+The **PV modules** tab has a **Spec sheet PDF** column. Set it once per module and
+that datasheet is selected automatically whenever the module is used — an exact
+link, with no guessing.
+
+The column is a **dropdown of the files actually in the folder**, so a filename
+cannot be mistyped. It lists only files starting with **`module_`**, which keeps
+the list short as the folder grows. Name module datasheets accordingly:
+
+```
+Spec Sheets/
+  module_Qcells_Q.TRON_BLK_M-G2+_420-440.pdf
+  module_REC470AA_Pure-RX.pdf
+  inverter_IQ8HC.pdf          <- hidden from the module dropdown
+  racking_Pegasus_Rail.pdf    <- hidden from the module dropdown
+```
+
+A filename that is set but does not follow the convention still merges — it just
+will not appear in the dropdown, and the table warns so it can be renamed. A
+filename missing from the folder warns too, at data-entry time rather than during
+a build.
+
+Inverters, racking, combiners and attachments will follow the same pattern with
+their own prefixes.
+
+### Where equipment data lives
+
+**PV modules** carry only DC characteristics, physical size and the linked spec
+sheet. **Microinverters** own `Iac`, `Vac` and the per-branch minimum and maximum,
+because those are inverter properties — a module has no AC output current.
+
+A consequence worth knowing: **the microinverter must be chosen explicitly.** It is
+no longer implied by the module, and PV Calc says so plainly rather than sizing
+against a zero.
+
+### Falling back to the Spec sheets table
+
+For equipment not yet linked directly, the **Reference Data → Spec sheets** tab
+maps model text to a PDF:
 
 | Equipment | Model matched | PDF filename | Merge order | Always |
 |---|---|---|---|---|
@@ -207,16 +248,16 @@ table has validation errors — so a problem is visible without opening the tab.
 
 | Table | Rows | Contents |
 |---|---|---|
-| `SPEC_SHEETS` | 6 | Equipment to spec-sheet PDF mapping |
+| `SPEC_SHEETS` | 6 | Fallback equipment to spec-sheet mapping |
 | `RT_LOCATION` | 517 | Design temperatures by city |
 | `RT_AMPACITY` | 24 | Conductor ampacity and resistance |
 | `RT_EGC` | 19 | OCPD to grounding conductor |
 | `RT_BREAKERS` | 17 | Standard OCPD ratings |
 | `RT_TEMP_CORR` | 16 | Ambient correction factors |
-| `MODULE_DB` | 12 | PV modules |
+| `MODULE_DB` | 12 | PV modules — DC characteristics, size, linked spec sheet |
 | `RT_ESS` | 7 | Storage configurations |
 | `RT_FILL_DERATING` | 7 | Conductor-count adjustment |
-| `RT_MI` | 6 | Microinverters |
+| `RT_MI` | 6 | Microinverters — AC output, Iac, branch limits |
 | `RT_HEIGHT_ADDER` | 5 | Rooftop temperature adder |
 
 ### How editing works
@@ -335,7 +376,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-148 tests covering path sanitisation, reserved Windows names, folder-name
+157 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.

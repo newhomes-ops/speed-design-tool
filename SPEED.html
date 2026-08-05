@@ -1114,7 +1114,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.3.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -1476,18 +1476,18 @@ let SPEC_SHEETS = [
 ];
 
 let MODULE_DB = [
-  {name:"SPR-X21-335-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.23, Voc:67.9, Vmp:57.3, Imp:5.85, Wpeak:335, Wptc:313.5, Iac:1.31, length:61.3, width:41.2, miModel:"IQ7XS"},
-  {name:"SPR-X21-350-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.5, Voc:68.2, Vmp:57.3, Imp:6.11, Wpeak:350, Wptc:327.9, Iac:1.31, length:61.3, width:41.2, miModel:"IQ7XS"},
-  {name:"Q.PEAK DUO BLK ML-G10+ (405)", brand:"QCELLS", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, Iac:1.6, length:74, width:41.1, miModel:"IQ7HS-66-M-US"},
-  {name:"Q.PEAK DUO BLK ML-G10+ (410)", brand:"QCELLS", type:"U", Isc:11.11, Voc:45.31, Vmp:38.48, Imp:10.65, Wpeak:410, Wptc:381, Iac:1.6, length:74, width:41.1, miModel:"IQ7HS-66-M-US"},
-  {name:"Q.PEAK DUO BLK ML-G10+ (415)", brand:"QCELLS", type:"U", Isc:11.14, Voc:45.34, Vmp:38.74, Imp:10.71, Wpeak:415, Wptc:390.7, Iac:1.6, length:74, width:41.1, miModel:"IQ7HS-66-M-US"},
-  {name:"Q.PEAK DUO BLK ML-G10+ / TS 405", brand:"QCELLS", type:"U", Isc:11.17, Voc:45.34, Vmp:37.39, Imp:10.83, Wpeak:405, Wptc:376.3, Iac:1.6, length:74.4, width:41.2, miModel:"IQ7HS-66-M-US"},
-  {name:"WSMDi-400", brand:"WAAREE", type:"U", Isc:11.32, Voc:45.22, Vmp:38, Imp:10.54, Wpeak:400, Wptc:373.1, Iac:1.6, length:75.75, width:40.87, miModel:"IQ7HS-66-M-US"},
-  {name:"WSMDi-410", brand:"WAAREE", type:"U", Isc:11.48, Voc:45.66, Vmp:38.44, Imp:10.68, Wpeak:410, Wptc:382.7, Iac:1.6, length:75.75, width:40.87, miModel:"IQ7HS-66-M-US"},
-  {name:"DNA-120-BF26-370W", brand:"APTOS", type:"U", Isc:11.26, Voc:41.4, Vmp:34.5, Imp:10.72, Wpeak:370, Wptc:341.5, Iac:1.6, length:69.37, width:41.26, miModel:"IQ7HS-66-M-US"},
-  {name:"JAM54S31-405/MR", brand:"JA SOLAR", type:"U", Isc:13.87, Voc:37.23, Vmp:31.21, Imp:12.98, Wpeak:405, Wptc:null, Iac:1.6, length:67.87, width:44.72, miModel:"IQ8MC-72-M-US"},
-  {name:"SEG-440-BTD-BG", brand:"SEG SOLAR", type:"U", Isc:14.15, Voc:39.3, Vmp:32.7, Imp:13.46, Wpeak:440, Wptc:417.7, Iac:0, length:67.8, width:44.65, miModel:""},
-  {name:"SPR-U405-BLK-QC-DC (405W)", brand:"SUNPOWER", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, Iac:1.6, length:74, width:41.1, miModel:"IQ8MC-72-M-US"}
+  {name:"SPR-X21-335-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.23, Voc:67.9, Vmp:57.3, Imp:5.85, Wpeak:335, Wptc:313.5, length:61.3, width:41.2, specSheet:""},
+  {name:"SPR-X21-350-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.5, Voc:68.2, Vmp:57.3, Imp:6.11, Wpeak:350, Wptc:327.9, length:61.3, width:41.2, specSheet:""},
+  {name:"Q.PEAK DUO BLK ML-G10+ (405)", brand:"QCELLS", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, length:74, width:41.1, specSheet:""},
+  {name:"Q.PEAK DUO BLK ML-G10+ (410)", brand:"QCELLS", type:"U", Isc:11.11, Voc:45.31, Vmp:38.48, Imp:10.65, Wpeak:410, Wptc:381, length:74, width:41.1, specSheet:""},
+  {name:"Q.PEAK DUO BLK ML-G10+ (415)", brand:"QCELLS", type:"U", Isc:11.14, Voc:45.34, Vmp:38.74, Imp:10.71, Wpeak:415, Wptc:390.7, length:74, width:41.1, specSheet:""},
+  {name:"Q.PEAK DUO BLK ML-G10+ / TS 405", brand:"QCELLS", type:"U", Isc:11.17, Voc:45.34, Vmp:37.39, Imp:10.83, Wpeak:405, Wptc:376.3, length:74.4, width:41.2, specSheet:""},
+  {name:"WSMDi-400", brand:"WAAREE", type:"U", Isc:11.32, Voc:45.22, Vmp:38, Imp:10.54, Wpeak:400, Wptc:373.1, length:75.75, width:40.87, specSheet:""},
+  {name:"WSMDi-410", brand:"WAAREE", type:"U", Isc:11.48, Voc:45.66, Vmp:38.44, Imp:10.68, Wpeak:410, Wptc:382.7, length:75.75, width:40.87, specSheet:""},
+  {name:"DNA-120-BF26-370W", brand:"APTOS", type:"U", Isc:11.26, Voc:41.4, Vmp:34.5, Imp:10.72, Wpeak:370, Wptc:341.5, length:69.37, width:41.26, specSheet:""},
+  {name:"JAM54S31-405/MR", brand:"JA SOLAR", type:"U", Isc:13.87, Voc:37.23, Vmp:31.21, Imp:12.98, Wpeak:405, Wptc:null, length:67.87, width:44.72, specSheet:""},
+  {name:"SEG-440-BTD-BG", brand:"SEG SOLAR", type:"U", Isc:14.15, Voc:39.3, Vmp:32.7, Imp:13.46, Wpeak:440, Wptc:417.7, length:67.8, width:44.65, specSheet:""},
+  {name:"SPR-U405-BLK-QC-DC (405W)", brand:"SUNPOWER", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, length:74, width:41.1, specSheet:""}
 ];
 
 
@@ -1643,17 +1643,23 @@ function pvCalculate(input) {
   const mod = MODULE_DB.find(m => m.name === input.moduleName) || null;
   if (input.moduleName && !mod) errors.push(`Module '${input.moduleName}' not in the database.`);
 
-  let miRow = input.miModel ? RT_MI.find(r => r.miModel === input.miModel) : null;
-  // Fall back to the module's paired microinverter.
-  if (!miRow && mod && mod.miModel) {
-    miRow = RT_MI.find(r => r.miModel === mod.miModel) || null;
-    if (miRow) warnings.push(`Microinverter not chosen — using '${miRow.miModel}' paired with the module.`);
+  const miRow = input.miModel ? RT_MI.find(r => r.miModel === input.miModel) : null;
+  if (input.miModel && !miRow) {
+    errors.push(`Microinverter '${input.miModel}' is not in the Microinverters table.`);
+  } else if (!miRow) {
+    errors.push("Choose a microinverter — AC current, voltage and branch limits all " +
+                "come from it, so nothing can be sized without one.");
   }
-  if (!miRow) errors.push("No microinverter selected, and the module has no paired default.");
 
   const vac = miRow ? (miRow.Vac || 240) : 240;
-  const iac = miRow ? miRow.Iac : (mod ? Number(mod.Iac) || 0 : 0);
-  if (!iac) errors.push("Microinverter output current (Iac) is zero — cannot size conductors.");
+  // AC output current is a property of the microinverter, never the module.
+  const iac = miRow ? Number(miRow.Iac) || 0 : 0;
+  // Only worth saying when a real microinverter was found but its Iac is unset —
+  // otherwise it just repeats the "choose a microinverter" error.
+  if (miRow && !iac) {
+    errors.push(`Microinverter '${miRow.miModel}' has no Iac value — set it on the ` +
+                `Microinverters tab before sizing conductors.`);
+  }
 
   const minBranch = miRow ? miRow.minBranch : 2;
   const maxBranch = miRow ? miRow.maxBranch : 16;
@@ -1976,7 +1982,13 @@ const TABLE_SCHEMAS = {
   },
   MODULE_DB: {
     label: "PV modules",
-    note: "Electrical characteristics and physical size. Wptc may be blank; it is only used for the CEC AC figure.",
+    note: "Electrical characteristics and physical size. Wptc may be blank; it is " +
+          "only used for the CEC AC figure. 'Spec sheet PDF' names the datasheet in " +
+          "the Spec Sheets folder — set it and the right sheet is picked automatically " +
+          "whenever this module is used. The dropdown lists only files whose name " +
+          "starts with 'module_', so the list stays short as the folder grows. " +
+          "AC output current and branch limits belong to the microinverter, so they " +
+          "live on the Microinverters tab.",
     key: "name",
     fields: [
       { name: "name",    type: "text", required: true, label: "Model name" },
@@ -1988,10 +2000,10 @@ const TABLE_SCHEMAS = {
       { name: "Imp",     type: "number", label: "Imp (A)" },
       { name: "Wpeak",   type: "number", required: true, label: "Wpeak (W)" },
       { name: "Wptc",    type: "number", nullable: true, label: "Wptc (W)" },
-      { name: "Iac",     type: "number", label: "Iac (A)" },
       { name: "length",  type: "number", label: "Length (in)" },
       { name: "width",   type: "number", label: "Width (in)" },
-      { name: "miModel", type: "text", label: "Paired microinverter" }
+      { name: "specSheet", type: "specfile", prefix: "module_",
+        label: "Spec sheet PDF" }
     ]
   },
   RT_MI: {
@@ -2101,7 +2113,7 @@ const TABLE_SCHEMAS = {
 /** Coerce a cell value according to its declared type. */
 function coerceCell(raw, field) {
   const s = raw === null || raw === undefined ? "" : String(raw).trim();
-  if (field.type === "text") return s;
+  if (field.type === "text" || field.type === "specfile") return s;
   if (s === "") return field.nullable ? null : (field.required ? undefined : null);
   const n = Number(s);
   if (!Number.isFinite(n)) return undefined;          // signals invalid
@@ -2157,7 +2169,7 @@ function validateTable(name, rows) {
         continue;
       }
       if (isBlank) continue;
-      if (f.type !== "text" && !Number.isFinite(Number(val))) {
+      if (f.type !== "text" && f.type !== "specfile" && !Number.isFinite(Number(val))) {
         errors.push(`Row ${i + 1}: '${f.label || f.name}' must be a number, got '${val}'.`);
       }
     }
@@ -2193,9 +2205,25 @@ function validateTable(name, rows) {
   // Cross-table sanity: a module or microinverter reference that does not exist.
   if (name === "MODULE_DB") {
     rows.forEach((row, i) => {
-      const mi = String(row.miModel || "").trim();
-      if (mi && !RT_MI.some(m => m.miModel === mi)) {
-        warnings.push(`Row ${i + 1}: paired microinverter '${mi}' is not in RT_MI.`);
+      // A named datasheet that is not in the folder would block a package build,
+      // so surface it here rather than at build time.
+      const sheet = String(row.specSheet || "").trim();
+      // typeof guard: the folder listing is declared later in the file, and this
+      // function is also exercised by the test harness in isolation.
+      const known = (typeof SPEC_FOLDER_FILES !== "undefined" &&
+                     Array.isArray(SPEC_FOLDER_FILES)) ? SPEC_FOLDER_FILES : null;
+      if (sheet && known &&
+          !known.some(f => f.name.toLowerCase() === sheet.toLowerCase())) {
+        warnings.push(`Row ${i + 1}: spec sheet '${sheet}' is not in the ` +
+                      `Spec Sheets folder.`);
+      }
+      // Convention check, not a hard rule — an off-convention file still merges,
+      // it just will not appear in the filtered dropdown.
+      const pre = ((TABLE_SCHEMAS.MODULE_DB.fields
+        .find(f => f.name === "specSheet") || {}).prefix || "").toLowerCase();
+      if (sheet && pre && !sheet.toLowerCase().startsWith(pre)) {
+        warnings.push(`Row ${i + 1}: '${sheet}' does not start with '${pre}', so it ` +
+                      `will not show in the dropdown. Rename it to follow the convention.`);
       }
     });
   }
@@ -3631,6 +3659,49 @@ async function findPlotPdf(projectHandle, project) {
   return { hit, candidates: pdfs.filter(r => !/ipermit package/i.test(r.name)) };
 }
 
+/**
+ * Sheets linked directly to a piece of equipment.
+ *
+ * An exact link on the equipment record beats fuzzy model matching: choosing a
+ * module determines its datasheet with no ambiguity. Currently modules; the same
+ * pattern extends to RT_MI and the racking tables.
+ */
+function equipmentSheets(project) {
+  const out = [];
+
+  const modName = String(project.module_type || "").trim();
+  if (modName) {
+    const up = modName.toUpperCase();
+    // Exact first, then a contains match, since report values carry a wattage
+    // prefix the database name does not.
+    let mod = MODULE_DB.find(m => String(m.name).toUpperCase() === up);
+    if (!mod) {
+      mod = MODULE_DB.find(m => {
+        const n = String(m.name).toUpperCase();
+        return n && (up.includes(n) || n.includes(up));
+      });
+    }
+    if (mod && String(mod.specSheet || "").trim()) {
+      out.push({
+        category: "Module",
+        model: mod.name,
+        file: String(mod.specSheet).trim(),
+        order: 10,
+        source: "MODULE_DB",
+        why: `linked to module "${mod.name}"`
+      });
+    } else if (mod) {
+      out.push({
+        category: "Module", model: mod.name, file: "", order: 10,
+        source: "MODULE_DB",
+        why: `"${mod.name}" has no spec sheet set — add one on the PV modules tab`,
+        problem: true
+      });
+    }
+  }
+  return out;
+}
+
 /** Which spec sheets does this project's equipment call for? */
 function suggestSheets(project) {
   const hay = [
@@ -3827,17 +3898,27 @@ async function specChooseProject(pid) {
     }
 
     // Sheet selection
-    const suggestions = suggestSheets(project);
-    SPEC_ROWS = suggestions
-      .slice()
-      .sort((a, b) => (Number(a.row.order) || 999) - (Number(b.row.order) || 999))
+    // Equipment-linked sheets first — they are authoritative. Table matches
+    // supply everything not yet linked to an equipment record.
+    const linked = equipmentSheets(project);
+    const linkedFiles = new Set(linked.filter(l => l.file)
+      .map(l => l.file.toLowerCase()));
+
+    const fromTable = suggestSheets(project)
+      .filter(s => !linkedFiles.has(String(s.row.file || "").toLowerCase()))
       .map(s => ({
         category: s.row.category || "",
         model: s.row.model || "",
         file: s.row.file || "",
+        order: Number(s.row.order) || 999,
         selected: s.matched,
-        why: s.why
+        why: s.why,
+        source: "SPEC_SHEETS"
       }));
+
+    SPEC_ROWS = linked.concat(fromTable)
+      .map(r => Object.assign({ selected: r.selected !== undefined ? r.selected : !!r.file }, r))
+      .sort((a, b) => (Number(a.order) || 999) - (Number(b.order) || 999));
     specRenderRows();
     specRefreshBuildState();
   } finally {
@@ -3860,8 +3941,9 @@ function specRenderRows() {
       <td>${r.category}</td>
       <td class="hint">${r.model || "—"}</td>
       <td>${r.file || "<span style='color:var(--err)'>no file set</span>"}
-        ${present ? "" : `<div class="mt" style="color:var(--err);font-size:11px">not in ${SPEC_FOLDER}</div>`}
-        ${r.why ? `<div class="mt" style="color:var(--ok);font-size:11px">${r.why}</div>` : ""}</td>
+        ${r.file && !present ? `<div class="mt" style="color:var(--err);font-size:11px">not in ${SPEC_FOLDER}</div>` : ""}
+        ${r.why ? `<div class="mt" style="color:${r.problem ? "var(--err)" : "var(--ok)"};font-size:11px">${r.why}</div>` : ""}
+        ${r.source === "MODULE_DB" ? `<div class="mt" style="color:var(--blue);font-size:11px">from PV modules table</div>` : ""}</td>
       <td style="white-space:nowrap">
         <button type="button" class="small sp-up" data-i="${i}">↑</button>
         <button type="button" class="small sp-down" data-i="${i}">↓</button>
@@ -4047,6 +4129,31 @@ function rdRender() {
       : schema.fields.map(f => {
           const v = r[f.name];
           const val = v === null || v === undefined ? "" : String(v);
+          if (f.type === "specfile") {
+            const all = Array.isArray(SPEC_FOLDER_FILES) ? SPEC_FOLDER_FILES : [];
+            const pre = String(f.prefix || "").toLowerCase();
+            // Only files following the naming convention, so the list stays usable
+            // as the folder grows.
+            const files = pre
+              ? all.filter(x => x.name.toLowerCase().startsWith(pre))
+              : all;
+            // Keep an unrecognised or off-convention value so nothing is lost.
+            const listed = files.some(x => x.name.toLowerCase() === val.toLowerCase());
+            const inFolder = all.some(x => x.name.toLowerCase() === val.toLowerCase());
+            const opts = ['<option value="">(none)</option>'];
+            if (!files.length && all.length && pre) {
+              opts.push(`<option value="" disabled>— no files named ${pre}* in ${SPEC_FOLDER} —</option>`);
+            }
+            files.forEach(x => opts.push(
+              `<option value="${x.name.replace(/"/g, "&quot;")}"${
+                x.name.toLowerCase() === val.toLowerCase() ? " selected" : ""}>${x.name}</option>`));
+            if (val && !listed) {
+              opts.push(`<option value="${val.replace(/"/g, "&quot;")}" selected>${val} — ${
+                inFolder ? "not named " + pre + "*" : "NOT IN FOLDER"}</option>`);
+            }
+            return `<td><select data-i="${i}" data-f="${f.name}"${
+              val && !listed ? ' style="border-color:var(--err)"' : ""}>${opts.join("")}</select></td>`;
+          }
           return `<td><input data-i="${i}" data-f="${f.name}" value="${
             val.replace(/"/g, "&quot;")}"></td>`;
         }).join("");
@@ -4061,7 +4168,7 @@ function rdRender() {
     (matched.length > RD_MAX_ROWS ? ` · showing the first ${RD_MAX_ROWS}, narrow the search to reach the rest` : "");
 
   // Cell edits
-  $("rd_body").querySelectorAll("input").forEach(el => {
+  $("rd_body").querySelectorAll("input, select").forEach(el => {
     el.addEventListener("change", () => {
       const i = Number(el.dataset.i), fname = el.dataset.f;
       const table = getTable(name);
@@ -4367,9 +4474,8 @@ function pvDoAutoDistribute() {
   const miVal = $("pv_mi").value;
   const modVal = $("pv_module").value;
   const mod = MODULE_DB.find(m => m.name === modVal);
-  let mi = miVal ? RT_MI.find(r => r.miModel === miVal) : null;
-  if (!mi && mod && mod.miModel) mi = RT_MI.find(r => r.miModel === mod.miModel);
-  if (!mi) { showMsg("Choose a module or microinverter first.", "err"); return; }
+  const mi = miVal ? RT_MI.find(r => r.miModel === miVal) : null;
+  if (!mi) { showMsg("Choose a microinverter first — the per-branch limits come from it.", "err"); return; }
 
   const dist = pvAutoDistribute(qty, mi.maxBranch, mi.minBranch);
   $("pv_branch_body").innerHTML = ""; pvBranchCount = 0;
@@ -4485,10 +4591,12 @@ function pvInit() {
   $("pv_btn_add").addEventListener("click", () => pvAddBranchRow(0));
   $("pv_btn_clear").addEventListener("click", pvReset);
 
-  // Selecting a module offers its paired microinverter.
+  // Modules no longer carry a paired microinverter — it is chosen on its own,
+  // because AC current and branch limits are inverter properties.
   $("pv_module").addEventListener("change", () => {
-    const mod = MODULE_DB.find(m => m.name === $("pv_module").value);
-    if (mod && mod.miModel && !$("pv_mi").value) $("pv_mi").value = mod.miModel;
+    if (!$("pv_mi").value) {
+      showMsg("Now choose the microinverter — AC current and branch limits come from it.", "warn");
+    }
   });
 
   // Re-default the conductor count when the service type changes.
