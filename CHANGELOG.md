@@ -3,6 +3,24 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 1.6.0 — 2026-08-03
+
+- **Installer is now a dropdown** with two options, Direct and Cobalt, starting
+  on "(choose)" so nothing is silently defaulted.
+- **Projects are filed under an installer root folder** —
+  `Projects/Cobalt/<project>` or `Projects/Direct/<project>` — so the two
+  installers' work stays separate. Both roots are created every time so they
+  always exist.
+- With no installer chosen the project lands directly in `Projects/` and Preview
+  warns, rather than silently producing an inconsistent tree.
+- Preview shows the full destination path and the installer folder, so the
+  routing is visible before anything is written.
+- The existing-projects list reads one level deeper and labels each project with
+  its installer group. Projects created before this change are still listed.
+- An imported installer value with no matching option is **added** rather than
+  discarded — a `<select>` silently drops an unmatched value otherwise.
+- 9 new tests, 132 total.
+
 ## 1.5.0 — 2026-08-03
 
 ### Reference data lives in the SPEED folder

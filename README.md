@@ -53,6 +53,10 @@ These are deliberate and each has a regression test:
   cloned, so reference data is never forked.
 - Folder names are sanitised for illegal Windows characters, reserved device
   names (`CON`, `COM1`, …) and trailing dots and spaces.
+- **Projects are filed under an installer root folder.** Choosing *Cobalt* puts
+  the project in `Projects/Cobalt/`, *Direct* in `Projects/Direct/`. Both roots
+  are created every time so they always exist. With no installer chosen the
+  project lands directly in `Projects/` and Preview warns about it.
 - **The working drawing is renamed to the customer** as it is copied, so a
   project folder holds `BADER BOLAND.dwg` rather than a generic `MWD.dwg`. If the
   customer name is empty the original filename is kept — a drawing called
@@ -69,7 +73,7 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
@@ -156,6 +160,32 @@ factor means that insulation rating is not permitted at that ambient.
 **Cross-references.** A module naming a microinverter absent from `RT_MI` raises a
 warning rather than an error — it may be intentional during a staged addition.
 
+### Installer routing
+
+`Installer` is a dropdown with two options, set in `CONFIG`:
+
+```js
+installers: ["Direct", "Cobalt"],
+installerRootFolders: true,     // file each project under its installer
+```
+
+Resulting layout:
+
+```
+SPEED/Projects/
+  Cobalt/
+    8961BOLA - BADER BOLAND - 8961 Longbrook Dr/
+  Direct/
+    1295CETS - IMANA CETSHWAYO - 12954 E Mexico Ave/
+```
+
+The dropdown starts on "(choose)" so nothing is silently defaulted. If a
+Salesforce import ever supplies an installer that is not in the list, it is
+**added as an option** rather than dropped, with a warning — a `<select>`
+otherwise discards an unmatched value in silence.
+
+Set `installerRootFolders: false` to go back to a flat `Projects/` folder.
+
 ### Drawing rename
 
 `MWD.dwg` is renamed as it is copied. Both settings live in `CONFIG` near the top
@@ -195,7 +225,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-123 tests covering path sanitisation, reserved Windows names, folder-name
+132 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.

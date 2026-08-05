@@ -577,7 +577,10 @@
           <div class="grid three">
             <div><label for="ahj_name">AHJ</label><input id="ahj_name" autocomplete="off"></div>
             <div><label for="utility_name">Utility</label><input id="utility_name" autocomplete="off"></div>
-            <div><label for="installer">Installer</label><input id="installer" autocomplete="off"></div>
+            <div>
+              <label for="installer">Installer</label>
+              <select id="installer"></select>
+            </div>
           </div>
         </fieldset>
 
@@ -933,7 +936,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const APP_BUILD   = "2026-08-03";
 
 const CONFIG = {
@@ -957,6 +960,17 @@ const CONFIG = {
   // holds a drawing named after the customer rather than a generic MWD.dwg.
   // Matched case-insensitively against the template filename.
   dwgRenameFrom: "MWD.dwg",
+
+  // Installer options. Order is the order shown; the first entry is the
+  // placeholder so nothing is silently defaulted.
+  installers: ["Direct", "Cobalt"],
+
+  // When true, each project is filed under a root folder named after its
+  // installer, so the two installers' work stays separate:
+  //     Projects/Direct/<project folder>/
+  //     Projects/Cobalt/<project folder>/
+  // Both roots are created up front so they always exist.
+  installerRootFolders: true,
 
   // Any project field or derived value. Examples:
   //   "{account_name}"                 -> BADER BOLAND
@@ -2200,8 +2214,19 @@ async function planGeneration(state, project) {
   }
 
   const name = folderName(project);
+
+  // Projects are filed under a root folder named after the installer.
+  const installer = CONFIG.installerRootFolders
+    ? sanitizeComponent(String(project.installer || "").trim(), "")
+    : "";
+  const installerRoot = installer && installer !== "UNSPECIFIED" ? installer : "";
+
   const projectsDir = await getDir(state.root, CONFIG.projectsFolder, false);
-  const exists = projectsDir ? await dirExists(projectsDir, name) : false;
+  let parentDir = projectsDir;
+  if (parentDir && installerRoot) {
+    parentDir = await getDir(parentDir, installerRoot, false);
+  }
+  const exists = parentDir ? await dirExists(parentDir, name) : false;
 
   const { files, dirs } = await walkTree(template);
   const toCopy = [], skipped = [], warnings = [];
@@ -2224,6 +2249,7 @@ async function planGeneration(state, project) {
   const dirSet = new Set(dirs.map(d => d.rel));
   for (const extra of CONFIG.extraSubfolders) dirSet.add(extra);
 
+
   if (!toCopy.some(f => f.name.toLowerCase().endsWith(".dwg"))) {
     warnings.push("No .dwg file found in the template tree — check the folder you chose.");
   }
@@ -2239,7 +2265,16 @@ async function planGeneration(state, project) {
   }
 
   const totalBytes = toCopy.reduce((sum, f) => sum + f.size, 0);
-  return { name, exists, files: toCopy, dirs: Array.from(dirSet).sort(),
+  if (CONFIG.installerRootFolders && !installerRoot) {
+    warnings.push(
+      "No installer chosen, so this project will be created directly in " +
+      `${CONFIG.projectsFolder} rather than under ` +
+      `${CONFIG.installers.join(" or ")}. Pick an installer to file it correctly.`);
+  }
+
+  return { name, exists, installerRoot,
+           relPath: (installerRoot ? installerRoot + "/" : "") + name,
+           files: toCopy, dirs: Array.from(dirSet).sort(),
            skipped, warnings, totalBytes };
 }
 
@@ -2251,7 +2286,20 @@ async function generateProject(state, project, plan, onProgress) {
   }
 
   const projectsDir = await getDir(state.root, CONFIG.projectsFolder, true);
-  const projectDir = await getDir(projectsDir, plan.name, true);
+
+  // Create every installer root, not just this project's, so both always exist.
+  if (CONFIG.installerRootFolders) {
+    for (const inst of CONFIG.installers) {
+      await getDir(projectsDir, sanitizeComponent(inst), true);
+    }
+  }
+
+  const parentDir = plan.installerRoot
+    ? await getDir(projectsDir, plan.installerRoot, true)
+    : projectsDir;
+  if (!parentDir) throw new Error("Could not create the installer folder.");
+
+  const projectDir = await getDir(parentDir, plan.name, true);
 
   let dirsCreated = 0;
   for (const rel of plan.dirs) {
@@ -2318,18 +2366,46 @@ async function listProjects(state) {
   const projectsDir = await getDir(state.root, CONFIG.projectsFolder, false);
   if (!projectsDir) return [];
   const out = [];
-  for await (const [name, handle] of projectsDir.entries()) {
-    if (handle.kind !== "directory") continue;
-    const entry = { folder: name, project_number: "", display: "" };
+
+  /** Read one project folder, if it looks like one. */
+  async function readProject(handle, name, group) {
+    const entry = { folder: name, group: group || "", project_number: "", display: "" };
+    let isProject = false;
     try {
       const fh = await handle.getFileHandle("project.json", { create: false });
       const data = JSON.parse(await (await fh.getFile()).text());
       entry.project_number = data.project_number || "";
       entry.display = displayName(data);
-    } catch (e) { /* no manifest — still list the folder */ }
-    out.push(entry);
+      entry.installer = data.installer || "";
+      isProject = true;
+    } catch (e) { /* no manifest */ }
+    return { entry, isProject };
   }
-  return out.sort((a, b) => a.folder.localeCompare(b.folder));
+
+  for await (const [name, handle] of projectsDir.entries()) {
+    if (handle.kind !== "directory") continue;
+
+    const { entry, isProject } = await readProject(handle, name, "");
+    if (isProject) { out.push(entry); continue; }
+
+    // No manifest: it is either an installer root, or a project folder whose
+    // manifest is missing. Look one level down before deciding.
+    let childCount = 0;
+    try {
+      for await (const [childName, childHandle] of handle.entries()) {
+        if (childHandle.kind !== "directory") continue;
+        childCount++;
+        const child = await readProject(childHandle, childName, name);
+        out.push(child.entry);
+      }
+    } catch (e) { /* unreadable */ }
+
+    // Nothing beneath it and no manifest — list it so it is not invisible.
+    if (childCount === 0) out.push(entry);
+  }
+
+  return out.sort((a, b) =>
+    (a.group || "").localeCompare(b.group || "") || a.folder.localeCompare(b.folder));
 }
 
 /** Find report CSVs in the reports folder, or the SPEED folder as fallback. */
@@ -2557,7 +2633,18 @@ function doImport() {
 
   for (const [field, value] of Object.entries(result.values)) {
     const el = $(field);
-    if (el && value !== "" && value !== 0) el.value = value;
+    if (!el || value === "" || value === 0) continue;
+    // A <select> silently ignores a value with no matching option, which would
+    // drop imported data without saying so. Add it instead.
+    if (el.tagName === "SELECT" &&
+        !Array.from(el.options).some(o => o.value === String(value))) {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = String(value);
+      el.appendChild(opt);
+      showMsg(`'${value}' is not a standard ${field.replace(/_/g, " ")} option — ` +
+              `added it for this project so the imported value is not lost.`, "warn");
+    }
+    el.value = value;
   }
 
   $("importReport").style.display = "block";
@@ -2581,9 +2668,11 @@ async function doPreview() {
 
     $("previewEmpty").style.display = "none";
     $("previewBox").style.display = "block";
-    $("pvPath").textContent = `${state.root.name} / ${CONFIG.projectsFolder} / ${plan.name}`;
+    $("pvPath").textContent =
+      `${state.root.name} / ${CONFIG.projectsFolder} / ${plan.relPath.replace("/", " / ")}`;
     $("pvStats").innerHTML =
       `<div><span>Folder name</span><span>${plan.name}</span></div>` +
+      `<div><span>Installer folder</span><span>${plan.installerRoot || "(none — see warning)"}</span></div>` +
       `<div><span>Folders</span><span>${plan.dirs.length}</span></div>` +
       `<div><span>Files</span><span>${plan.files.length}</span></div>` +
       `<div><span>Size</span><span>${mb(plan.totalBytes)} MB</span></div>` +
@@ -2647,7 +2736,9 @@ async function refreshProjects() {
     $("plist").innerHTML = projects.length
       ? projects.map(p => `<div class="row">
            <div class="nm">${p.project_number || p.folder}</div>
-           <div class="mt">${p.display || p.folder}</div></div>`).join("")
+           <div class="mt">${p.display || p.folder}</div>
+           ${p.group ? `<div class="mt" style="color:var(--blue)">${p.group}</div>` : ""}
+         </div>`).join("")
       : '<div class="hint">None yet.</div>';
   } catch (e) {
     $("plist").innerHTML = `<div class="hint">Could not list projects: ${e.message}</div>`;
@@ -2658,7 +2749,7 @@ function clearForm() {
   for (const f of FORM_FIELDS) {
     const el = $(f);
     if (!el) continue;
-    if (el.tagName === "SELECT") el.selectedIndex = 0;
+    if (el.tagName === "SELECT") el.selectedIndex = 0;   // placeholder for installer
     else if (f === "module_quantity") el.value = "0";
     else if (f === "checked_by") el.value = "EOR";
     else if (f === "date_drawn") el.value = new Date().toISOString().slice(0, 10);
@@ -2681,6 +2772,8 @@ async function init() {
   }
   $("app").style.display = "grid";
   $("date_drawn").value = new Date().toISOString().slice(0, 10);
+  $("installer").innerHTML = '<option value="">(choose)</option>' +
+    CONFIG.installers.map(i => `<option value="${i}">${i}</option>`).join("");
   $("appVersion").textContent = "v" + APP_VERSION;
   $("appVersion").title = `SPEED ${APP_VERSION} — built ${APP_BUILD}`;
   renderMapping();
