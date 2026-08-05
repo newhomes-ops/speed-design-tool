@@ -3,6 +3,42 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.0.0 — 2026-08-03
+
+### Phase 5 — iPermit package
+
+- New **Spec Sheets** tab. Choose a project; the tool locates the plotted CAD PDF
+  by customer name anywhere in the project folder, pre-ticks the spec sheets that
+  match the project's equipment, and merges everything into one package.
+- Output written to the project's `Deliverables` folder as
+  `<Project Number> - <CUSTOMER NAME> - iPermit Package.pdf`. CAD plot first, then
+  the ticked sheets in the order shown; order is adjustable per project.
+- New **`SPEC_SHEETS`** reference table (equipment, model matched, PDF filename,
+  merge order, always) — editable and savable like every other table.
+- Sheets are read from a **`Spec Sheets`** folder inside the SPEED folder. A sheet
+  listed in the table but absent from the folder is shown as missing and cannot be
+  ticked.
+- If the expected plot is not found, every other PDF in the project is offered as
+  an alternative. A previously built package is never offered as an input.
+
+### Encrypted datasheets are refused, not skipped
+Many manufacturer PDFs carry permissions-only encryption. The merger cannot
+decrypt them. **The build is refused** and the offending files named, because a
+permit set silently missing its module datasheet is worse than a blocked build.
+One of the 16 sample PDFs was encrypted — the Qcells module datasheet.
+
+### Verification before writing
+The merged page count is checked against the sum of the inputs and the output is
+re-parsed before anything reaches `Deliverables`. A mismatch aborts with nothing
+written.
+
+### Size
+pdf-lib (MIT) is **compiled into the file** rather than loaded from a CDN, so the
+tool still makes **zero network requests**. The file is now 837 KB raw, **321 KB
+gzipped** — which is what GitHub Pages actually serves.
+
+- 9 new tests, 148 total.
+
 ## 1.9.0 — 2026-08-03
 
 ### Files tab — browse a project inside the tool

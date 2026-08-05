@@ -19,7 +19,7 @@ repository should almost certainly be private.
 | 2 | Project import from the Salesforce report CSV | Ready |
 | 3 | PV / NEC calculations — conductor, OCPD, EGC, conduit, voltage drop | Ready |
 | 4 | Bill of Materials | Not built |
-| 5 | Specification sheets | Not built |
+| 5 | iPermit package — merge CAD plot with spec sheets | Ready |
 
 ---
 
@@ -73,7 +73,7 @@ The version is shown in the header, recorded in every generated
 To release, bump both constants near the top of the `<script>` block:
 
 ```js
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "2.0.0";
 const APP_BUILD   = "2026-08-03";
 ```
 
@@ -116,6 +116,57 @@ has to be entered once in the **Folders** panel for Copy path to produce a full
 path. Without it you get a relative path like
 `Projects\Cobalt\8961BOLA - BADER BOLAND`.
 
+## Building the iPermit package
+
+Put the datasheet PDFs in a **`Spec Sheets`** folder inside the SPEED folder.
+Map them to equipment on the **Reference Data → Spec sheets** tab:
+
+| Equipment | Model matched | PDF filename | Merge order | Always |
+|---|---|---|---|---|
+| Module | Q.TRON BLK M-G2+ | `Qcells_Data_sheet_….pdf` | 10 | false |
+| Inverter | IQ8HC | `IQ8HC-Microinverter-….pdf` | 20 | false |
+
+**Model matched** is compared against the project's module, inverter, attachment
+and racking, so the right sheets are pre-ticked. Leave it blank and set **Always**
+to `true` for sheets that belong in every package. **Merge order** fixes the
+sequence.
+
+### The workflow
+
+1. Plot the CAD drawing to PDF. Because the drawing is named after the customer,
+   so is the plot — `BADER BOLAND.pdf`.
+2. **Spec Sheets** tab → choose the project. The tool finds the plot by name
+   anywhere in the project folder, and pre-ticks the matching sheets.
+3. Adjust the ticks and order, then **Build iPermit package**.
+
+Output goes to the project's `Deliverables` folder as:
+
+```
+<Project Number> - <CUSTOMER NAME> - iPermit Package.pdf
+```
+
+The CAD plot is always first, then the ticked sheets in the order shown.
+
+### Encrypted datasheets
+
+**Many manufacturer PDFs carry permissions-only encryption** — no password to
+open, but printing and copying are restricted. The merger cannot decrypt them, so
+such a file **cannot** be included.
+
+The tool **refuses to build** rather than quietly omitting a sheet: a permit set
+silently missing its module datasheet is far worse than a blocked build. The fix
+is one-off per file — open it, **Save As** over itself, and the protection is
+dropped.
+
+Of the 16 PDFs in the sample template, exactly one was encrypted — and it was the
+Qcells module datasheet, the most important sheet in the package.
+
+### Verification before writing
+
+The merged page count is checked against the sum of the inputs, and the output is
+re-parsed, **before** anything is written to `Deliverables`. A mismatch aborts
+with nothing written.
+
 ## If the buttons do nothing
 
 Open the **Diagnostics** panel at the bottom of the Project tab, press **Show
@@ -143,9 +194,10 @@ layout:
 | **Project** | Folders, Salesforce import, project information, folder preview, existing projects |
 | **PV Calc** | PV / NEC calculations and results |
 | **Files** | Browse a project's contents and open files |
-| **Reference Data** | All ten reference tables |
+| **Spec Sheets** | Build the merged iPermit package |
+| **Reference Data** | All eleven reference tables |
 
-BOM and Spec Sheets appear as disabled tabs until they are built.
+BOM appears as a disabled tab until it is built.
 
 ## Reference data
 
@@ -155,6 +207,7 @@ table has validation errors — so a problem is visible without opening the tab.
 
 | Table | Rows | Contents |
 |---|---|---|
+| `SPEC_SHEETS` | 6 | Equipment to spec-sheet PDF mapping |
 | `RT_LOCATION` | 517 | Design temperatures by city |
 | `RT_AMPACITY` | 24 | Conductor ampacity and resistance |
 | `RT_EGC` | 19 | OCPD to grounding conductor |
@@ -282,7 +335,7 @@ sites. Syncing and opening locally avoids this entirely.
 node tests/run-tests.js
 ```
 
-139 tests covering path sanitisation, reserved Windows names, folder-name
+148 tests covering path sanitisation, reserved Windows names, folder-name
 templating, the drawing rename, CSV parsing, the report field mapping, the
 reference tables, and the NEC calculation engine. They extract the logic from `SPEED.html` at run time, so
 they always test the shipped file.
