@@ -3,6 +3,66 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.7.0 — 2026-08-05
+
+### 240 V is now the default, not a refusal
+
+A bare model with two variants and nothing to disambiguate it resolves to the
+**240 V** build instead of stopping. `miResolve` returns state `"defaulted"`
+rather than `"ok"`, so callers can still tell a choice was made for the designer
+rather than by them, and PV Calc says so:
+
+> `'IQ8MC-72-M-US'` is sold in 240 V and 208 V. Defaulted to 240 V (Iac 1.33 A,
+> max 12 per branch). Set the service voltage to pick the other build.
+
+A **warning**, not an error — the calculation proceeds. The warning names the
+consequence (the actual Iac and branch limit), not just the fact, because "we
+picked one for you" is useless without knowing what changed.
+
+If a part has no 240 V build at all there is nothing safe to fall back to, so
+that case still reports ambiguity. There is a test for it even though every
+current row has a 240 V sibling.
+
+### Vac is a dropdown, built from the Service voltage list
+
+`SERVICE_VOLTAGES = [240, 208, 120, 277, 480]` is declared once. Project
+Information's **Service voltage** dropdown is generated from it, and the **Vac**
+column on the Microinverters tab is constrained to it via a new `choices`
+property on the schema.
+
+They are the *same array*, not two copies — there is a test asserting identity
+rather than equality, so the two can never drift apart. That matters because the
+service voltage is what picks a microinverter variant; if the lists diverged, a
+designer could choose a voltage no row could match.
+
+`230` — plausible and wrong — is now rejected at entry and at validation, where
+before it would have been stored and made the row unreachable by lookup. An
+off-list value already in the data is preserved and flagged red rather than
+silently rewritten.
+
+### 16:9 layout
+
+The shell was capped at `1240px`, which wasted about 600px on a 1920×1080
+display and squeezed the 11-column reference tables. Now:
+
+- `--shell: min(1680px, calc(100vw - 48px))` — fills a 16:9 display, still
+  sensible on a smaller laptop.
+- **Reference Data** and **Files** take the *full* width (`100vw - 32px`), since
+  they are wide tables rather than prose. Toggled from `showView`.
+- Inputs inside table cells stretch with their column, so the extra width goes
+  to the data instead of to padding.
+- Sidebar 384px → 400px.
+
+The other views stay capped on purpose: forms and prose get harder to read as
+lines get longer, so widening everything would have made the Project tab worse
+while fixing the tables.
+
+### Tests
+
+206 passing, up from 198. Eight new, including the shared-array identity check,
+`coerceCell` rejecting an off-list choice, and a sweep asserting every voltage
+the dropdown offers resolves against every microinverter model.
+
 ## 2.6.0 — 2026-08-05
 
 ### One microinverter model, two Vac variants

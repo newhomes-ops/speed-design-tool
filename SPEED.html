@@ -47,6 +47,11 @@
      ================================================================== */
   :root {
     /* Approved brand colours */
+    /* Shell width. 1680px fills a 1920x1080 (16:9) display with a comfortable
+       margin; the calc() keeps it honest on smaller laptops. Prose and forms
+       read badly beyond this, which is why it is capped at all. */
+    --shell: min(1680px, calc(100vw - 48px));
+
     --navy:      #162241;   /* darkNavy  — primary dark, headers, table heads */
     --blue:      #0056B8;   /* skyBlue   — accent, actions, links */
     --yellow:    #FAD646;   /* sparing accent only */
@@ -97,7 +102,7 @@
     box-shadow: 0 1px 0 rgba(255,255,255,.06), var(--shadow-md);
   }
   .topbar-inner {
-    max-width: 1240px; margin: 0 auto; padding: 0 24px;
+    max-width: var(--shell); margin: 0 auto; padding: 0 24px;
     min-height: 68px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   }
   .brand { display: flex; align-items: center; gap: 16px; padding: 12px 0; }
@@ -139,17 +144,22 @@
 
   /* ---------------------------------------------------------------- layout */
 
-  main { max-width: 1240px; margin: 24px auto 72px; padding: 0 24px; }
+  main { max-width: var(--shell); margin: 24px auto 72px; padding: 0 24px; }
 
   /* ---------------------------------------------------------------- views */
 
   .view { display: none; }
   .view.active {
-    display: grid; grid-template-columns: minmax(0,1fr) 384px;
+    display: grid; grid-template-columns: minmax(0,1fr) 400px;
     gap: 24px; align-items: start;
   }
   .view.active:has(> .col.wide:only-child) { grid-template-columns: minmax(0,1fr); }
   .col { min-width: 0; }
+
+  /* Reference Data and Files are wide tables, not prose. Cramming an 11-column
+     table into a reading-width column is what made the data unreadable, so
+     these two views take the full display instead. Set from showView(). */
+  body.wide-view { --shell: calc(100vw - 32px); }
   @media (max-width: 1040px) { .view.active { grid-template-columns: minmax(0,1fr); } }
 
   /* ------------------------------------------------------------- tab bar */
@@ -159,7 +169,7 @@
     position: sticky; top: 68px; z-index: 30; box-shadow: var(--shadow-sm);
   }
   .tab-bar-inner {
-    max-width: 1240px; margin: 0 auto; padding: 0 24px;
+    max-width: var(--shell); margin: 0 auto; padding: 0 24px;
     display: flex; gap: 2px; overflow-x: auto;
   }
   .tab-bar .tab {
@@ -325,6 +335,10 @@
   /* ---------------------------------------------------------------- tables */
 
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  /* Inputs inside a table cell must be free to grow with the column, or the
+     extra width goes to padding instead of to the data. */
+  #rd_body table input, #rd_body table select,
+  .rd-table input, .rd-table select { width: 100%; min-width: 0; box-sizing: border-box; }
   thead th {
     background: var(--navy); color: var(--white);
     font-size: 11px; font-weight: 700; letter-spacing: .04em;
@@ -618,11 +632,7 @@
             <div><label for="attachment_type">Attachment</label><input id="attachment_type" autocomplete="off"></div>
             <div><label for="railing_type">Railing</label><input id="railing_type" autocomplete="off"></div>
             <div><label for="service_voltage">Service voltage</label>
-              <select id="service_voltage">
-                <option value="240">240 V</option><option value="208">208 V</option>
-                <option value="120">120 V</option><option value="277">277 V</option>
-                <option value="480">480 V</option>
-              </select></div>
+              <select id="service_voltage"></select></div>
           </div>
         </fieldset>
 
@@ -1118,7 +1128,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.6.0";
+const APP_VERSION = "2.7.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1454,6 +1464,23 @@ let RT_ESS = [{"config":"5 kWh w/o Backup","battCurrent":16,"ampacity":31.64,"br
 
 let RT_BREAKERS = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
 
+/**
+ * Nominal AC service voltages.
+ *
+ * One list, used both for Project Information's "Service voltage" dropdown and
+ * for the Vac column on the Microinverters tab, so the two can never drift
+ * apart — the voltage hint that picks a microinverter variant is matched against
+ * this exact set.
+ */
+const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
+
+/**
+ * Which variant a bare model falls back to when nothing else disambiguates it.
+ * 240 V is the residential norm, so this is right far more often than not —
+ * but the fallback is always reported as a warning, never applied silently.
+ */
+const MI_DEFAULT_VAC = 240;
+
 let RT_MI = [
   // One model, one row per AC voltage. Identity is (miModel, Vac) — see
   // keyFields on the RT_MI schema. acSize, Iac, invEff and the branch limits
@@ -1674,6 +1701,14 @@ function miResolve(value, vacHint) {
 
   const hinted = vac ? candidates.filter(r => Number(r.Vac) === Number(vac)) : [];
   if (hinted.length === 1) return { row: hinted[0], state: "ok", candidates };
+
+  // Nothing disambiguated it. Fall back to 240 V rather than refusing, but flag
+  // it so the designer can see a choice was made on their behalf.
+  const fallback = candidates.find(r => Number(r.Vac) === MI_DEFAULT_VAC);
+  if (fallback) {
+    return { row: fallback, state: "defaulted", defaultedTo: MI_DEFAULT_VAC, candidates };
+  }
+  // No 240 V build exists, so there is no safe default to reach for.
   return { row: null, state: "ambiguous", candidates };
 }
 
@@ -1692,10 +1727,17 @@ function pvCalculate(input) {
 
   const miHit = miResolve(input.miModel, input.vac);
   const miRow = miHit.row;
-  if (miHit.state === "ambiguous") {
+  if (miHit.state === "defaulted") {
+    warnings.push(`'${input.miModel}' is sold in ` +
+      miHit.candidates.map(c => c.Vac + " V").join(" and ") +
+      `. Defaulted to ${miHit.defaultedTo} V (Iac ${miRow.Iac} A, ` +
+      `max ${miRow.maxBranch} per branch). Set the service voltage to pick ` +
+      `the other build.`);
+  } else if (miHit.state === "ambiguous") {
     errors.push(`'${input.miModel}' is sold in ` +
       miHit.candidates.map(c => c.Vac + " V").join(" and ") +
-      `. Choose the voltage — Iac and the branch limits differ between them.`);
+      `, and none of them is ${MI_DEFAULT_VAC} V. Choose the voltage — Iac and ` +
+      `the branch limits differ between them.`);
   } else if (miHit.state === "unknown") {
     errors.push(`Microinverter '${input.miModel}' is not in the Microinverters table.`);
   } else if (!miRow) {
@@ -2079,7 +2121,8 @@ const TABLE_SCHEMAS = {
       { name: "minBranch", type: "int", required: true, label: "Min per branch" },
       { name: "maxBranch", type: "int", required: true, label: "Max per branch" },
       { name: "Iac",       type: "number", required: true, label: "Iac (A)" },
-      { name: "Vac",       type: "int", required: true, label: "Vac (V)" },
+      { name: "Vac",       type: "int", required: true, label: "Vac (V)",
+        choices: SERVICE_VOLTAGES },
       { name: "specSheet", type: "specfile", prefix: "Inverter_",
         label: "Spec sheet PDF" }
     ]
@@ -2180,7 +2223,12 @@ function coerceCell(raw, field) {
   if (s === "") return field.nullable ? null : (field.required ? undefined : null);
   const n = Number(s);
   if (!Number.isFinite(n)) return undefined;          // signals invalid
-  return field.type === "int" ? Math.round(n) : n;
+  const v = field.type === "int" ? Math.round(n) : n;
+  // A constrained column must not accept a value the rest of the tool cannot
+  // match — an off-list Vac would make the microinverter unreachable.
+  if (Array.isArray(field.choices) &&
+      !field.choices.some(c => Number(c) === v)) return undefined;
+  return v;
 }
 
 /**
@@ -2255,6 +2303,10 @@ function validateTable(name, rows) {
       if (isBlank) continue;
       if (f.type !== "text" && f.type !== "specfile" && !Number.isFinite(Number(val))) {
         errors.push(`Row ${i + 1}: '${f.label || f.name}' must be a number, got '${val}'.`);
+      } else if (Array.isArray(f.choices) &&
+                 !f.choices.some(c => String(c) === String(val).trim())) {
+        errors.push(`Row ${i + 1}: '${f.label || f.name}' must be one of ` +
+                    `${f.choices.join(", ")}, got '${val}'.`);
       }
     }
   });
@@ -2403,6 +2455,7 @@ if (typeof module !== "undefined" && module.exports) {
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
+    SERVICE_VOLTAGES, MI_DEFAULT_VAC,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -4213,7 +4266,11 @@ async function specInit() {
   });
 }
 
+/** Views whose content is a wide table rather than prose. */
+const WIDE_VIEWS = new Set(["reference", "files"]);
+
 function showView(name) {
+  document.body.classList.toggle("wide-view", WIDE_VIEWS.has(name));
   document.querySelectorAll(".view").forEach(v => {
     v.classList.toggle("active", v.id === "view-" + name);
   });
@@ -4301,6 +4358,23 @@ function rdRender() {
       : schema.fields.map(f => {
           const v = r[f.name];
           const val = v === null || v === undefined ? "" : String(v);
+          if (Array.isArray(f.choices)) {
+            // A fixed set of values, so a dropdown rather than free text —
+            // a typo here would make the row unreachable by lookup.
+            const listed = f.choices.some(c => String(c) === val);
+            const opts = f.choices.map(c =>
+              `<option value="${c}"${String(c) === val ? " selected" : ""}>${c}</option>`);
+            if (!val) opts.unshift('<option value="" selected>(choose)</option>');
+            // Preserve an off-list value that is already in the data rather than
+            // silently rewriting it; validation flags it separately.
+            if (val && !listed) {
+              opts.push(`<option value="${val.replace(/"/g, "&quot;")}" selected>` +
+                        `${val} — not an allowed value</option>`);
+            }
+            return `<td><select data-i="${i}" data-f="${f.name}"${
+              val && !listed ? ' style="border-color:var(--err)"' : ""}>${
+              opts.join("")}</select></td>`;
+          }
           if (f.type === "specfile") {
             const all = Array.isArray(SPEC_FOLDER_FILES) ? SPEC_FOLDER_FILES : [];
             const pre = String(f.prefix || "").toLowerCase();
@@ -4702,6 +4776,17 @@ function pvPopulateSelectors() {
   // Project Information owns the module choice, so its dropdown is rebuilt
   // from the same table at the same moment.
   moduleSelectPopulate();
+
+  // Built from SERVICE_VOLTAGES, the same list the Vac column is constrained
+  // to, so a service voltage can always match a microinverter variant.
+  const sv = $("service_voltage");
+  if (sv) {
+    const keep = sv.value;
+    sv.innerHTML = SERVICE_VOLTAGES.map(v =>
+      `<option value="${v}"${v === MI_DEFAULT_VAC ? " selected" : ""}>${v} V</option>`
+    ).join("");
+    if (keep) sv.value = keep;
+  }
 
   $("pv_module").innerHTML = '<option value="">(choose a module)</option>' +
     MODULE_DB.map(m =>
