@@ -614,6 +614,7 @@
               <select id="installer"></select>
             </div>
           </div>
+          <div id="jur_suggest" style="display:none; margin-top:12px"></div>
         </fieldset>
 
         <fieldset>
@@ -624,7 +625,9 @@
               <div id="module_type_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="module_quantity">Module qty</label>
               <input id="module_quantity" type="number" min="0" step="1" value="0"></div>
-            <div><label for="inverter_model">Inverter model</label><input id="inverter_model" autocomplete="off"></div>
+            <div><label for="inverter_model">Inverter model</label>
+              <select id="inverter_model"></select>
+              <div id="inverter_model_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="roof_type">Roof type</label><input id="roof_type" autocomplete="off"></div>
             <div><label for="roof_pitch">Roof pitch</label>
               <input id="roof_pitch" placeholder="5:12" autocomplete="off"></div>
@@ -734,7 +737,9 @@
             </div>
             <div>
               <label for="pv_mi">Microinverter</label>
-              <select id="pv_mi"></select>
+              <select id="pv_mi" disabled></select>
+              <div class="hint" style="margin-top:5px">Follows <b>Inverter model</b> on
+                Project Information &mdash; change it there.</div>
             </div>
             <div>
               <label for="pv_phase">Service</label>
@@ -1128,7 +1133,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.7.0";
+const APP_VERSION = "2.9.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1472,6 +1477,19 @@ let RT_BREAKERS = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 15
  * apart — the voltage hint that picks a microinverter variant is matched against
  * this exact set.
  */
+/**
+ * AHJ and utility by service address.
+ *
+ * Ships EMPTY on purpose. There is no authoritative offline source for this and
+ * inventing rows would put a guessed jurisdiction on a stamped permit set, so it
+ * is seeded from real projects as they are designed. New Homes work repeats
+ * across a bounded set of communities, so it converges quickly.
+ *
+ * A ZIP row is preferred over a city row: one city can span several
+ * jurisdictions, and one jurisdiction can span many ZIPs.
+ */
+let RT_JURISDICTION = [];
+
 const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
 
 /**
@@ -1657,6 +1675,37 @@ function pvSizeBranch(o) {
     wireNEC: wireRowNEC.size, wire: wireRow.size, upsizedForVd,
     vdBranch, ocpd, egc: pvGetEGC(ocpd), conduit: pvConduitSize(wireRow.size)
   };
+}
+
+/** Five-digit ZIP, ignoring a +4 suffix and stray spaces. */
+function normZip(v) {
+  const m = String(v === undefined || v === null ? "" : v).match(/\d{5}/);
+  return m ? m[0] : "";
+}
+
+/**
+ * Find the AHJ and utility for an address.
+ *
+ * ZIP first, then city + state. Returns how it matched so the designer can see
+ * whether the answer was precise or only city-level — a city-level match is a
+ * suggestion, not a fact, because a city can straddle jurisdictions.
+ */
+function jurisdictionLookup(zip, city, state) {
+  const z = normZip(zip);
+  const c = String(city || "").trim().toLowerCase();
+  const st = String(state || "").trim().toLowerCase();
+
+  if (z) {
+    const hit = RT_JURISDICTION.find(r => normZip(r.zip) === z);
+    if (hit) return { row: hit, matchedOn: "zip" };
+  }
+  if (c && st) {
+    const hit = RT_JURISDICTION.find(r =>
+      String(r.city || "").trim().toLowerCase() === c &&
+      String(r.state || "").trim().toLowerCase() === st);
+    if (hit) return { row: hit, matchedOn: "city" };
+  }
+  return { row: null, matchedOn: null };
 }
 
 /**
@@ -2100,6 +2149,25 @@ const TABLE_SCHEMAS = {
         label: "Spec sheet PDF" }
     ]
   },
+  RT_JURISDICTION: {
+    label: "AHJ & utility",
+    note: "Fills the AHJ and Utility fields from the service address. A ZIP row " +
+          "wins over a city row, because one city can span several jurisdictions. " +
+          "This table ships empty — there is no reliable offline source for it, " +
+          "so add a row the first time you design in a community and it is right " +
+          "for every project there afterwards. Nothing is ever written to the " +
+          "form without you pressing Use.",
+    keyFields: ["zip", "city", "state"],
+    allowEmpty: true,
+    fields: [
+      { name: "zip",         type: "text", label: "ZIP" },
+      { name: "city",        type: "text", label: "City" },
+      { name: "state",       type: "text", label: "State" },
+      { name: "ahjName",     type: "text", label: "AHJ" },
+      { name: "utilityName", type: "text", label: "Utility" },
+      { name: "codeYear",    type: "text", label: "Code year" }
+    ]
+  },
   RT_MI: {
     label: "Microinverters",
     note: "One row per model per AC voltage — the same part number in 240 V and " +
@@ -2262,7 +2330,9 @@ function validateTable(name, rows) {
   if (!schema) return { errors: ["Unknown table: " + name], warnings };
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    errors.push("Table is empty.");
+    // RT_JURISDICTION legitimately starts empty; every other table shipping
+    // empty means data was lost.
+    if (!schema.allowEmpty) errors.push("Table is empty.");
     return { errors, warnings };
   }
 
@@ -2409,6 +2479,7 @@ function getTable(name) {
   switch (name) {
     case "SPEC_SHEETS": return SPEC_SHEETS;
     case "MODULE_DB": return MODULE_DB;
+    case "RT_JURISDICTION": return RT_JURISDICTION;
     case "RT_MI": return RT_MI;
     case "RT_LOCATION": return RT_LOCATION;
     case "RT_ESS": return RT_ESS;
@@ -2426,6 +2497,7 @@ function setTable(name, rows) {
   switch (name) {
     case "SPEC_SHEETS": SPEC_SHEETS = rows; break;
     case "MODULE_DB": MODULE_DB = rows; break;
+    case "RT_JURISDICTION": RT_JURISDICTION = rows; break;
     case "RT_MI": RT_MI = rows; break;
     case "RT_LOCATION": RT_LOCATION = rows; break;
     case "RT_ESS": RT_ESS = rows; break;
@@ -2451,11 +2523,11 @@ function blankRow(name) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = Object.assign({}, SPEED_LOGIC, {
     RT_LOCATION, RT_AMPACITY, RT_TEMP_CORR, RT_HEIGHT_ADDER, RT_FILL_DERATING,
-    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB,
+    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION,
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
-    SERVICE_VOLTAGES, MI_DEFAULT_VAC,
+    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -2892,11 +2964,11 @@ function collect() {
     if (!el) continue;
     o[f] = f === "module_quantity" ? toInt(el.value) : el.value;
   }
-  // The microinverter lives on PV Calc, not the project form, but the spec-sheet
-  // package needs an exact model to link a datasheet to. Recording it here makes
-  // that link exact instead of guessing from the free-text inverter_model.
-  const mi = $("pv_mi");
-  if (mi && mi.value) o.mi_model = mi.value;
+  // inverter_model is already a composite RT_MI key, so mi_model is written only
+  // as the resolved row's key — which differs when the 240 V fallback applied.
+  // Later phases then never have to re-run the fallback.
+  const inv = inverterResolve();
+  if (inv.mi) o.mi_model = miKey(inv.mi);
   return o;
 }
 
@@ -3104,11 +3176,13 @@ async function doPreview() {
   // Refuse at Preview rather than at Generate: Preview is where the designer
   // looks for problems, and failing later would waste a folder copy.
   const gate = moduleGate();
-  if (!gate.ok) {
+  const inv = inverterGate();
+  const stop = !gate.ok ? gate : (!inv.ok ? inv : null);
+  if (stop) {
     moduleSyncDownstream();
     state.canGenerate = false; state.plan = null;
     $("btnGenerate").disabled = true;
-    showMsg(gate.reason, "err");
+    showMsg(stop.reason, "err");
     return;
   }
 
@@ -3154,9 +3228,10 @@ async function doPreview() {
 
 async function doGenerate() {
   if (!state.plan) { showMsg("Press Preview first.", "err"); return; }
-  // Re-check: the reference table can change between Preview and Generate.
-  const gate = moduleGate();
-  if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
+  // Re-check: the reference tables can change between Preview and Generate.
+  const gate = moduleGate(), inv = inverterGate();
+  const stop = !gate.ok ? gate : (!inv.ok ? inv : null);
+  if (stop) { moduleSyncDownstream(); showMsg(stop.reason, "err"); return; }
   if (!confirm(`Create '${state.plan.name}' and copy ${state.plan.files.length} files ` +
                `(${mb(state.plan.totalBytes)} MB)?`)) return;
 
@@ -3260,16 +3335,17 @@ async function loadProject(pid) {
       filled++;
     }
 
-    // Restore the microinverter too; it is not a FORM_FIELDS entry.
-    if (data.mi_model && $("pv_mi")) {
-      const miSel = $("pv_mi");
-      if (!Array.from(miSel.options).some(o => o.value === data.mi_model)) {
+    // inverter_model is a FORM_FIELDS entry and is already restored above, so
+    // pv_mi follows from the sync. Projects saved before 2.8.0 held the model
+    // only in mi_model, so fall back to that.
+    if (!$("inverter_model").value && data.mi_model) {
+      const sel = $("inverter_model");
+      if (!Array.from(sel.options).some(o => o.value === data.mi_model)) {
         const opt = document.createElement("option");
-        opt.value = opt.textContent = data.mi_model + "  — not in the Microinverters table";
-        opt.value = data.mi_model;
-        miSel.appendChild(opt);
+        opt.value = opt.textContent = data.mi_model;
+        sel.appendChild(opt);
       }
-      miSel.value = data.mi_model;
+      sel.value = data.mi_model;
     }
 
     moduleSyncDownstream();
@@ -3441,13 +3517,28 @@ function wireControls() {
     }
   });
 
-  // The address feeds the design-temperature lookup.
-  ["city", "state"].forEach(id =>
+  $("inverter_model").addEventListener("change", () => {
+    moduleSyncDownstream();
+    const inv = inverterResolve();
+    if (inv.state === "unknown") {
+      showMsg(`'${inv.name}' is not in the Microinverters table — add it before ` +
+              `calculating or generating.`, "warn");
+    }
+  });
+
+  // The address feeds the design-temperature lookup and the AHJ/utility lookup.
+  ["city", "state", "zip_code"].forEach(id =>
     $(id).addEventListener("change", () => moduleSyncDownstream()));
 
-  // Once the voltage is set by hand, stop adopting the inverter's Vac.
+  // Typing over a suggested value should update the strip, not leave it stale.
+  ["ahj_name", "utility_name"].forEach(id =>
+    $(id).addEventListener("change", jurRender));
+
+  // Once the voltage is set by hand, stop adopting the inverter's Vac — and
+  // re-resolve, because the voltage is what picks between two builds.
   $("service_voltage").addEventListener("change", e => {
     e.target.dataset.userSet = "1";
+    moduleSyncDownstream();
   });
   $("btnRefresh").addEventListener("click", refreshProjects);
   $("lookupNumber").addEventListener("keydown", e => {
@@ -4728,6 +4819,245 @@ function moduleRenderStatus(r) {
   box.appendChild(btn);
 }
 
+/* ---- AHJ and utility from the address ------------------------------
+
+   Suggested, never auto-filled. The AHJ goes on a PE-stamped permit set, and a
+   wrong one means a rejected permit, so the designer confirms every match. The
+   strip also says how it matched: a ZIP match is precise, a city match is a
+   guess because a city can straddle jurisdictions.
+*/
+
+/** Add or update the row for this address, from what the form now holds. */
+function jurRemember() {
+  const zip = normZip($("zip_code").value);
+  const city = $("city").value.trim(), st = $("state").value.trim();
+  const ahj = $("ahj_name").value.trim(), util = $("utility_name").value.trim();
+  const code = $("code_year") ? $("code_year").value.trim() : "";
+  if (!zip && !(city && st)) {
+    showMsg("Enter a ZIP, or a city and state, before saving the jurisdiction.", "err");
+    return;
+  }
+  if (!ahj && !util) {
+    showMsg("Fill in the AHJ or the Utility first — there is nothing to remember yet.", "err");
+    return;
+  }
+  const rows = getTable("RT_JURISDICTION");
+  let row = zip ? rows.find(r => normZip(r.zip) === zip) : null;
+  if (!row) {
+    row = rows.find(r =>
+      String(r.city || "").trim().toLowerCase() === city.toLowerCase() &&
+      String(r.state || "").trim().toLowerCase() === st.toLowerCase() &&
+      !normZip(r.zip));
+  }
+  const isNew = !row;
+  if (isNew) { row = blankRow("RT_JURISDICTION"); rows.push(row); }
+  row.zip = zip; row.city = city; row.state = st;
+  row.ahjName = ahj; row.utilityName = util; row.codeYear = code;
+  RD_DIRTY.add("RT_JURISDICTION");
+  if (typeof rdCurrent !== "undefined" && rdCurrent === "RT_JURISDICTION") {
+    rdRender(); rdValidate(true);
+  }
+  if (typeof rdPopulateSelector === "function") rdPopulateSelector();
+  jurRender();
+  showMsg(`${isNew ? "Added" : "Updated"} ${zip || city + ", " + st} in AHJ & utility. ` +
+          `Press Save to folder on the Reference Data tab to keep it.`, "ok");
+}
+
+/** Copy a matched row into the form. Only ever called from the Use button. */
+function jurApply(row) {
+  if (row.ahjName) $("ahj_name").value = row.ahjName;
+  if (row.utilityName) $("utility_name").value = row.utilityName;
+  if (row.codeYear && $("code_year")) $("code_year").value = row.codeYear;
+  jurRender();
+  showMsg("Filled in the AHJ and utility from AHJ & utility. Check them against " +
+          "the plan set before generating.", "ok");
+}
+
+/** Draw the suggestion strip. */
+function jurRender() {
+  const box = $("jur_suggest");
+  if (!box) return;
+  box.textContent = "";
+
+  const zip = $("zip_code").value, city = $("city").value, st = $("state").value;
+  const hasAddr = normZip(zip) || (city.trim() && st.trim());
+  const ahj = $("ahj_name").value.trim(), util = $("utility_name").value.trim();
+  const hit = jurisdictionLookup(zip, city, st);
+
+  // Nothing known for this address: offer to record it once it is filled in,
+  // which is how the table gets built without anyone maintaining it separately.
+  if (!hit.row) {
+    if (!hasAddr || (!ahj && !util)) { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.className = "msg show warn";
+    const span = document.createElement("span");
+    span.innerHTML = `<b>${modEscHtml(normZip(zip) || city + ", " + st)}</b> is not in ` +
+      `<b>AHJ &amp; utility</b> yet. Save it and every later project here fills itself in.`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Remember this address";
+    btn.style.cssText = "margin-left:10px;padding:2px 9px";
+    btn.addEventListener("click", jurRemember);
+    box.appendChild(span); box.appendChild(btn);
+    return;
+  }
+
+  const r = hit.row;
+  const differs = (r.ahjName && r.ahjName !== ahj) || (r.utilityName && r.utilityName !== util);
+  const precise = hit.matchedOn === "zip";
+
+  box.style.display = "block";
+  box.className = "msg show " + (differs ? (precise ? "warn" : "err") : "ok");
+  const span = document.createElement("span");
+  span.innerHTML =
+    (precise
+      ? `Matched <b>ZIP ${modEscHtml(normZip(r.zip))}</b>`
+      : `Matched <b>${modEscHtml(r.city)}, ${modEscHtml(r.state)}</b> only — no ZIP row, ` +
+        `and a city can span more than one jurisdiction`) +
+    `: AHJ <b>${modEscHtml(r.ahjName || "—")}</b>, utility ` +
+    `<b>${modEscHtml(r.utilityName || "—")}</b>` +
+    (r.codeYear ? `, code <b>${modEscHtml(r.codeYear)}</b>` : "") +
+    (differs ? "." : " — already matches the form.");
+
+  box.appendChild(span);
+  if (differs) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = precise ? "Use this" : "Use this anyway";
+    btn.style.cssText = "margin-left:10px;padding:2px 9px";
+    btn.addEventListener("click", () => jurApply(r));
+    box.appendChild(btn);
+  }
+  const upd = document.createElement("button");
+  upd.type = "button";
+  upd.textContent = "Update from form";
+  upd.style.cssText = "margin-left:8px;padding:2px 9px";
+  upd.addEventListener("click", jurRemember);
+  box.appendChild(upd);
+}
+
+/* ---- inverter model: the same contract as module type -------------- */
+
+/** Rebuild the Inverter model dropdown from RT_MI, keeping any off-list value. */
+function miSelectPopulate() {
+  const sel = $("inverter_model");
+  if (!sel) return;
+  const keep = sel.value;
+  // The value is model + voltage, so a selection is never ambiguous.
+  sel.innerHTML = '<option value="">(choose a microinverter)</option>' +
+    RT_MI.map(r =>
+      `<option value="${modEscAttr(miKey(r))}">${modEscHtml(r.miModel)} — ` +
+      `${r.Vac} V, ${r.acSize} W, ${r.Iac} A, ${r.minBranch}-${r.maxBranch}/branch` +
+      `</option>`).join("");
+  if (keep && !Array.from(sel.options).some(o => o.value === keep)) {
+    const opt = document.createElement("option");
+    opt.value = keep;
+    opt.textContent = keep + "  — not in the Microinverters table";
+    sel.appendChild(opt);
+  }
+  sel.value = keep;
+}
+
+/**
+ * Resolve the project's inverter. Delegates to miResolve, so the composite key,
+ * the legacy "(208V)" spelling and the 240 V fallback all behave identically to
+ * everywhere else that resolves a microinverter.
+ */
+function inverterResolve() {
+  const el = $("inverter_model");
+  const raw = el ? String(el.value).trim() : "";
+  if (!raw) return { state: "empty", name: "", mi: null };
+  const sv = $("service_voltage");
+  const hit = miResolve(raw, sv ? Number(sv.value) || undefined : undefined);
+  if (hit.state === "unknown") return { state: "unknown", name: raw, mi: null };
+  if (!hit.row) return { state: "ambiguous", name: raw, mi: null, candidates: hit.candidates };
+  return { state: hit.state === "defaulted" ? "defaulted" : "ok",
+           name: raw, mi: hit.row, defaultedTo: hit.defaultedTo };
+}
+
+/** Whether the project has a usable microinverter. */
+function inverterGate() {
+  const r = inverterResolve();
+  if (r.state === "ok" || r.state === "defaulted") return { ok: true, resolved: r };
+  if (r.state === "empty") return { ok: false, resolved: r, reason:
+    "Choose an inverter model on Project Information — AC current, voltage and " +
+    "branch limits all come from it, so nothing can be sized without one." };
+  if (r.state === "ambiguous") return { ok: false, resolved: r, reason:
+    `'${r.name}' is sold in ` + r.candidates.map(c => c.Vac + " V").join(" and ") +
+    `, and none is ${MI_DEFAULT_VAC} V. Set the service voltage to pick one.` };
+  return { ok: false, resolved: r, reason:
+    `'${r.name}' is not in the Microinverters reference table, so it has no Iac ` +
+    `or branch limits. Add it under Reference Data → Microinverters first.` };
+}
+
+/** Send the user to the Microinverters table with the model already filled in. */
+function miAddToTable(name) {
+  if (typeof rdCurrent === "undefined") return;
+  // Split "MODEL @ 240V" back into its parts so both key columns are seeded.
+  const m = String(name).match(/^(.*?)\s*@\s*(\d{2,4})\s*V\s*$/i) ||
+            String(name).match(/^(.*?)\s*\((\d{2,4})\s*V\)\s*$/i);
+  const model = m ? m[1].trim() : String(name).trim();
+  const vac = m ? Number(m[2]) : MI_DEFAULT_VAC;
+  const rows = getTable("RT_MI");
+  let row = rows.find(r =>
+    String(r.miModel || "").trim().toUpperCase() === model.toUpperCase() &&
+    Number(r.Vac) === vac);
+  if (!row) {
+    row = blankRow("RT_MI");
+    row.miModel = model;
+    row.Vac = vac;
+    rows.push(row);
+    RD_DIRTY.add("RT_MI");
+  }
+  rdCurrent = "RT_MI";
+  $("rd_search").value = "";
+  rdPopulateSelector(); rdRender(); rdValidate(true);
+  showView("reference");
+  const body = $("rd_body");
+  if (body) body.scrollTop = body.scrollHeight;
+  showMsg(`'${model}' at ${vac} V added as a blank row. Fill in AC size, Iac and ` +
+          `the branch limits, then press Save to folder to keep it.`, "warn");
+}
+
+/** Draw the line under the Inverter model dropdown. */
+function inverterRenderStatus(r) {
+  const box = $("inverter_model_status");
+  if (!box) return;
+  box.textContent = "";
+  if (r.state === "empty") {
+    box.textContent = "Iac, AC voltage and the per-branch limits all come from this.";
+    return;
+  }
+  if (r.state === "ok" || r.state === "defaulted") {
+    const mi = r.mi;
+    box.innerHTML =
+      (r.state === "defaulted"
+        ? `<b style="color:#8a5b00">Defaulted to ${r.defaultedTo} V</b> — `
+        : `<b style="color:#0a7d34">In the reference table</b> — `) +
+      `${mi.Vac} V, Iac ${mi.Iac} A, ${mi.acSize} W, ` +
+      `${mi.minBranch}&ndash;${mi.maxBranch} modules per branch` +
+      (mi.specSheet
+        ? ` · spec sheet <b>${modEscHtml(mi.specSheet)}</b>`
+        : ` · <b>no spec sheet linked</b> — set one on the Microinverters tab`);
+    return;
+  }
+  const span = document.createElement("span");
+  span.innerHTML = r.state === "ambiguous"
+    ? `<b style="color:#b3261e">Two voltage builds and no ${MI_DEFAULT_VAC} V option.</b> ` +
+      `Set the service voltage to pick one.`
+    : `<b style="color:#b3261e">Not in the Microinverters table.</b> ` +
+      `Nothing can be calculated or generated until it is added.`;
+  box.appendChild(span);
+  if (r.state === "unknown") {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Add to Microinverters";
+    btn.style.cssText = "margin-left:8px;padding:2px 9px";
+    btn.addEventListener("click", () => miAddToTable(r.name));
+    box.appendChild(btn);
+  }
+}
+
 /**
  * Push the project's module into every dropdown that depends on it, then
  * repaint the status line. Safe to call as often as you like.
@@ -4760,22 +5090,42 @@ function moduleSyncDownstream() {
     if (hit && locEl.value !== hit.display) locEl.value = hit.display;
   }
 
-  // Service voltage belongs to the microinverter. Adopt it only while the
-  // user has not set it by hand, so a deliberate override is never clobbered.
-  const miSel = $("pv_mi"), sv = $("service_voltage");
-  if (miSel && miSel.value && sv && !sv.dataset.userSet) {
-    const mi = miResolve(miSel.value).row;
-    if (mi && mi.Vac && String(mi.Vac) !== sv.value) sv.value = String(mi.Vac);
+  // PV Calc's Microinverter is a read-only mirror of Project Information, the
+  // same arrangement as the module. Both equipment choices live in one place.
+  const inv = inverterResolve();
+  const miSel = $("pv_mi");
+  if (miSel) {
+    const want = inv.mi ? miKey(inv.mi) : inv.name;
+    if (want && !Array.from(miSel.options).some(o => o.value === want)) {
+      const opt = document.createElement("option");
+      opt.value = want;
+      opt.textContent = want +
+        (inv.mi ? "" : "  — not in the Microinverters table");
+      miSel.appendChild(opt);
+    }
+    miSel.value = want;
+  }
+
+  // Service voltage belongs to the microinverter. Adopt it only while the user
+  // has not set it by hand, so a deliberate override is never clobbered — and
+  // an override is exactly how the 208 V build gets chosen.
+  const sv = $("service_voltage");
+  if (inv.mi && sv && !sv.dataset.userSet &&
+      inv.state === "ok" && String(inv.mi.Vac) !== sv.value) {
+    sv.value = String(inv.mi.Vac);
   }
 
   moduleRenderStatus(r);
+  inverterRenderStatus(inv);
+  jurRender();
   return r;
 }
 
 function pvPopulateSelectors() {
-  // Project Information owns the module choice, so its dropdown is rebuilt
-  // from the same table at the same moment.
+  // Project Information owns both equipment choices, so both dropdowns are
+  // rebuilt from the same tables at the same moment.
   moduleSelectPopulate();
+  miSelectPopulate();
 
   // Built from SERVICE_VOLTAGES, the same list the Vac column is constrained
   // to, so a service voltage can always match a microinverter variant.
@@ -4882,6 +5232,8 @@ function pvSyncFromProject() { return moduleSyncDownstream(); }
 function pvDoAutoDistribute() {
   const gate = moduleGate();
   if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
+  const invGate = inverterGate();
+  if (!invGate.ok) { moduleSyncDownstream(); showMsg(invGate.reason, "err"); return; }
 
   const qty = Number($("module_quantity").value) || 0;
   if (qty <= 0) { showMsg("Set the module quantity first.", "err"); return; }
@@ -4986,6 +5338,8 @@ function pvDoCalculate() {
   // produce numbers built on an empty module.
   const gate = moduleGate();
   if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
+  const inv = inverterGate();
+  if (!inv.ok) { moduleSyncDownstream(); showMsg(inv.reason, "err"); return; }
 
   const input = pvReadInput();
   if (!input.branches.some(b => b.nMod > 0)) {
@@ -5021,12 +5375,10 @@ function pvInit() {
   $("pv_btn_add").addEventListener("click", () => pvAddBranchRow(0));
   $("pv_btn_clear").addEventListener("click", pvReset);
 
-  // pv_module is a disabled mirror of Project Information, so it has no
-  // listener of its own. The microinverter is still an independent choice —
-  // modules carry no AC data — and it supplies the service voltage.
-  $("pv_mi").addEventListener("change", () => moduleSyncDownstream());
+  // pv_module and pv_mi are both disabled mirrors of Project Information, so
+  // neither has a listener of its own.
 
-  // Paint the status line from whatever the form already holds.
+  // Paint the status lines from whatever the form already holds.
   moduleSyncDownstream();
 
   // Re-default the conductor count when the service type changes.

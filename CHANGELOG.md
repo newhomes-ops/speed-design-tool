@@ -3,6 +3,129 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.9.0 — 2026-08-05
+
+### AHJ and utility from the service address
+
+New reference table, **AHJ & utility** (`RT_JURISDICTION`): ZIP, city, state →
+AHJ, utility, code year. Entering an address suggests all three.
+
+**Nothing is auto-filled.** The strip shows the match and you press **Use this**.
+The AHJ goes on a PE-stamped permit set — a wrong one is a rejected permit, and
+there is already one unresolved NEC 690.8(B) question riding on the EOR, so
+nothing legally operative fills itself in silently.
+
+The strip states *how* it matched, because the two are not equally trustworthy:
+
+| Match | Shown as | Button |
+|---|---|---|
+| ZIP | green when the form agrees, amber when it differs | Use this |
+| City + state only | **red** — a city can span several jurisdictions | Use this anyway |
+| Nothing | amber — offer to record it | Remember this address |
+
+### The table builds itself
+
+It **ships empty**, and that is deliberate: there is no reliable offline source
+for US jurisdictions, and seeding it with invented rows would be worse than
+leaving it blank.
+
+Instead, once you have filled in an AHJ for a new ZIP, **Remember this address**
+writes the row. Every later project in that community fills itself in. New Homes
+work repeats across a bounded set of communities, so the table converges after a
+few jobs without anyone maintaining it as a separate task.
+
+`allowEmpty` was added to the schema for this one table. Every *other* table
+still errors when empty — a test asserts exactly that, because an empty
+`RT_AMPACITY` means data was lost, not that nothing has been entered yet.
+
+### Why not an online lookup
+
+Investigated and rejected for now:
+
+- **AHJ** — SunSpec's AHJ Registry is purpose-built for this (43,096 US AHJs,
+  address → jurisdiction), but the API token has to be requested from SunSpec
+  and access is throttled.
+- **Utility** — NREL's Utility Rates API returns a utility name, but **its data
+  is from 2012 with no plans to update it**, which is not good enough for a
+  permit. The `developer.nrel.gov` domain was also retired on 29 May 2026.
+- **Unknown either way** — whether either endpoint sends CORS headers. If not, a
+  single-file browser tool cannot call them at all, and the fix is a proxy
+  server, which is the thing this tool exists to avoid.
+
+An embedded API key would also be public: GitHub Pages serves this repository
+openly. If an online lookup is added later, the key belongs in a JSON file in
+the SPEED folder, per-user, never in the repo.
+
+### Tests
+
+231 passing, up from 218. Fourteen new, including ZIP normalisation (`78613-4402`
+matches `78613`), ZIP beating a conflicting city row, and one asserting the
+lookup returns nothing rather than the nearest row for an unknown address.
+
+## 2.8.0 — 2026-08-05
+
+### Inverter model works exactly like module type
+
+`Inverter model` on **Project Information** is now a dropdown built from the
+**Microinverters** table, and PV Calc's Microinverter field is a **disabled
+mirror** of it. Both equipment choices now live in one place, and the two
+screens cannot disagree about either.
+
+The dropdown reads `IQ7HS-66-M-US — 240 V, 384 W, 1.6 A, 2-10/branch`. Its value
+is the composite key, so a pick made in the tool is never ambiguous.
+
+A model that is not in the table gets a status line and an **Add to
+Microinverters** button that jumps to Reference Data with the model *and the
+voltage* already seeded — `miAddToTable` splits `MODEL @ 208V` back into both key
+columns, because a row missing either one would fail validation immediately.
+
+### What blocks and what only warns
+
+| State | Meaning | Effect |
+|---|---|---|
+| empty | nothing chosen | blocks |
+| ok | resolved exactly | proceeds |
+| defaulted | bare model, took the 240 V build | proceeds, warns |
+| ambiguous | two builds, neither is 240 V | blocks |
+| unknown | not in the table | blocks |
+
+There is a test asserting every one of those five states is *either* explicitly
+allowed or explicitly blocked, so a new state cannot be added and silently
+treated as usable.
+
+Preview, Generate, Calculate and Auto-distribute are gated on the inverter in
+the same four places as the module — with a test asserting the two gate counts
+are equal, so the pair cannot drift apart later.
+
+**This doubles the data a designer must have before a folder can be created.**
+Both the module and the inverter must now be in the reference tables. That is
+what "just like module type" means, but it is a real cost on a brand-new
+equipment package, and relaxing either is a one-line change.
+
+### Resolution order
+
+The composite key wins over the service voltage, so an explicit pick is never
+silently overridden. Only a *bare* model consults the voltage field, and only
+then does the 240 V fallback apply.
+
+`project.json` now stores `mi_model` as the **resolved** row's key rather than
+the raw field, so later phases never re-run the fallback and get a different
+answer. Projects saved before 2.8.0 kept the model only in `mi_model`; those
+still load, falling back to it when `inverter_model` is empty.
+
+### Removed
+
+The bespoke `pv_mi` restore in project loading, and the `pv_mi` change listener.
+Both are now consequences of the sync rather than separate code paths — the kind
+of duplicate wiring that produced the dangling-listener crash in 1.7.0.
+
+### Tests
+
+218 passing, up from 206. Twelve new. `inverterResolve` and `inverterGate` read
+the DOM, so they are extracted and exercised against a stub rather than left
+unverified; three further tests assert the module and inverter fields stay
+structurally identical.
+
 ## 2.7.0 — 2026-08-05
 
 ### 240 V is now the default, not a refusal
