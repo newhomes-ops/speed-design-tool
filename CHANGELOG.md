@@ -3,6 +3,82 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.4.0 — 2026-08-05
+
+### Module type is now the source of truth
+
+`Module type` on **Project Information** is a dropdown built from the **PV
+modules** reference table, and PV Calc's Module field is a disabled mirror of
+it. The two screens can no longer disagree about what is on the roof.
+
+Matching is **exact**. The previous loose/substring matcher is gone: it could
+map `Q.TRON BLK M-G2.C+ 430` onto a different power class, and sizing a stamped
+drawing against the wrong current is not a tolerable failure mode. A model that
+is not in the table is preserved, shown, and flagged — never silently remapped.
+
+### A module absent from the table blocks the job
+
+Preview, Generate, Calculate and Auto-distribute all consult one gate. An
+unknown module stops each of them with the reason, plus an **Add to PV modules**
+button that jumps to Reference Data with the model already filled in.
+
+Generate is blocked too, which is the literal reading of the requirement. The
+cost is real: a designer who imports a brand-new module cannot create the
+project folder until the module's electrical data is entered. Relaxing it to
+block only calculations is a one-line change in `doPreview`/`doGenerate`.
+
+### Dropdowns that follow the module
+
+- **PV Calc → Module** mirrors it exactly.
+- **PV Calc → Location** follows the project city and state.
+- **Spec sheet** comes from the module's linked `specSheet`, exact match only —
+  the substring fallback was removed for the same reason as above.
+- **Service voltage** adopts the microinverter's `Vac`, but only while the
+  field has not been set by hand. A deliberate override is never clobbered.
+
+The **microinverter is still chosen by hand**. Module rows carry no AC data
+after 2.3.0, so there is no data path from module to inverter. Adding a
+"compatible modules" column to the Microinverters tab would create one.
+
+### PV modules table
+
+`Type` column removed from the rows and the schema.
+
+The table now holds only the six approved models. Electricals are from the
+manufacturer datasheet for the exact power class:
+
+| Model | Brand | Wpeak | Isc | Voc | Vmp | Imp | Size (in) | Wptc |
+|---|---|---|---|---|---|---|---|---|
+| Q.PEAK DUO BLK ML-G10.C+ 410 | QCELLS | 410 | 11.11 | 45.31 | 38.48 | 10.65 | 74 × 41.1 | 381 |
+| Q.TRON BLK M-G2.C+ 430 | QCELLS | 430 | 13.74 | 39.32 | 32.94 | 13.05 | 67.8 × 44.6 | — |
+| JAM54D41 440/MB | JA SOLAR | 440 | 13.85 | 39.38 | 33.37 | 13.18 | 67.8 × 44.65 | — |
+| SEG-440-BTD-BG | SEG SOLAR | 440 | 14.15 | 39.3 | 32.7 | 13.46 | 67.8 × 44.65 | 417.7 |
+| REC460AA Pure-RX-DC | REC | 460 | 8.88 | 65.7 | 54.9 | 8.38 | 68 × 47.4 | — |
+| REC470AA PURE-RX | REC | 470 | 8.95 | 65.7 | 55.4 | 8.49 | 68 × 47.4 | — |
+
+**`Wptc` is blank on four rows because PTC could not be confirmed.** Two web
+searches returned the *same two numbers* attached to *different* modules, and
+the CEC PV Module List is form-driven and could not be queried. A fabricated
+PTC would corrupt the CEC AC figure without failing any check, so those cells
+are null and CEC AC shows `—`. The two that are populated are traceable:
+`417.7` for SEG-440 comes from IPlot Tool 6, and `381` is carried over from
+IPlot's `Q.PEAK DUO BLK ML-G10+ (410)` row — the same power class with
+identical electricals, but **not separately verified for the `.C+` variant**.
+
+Sources: Q.TRON from the datasheet already in `Spec Sheets`
+(`Qcells_Data_sheet_Q.TRON_BLK_M-G2+_series_DCA_420-440`); Q.PEAK G10 and
+JAM54D41 from manufacturer PDFs; REC from the REC Group Alpha Pure-RX datasheet
+(460 and 470 differ only by power class); SEG-440 from IPlot Tool 6.
+
+### Tests
+
+166 passing, up from 157. Nine new tests cover the exact-match contract,
+including one asserting that **no model name is a substring of another** — the
+property that makes exact matching safe — and one asserting that the real
+sibling variant `Q.TRON BLK M-G2.H+ 430` is rejected rather than matched onto
+the `.C+` row. The two microinverter tests that referenced deleted modules were
+repointed, not removed; the suite caught one of those itself.
+
 ## 2.3.0 — 2026-08-03
 
 ### Equipment data moved to where it belongs

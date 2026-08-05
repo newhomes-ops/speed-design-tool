@@ -605,7 +605,9 @@
         <fieldset>
           <legend>Equipment &amp; roof</legend>
           <div class="grid three">
-            <div><label for="module_type">Module type</label><input id="module_type" autocomplete="off"></div>
+            <div><label for="module_type">Module type</label>
+              <select id="module_type"></select>
+              <div id="module_type_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="module_quantity">Module qty</label>
               <input id="module_quantity" type="number" min="0" step="1" value="0"></div>
             <div><label for="inverter_model">Inverter model</label><input id="inverter_model" autocomplete="off"></div>
@@ -716,7 +718,9 @@
           <div class="grid">
             <div class="full">
               <label for="pv_module">Module</label>
-              <select id="pv_module"></select>
+              <select id="pv_module" disabled></select>
+              <div class="hint" style="margin-top:5px">Follows <b>Module type</b> on
+                Project Information &mdash; change it there.</div>
             </div>
             <div>
               <label for="pv_mi">Microinverter</label>
@@ -1114,8 +1118,8 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.3.0";
-const APP_BUILD   = "2026-08-03";
+const APP_VERSION = "2.4.0";
+const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
   templateFolder: "Project Template",
@@ -1476,18 +1480,16 @@ let SPEC_SHEETS = [
 ];
 
 let MODULE_DB = [
-  {name:"SPR-X21-335-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.23, Voc:67.9, Vmp:57.3, Imp:5.85, Wpeak:335, Wptc:313.5, length:61.3, width:41.2, specSheet:""},
-  {name:"SPR-X21-350-BLK-E-AC", brand:"SUNPOWER", type:"E", Isc:6.5, Voc:68.2, Vmp:57.3, Imp:6.11, Wpeak:350, Wptc:327.9, length:61.3, width:41.2, specSheet:""},
-  {name:"Q.PEAK DUO BLK ML-G10+ (405)", brand:"QCELLS", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, length:74, width:41.1, specSheet:""},
-  {name:"Q.PEAK DUO BLK ML-G10+ (410)", brand:"QCELLS", type:"U", Isc:11.11, Voc:45.31, Vmp:38.48, Imp:10.65, Wpeak:410, Wptc:381, length:74, width:41.1, specSheet:""},
-  {name:"Q.PEAK DUO BLK ML-G10+ (415)", brand:"QCELLS", type:"U", Isc:11.14, Voc:45.34, Vmp:38.74, Imp:10.71, Wpeak:415, Wptc:390.7, length:74, width:41.1, specSheet:""},
-  {name:"Q.PEAK DUO BLK ML-G10+ / TS 405", brand:"QCELLS", type:"U", Isc:11.17, Voc:45.34, Vmp:37.39, Imp:10.83, Wpeak:405, Wptc:376.3, length:74.4, width:41.2, specSheet:""},
-  {name:"WSMDi-400", brand:"WAAREE", type:"U", Isc:11.32, Voc:45.22, Vmp:38, Imp:10.54, Wpeak:400, Wptc:373.1, length:75.75, width:40.87, specSheet:""},
-  {name:"WSMDi-410", brand:"WAAREE", type:"U", Isc:11.48, Voc:45.66, Vmp:38.44, Imp:10.68, Wpeak:410, Wptc:382.7, length:75.75, width:40.87, specSheet:""},
-  {name:"DNA-120-BF26-370W", brand:"APTOS", type:"U", Isc:11.26, Voc:41.4, Vmp:34.5, Imp:10.72, Wpeak:370, Wptc:341.5, length:69.37, width:41.26, specSheet:""},
-  {name:"JAM54S31-405/MR", brand:"JA SOLAR", type:"U", Isc:13.87, Voc:37.23, Vmp:31.21, Imp:12.98, Wpeak:405, Wptc:null, length:67.87, width:44.72, specSheet:""},
-  {name:"SEG-440-BTD-BG", brand:"SEG SOLAR", type:"U", Isc:14.15, Voc:39.3, Vmp:32.7, Imp:13.46, Wpeak:440, Wptc:417.7, length:67.8, width:44.65, specSheet:""},
-  {name:"SPR-U405-BLK-QC-DC (405W)", brand:"SUNPOWER", type:"U", Isc:11.08, Voc:45.27, Vmp:38.22, Imp:10.6, Wpeak:405, Wptc:376.3, length:74, width:41.1, specSheet:""}
+  // Electricals taken from the manufacturer datasheet for the exact power
+  // class. Wptc is the CEC PTC rating; it is left null where PTC could not be
+  // confirmed against the CEC PV Module List, because a guessed PTC would
+  // silently corrupt the CEC AC figure. A null Wptc simply shows "-".
+  {name:"Q.PEAK DUO BLK ML-G10.C+ 410", brand:"QCELLS",    Isc:11.11, Voc:45.31, Vmp:38.48, Imp:10.65, Wpeak:410, Wptc:381,   length:74,   width:41.1,  specSheet:""},
+  {name:"Q.TRON BLK M-G2.C+ 430",       brand:"QCELLS",    Isc:13.74, Voc:39.32, Vmp:32.94, Imp:13.05, Wpeak:430, Wptc:null,  length:67.8, width:44.6,  specSheet:""},
+  {name:"JAM54D41 440/MB",              brand:"JA SOLAR",  Isc:13.85, Voc:39.38, Vmp:33.37, Imp:13.18, Wpeak:440, Wptc:null,  length:67.8, width:44.65, specSheet:""},
+  {name:"SEG-440-BTD-BG",               brand:"SEG SOLAR", Isc:14.15, Voc:39.3,  Vmp:32.7,  Imp:13.46, Wpeak:440, Wptc:417.7, length:67.8, width:44.65, specSheet:""},
+  {name:"REC460AA Pure-RX-DC",          brand:"REC",       Isc:8.88,  Voc:65.7,  Vmp:54.9,  Imp:8.38,  Wpeak:460, Wptc:null,  length:68,   width:47.4,  specSheet:""},
+  {name:"REC470AA PURE-RX",             brand:"REC",       Isc:8.95,  Voc:65.7,  Vmp:55.4,  Imp:8.49,  Wpeak:470, Wptc:null,  length:68,   width:47.4,  specSheet:""}
 ];
 
 
@@ -1982,7 +1984,9 @@ const TABLE_SCHEMAS = {
   },
   MODULE_DB: {
     label: "PV modules",
-    note: "Electrical characteristics and physical size. Wptc may be blank; it is " +
+    note: "Electrical characteristics and physical size. This table decides what " +
+          "the Module type dropdown on Project Information offers — a module that " +
+          "is not here cannot be used on a project. Wptc may be blank; it is " +
           "only used for the CEC AC figure. 'Spec sheet PDF' names the datasheet in " +
           "the Spec Sheets folder — set it and the right sheet is picked automatically " +
           "whenever this module is used. The dropdown lists only files whose name " +
@@ -1993,7 +1997,6 @@ const TABLE_SCHEMAS = {
     fields: [
       { name: "name",    type: "text", required: true, label: "Model name" },
       { name: "brand",   type: "text", label: "Brand" },
-      { name: "type",    type: "text", label: "Type" },
       { name: "Isc",     type: "number", label: "Isc (A)" },
       { name: "Voc",     type: "number", label: "Voc (V)" },
       { name: "Vmp",     type: "number", label: "Vmp (V)" },
@@ -2936,6 +2939,9 @@ function doImport() {
     el.value = value;
   }
 
+  // The report may name a module that is not in the table; surface that now.
+  moduleSyncDownstream();
+
   $("importReport").style.display = "block";
   $("importKv").innerHTML =
     `<div><span>Fields imported</span><span>${result.populated.length}</span></div>` +
@@ -2949,6 +2955,17 @@ function doImport() {
 }
 
 async function doPreview() {
+  // Refuse at Preview rather than at Generate: Preview is where the designer
+  // looks for problems, and failing later would waste a folder copy.
+  const gate = moduleGate();
+  if (!gate.ok) {
+    moduleSyncDownstream();
+    state.canGenerate = false; state.plan = null;
+    $("btnGenerate").disabled = true;
+    showMsg(gate.reason, "err");
+    return;
+  }
+
   busy(true, "reading template…");
   try {
     const plan = await planGeneration(state, collect());
@@ -2991,6 +3008,9 @@ async function doPreview() {
 
 async function doGenerate() {
   if (!state.plan) { showMsg("Press Preview first.", "err"); return; }
+  // Re-check: the reference table can change between Preview and Generate.
+  const gate = moduleGate();
+  if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
   if (!confirm(`Create '${state.plan.name}' and copy ${state.plan.files.length} files ` +
                `(${mb(state.plan.totalBytes)} MB)?`)) return;
 
@@ -3094,6 +3114,8 @@ async function loadProject(pid) {
       filled++;
     }
 
+    moduleSyncDownstream();
+
     // Loading is not the same as being ready to generate — that folder exists.
     state.plan = null;
     state.canGenerate = false;
@@ -3154,6 +3176,8 @@ function clearForm() {
     else if (f === "date_drawn") el.value = new Date().toISOString().slice(0, 10);
     else el.value = "";
   }
+  delete $("service_voltage").dataset.userSet;
+  moduleSyncDownstream();
   $("previewBox").style.display = "none";
   $("previewEmpty").style.display = "block";
   $("importReport").style.display = "none";
@@ -3248,6 +3272,25 @@ function wireControls() {
   $("btnPreview").addEventListener("click", doPreview);
   $("btnGenerate").addEventListener("click", doGenerate);
   $("btnClear").addEventListener("click", clearForm);
+
+  // Module type is the source of truth, so every dependent dropdown is
+  // refreshed the moment it changes.
+  $("module_type").addEventListener("change", () => {
+    const r = moduleSyncDownstream();
+    if (r.state === "unknown") {
+      showMsg(`'${r.name}' is not in the PV modules table — add it before ` +
+              `calculating or generating.`, "warn");
+    }
+  });
+
+  // The address feeds the design-temperature lookup.
+  ["city", "state"].forEach(id =>
+    $(id).addEventListener("change", () => moduleSyncDownstream()));
+
+  // Once the voltage is set by hand, stop adopting the inverter's Vac.
+  $("service_voltage").addEventListener("change", e => {
+    e.target.dataset.userSet = "1";
+  });
   $("btnRefresh").addEventListener("click", refreshProjects);
   $("lookupNumber").addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); doImport(); }
@@ -3672,15 +3715,11 @@ function equipmentSheets(project) {
   const modName = String(project.module_type || "").trim();
   if (modName) {
     const up = modName.toUpperCase();
-    // Exact first, then a contains match, since report values carry a wattage
-    // prefix the database name does not.
-    let mod = MODULE_DB.find(m => String(m.name).toUpperCase() === up);
-    if (!mod) {
-      mod = MODULE_DB.find(m => {
-        const n = String(m.name).toUpperCase();
-        return n && (up.includes(n) || n.includes(up));
-      });
-    }
+    // Exact only. Module type is now chosen from MODULE_DB itself, so a
+    // substring fallback could only ever fire on an off-list value — and
+    // attaching a neighbouring power class's datasheet to a permit set is
+    // worse than attaching none.
+    const mod = MODULE_DB.find(m => String(m.name).trim().toUpperCase() === up);
     if (mod && String(mod.specSheet || "").trim()) {
       out.push({
         category: "Module",
@@ -4365,12 +4404,177 @@ function rdInit() {
 
 }
 
+/* ==================================================================
+   Module type — the single source of truth                  (2.4.0)
+
+   "Module type" on Project Information decides which module a project
+   uses. PV Calc mirrors it and cannot be set independently, so the two
+   screens can never disagree about what is on the roof.
+
+   Matching is EXACT. The old loose/substring match is gone on purpose:
+   "Q.TRON BLK M-G2.C+ 430" substring-matches several power classes, and
+   picking the wrong one sizes conductors against the wrong current on a
+   stamped drawing. A module that is not in MODULE_DB is preserved and
+   flagged, never quietly mapped onto a neighbour.
+   ================================================================== */
+
+const modEscHtml = s => String(s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const modEscAttr = s => modEscHtml(s).replace(/"/g, "&quot;");
+
+/** Rebuild the Module type dropdown from MODULE_DB, keeping any off-list value. */
+function moduleSelectPopulate() {
+  const sel = $("module_type");
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">(choose a module)</option>' +
+    MODULE_DB.map(m =>
+      `<option value="${modEscAttr(m.name)}">${modEscHtml(m.name)}` +
+      ` — ${m.Wpeak}W ${modEscHtml(m.brand || "")}</option>`).join("");
+  // An imported or previously saved model that has since left the table must
+  // still be visible, or the project would appear to have no module at all.
+  if (keep && !Array.from(sel.options).some(o => o.value === keep)) {
+    const opt = document.createElement("option");
+    opt.value = keep;
+    opt.textContent = keep + "  — not in the PV modules table";
+    sel.appendChild(opt);
+  }
+  sel.value = keep;
+}
+
+/** Resolve the project's module against MODULE_DB. Exact match only. */
+function moduleResolve() {
+  const el = $("module_type");
+  const raw = el ? String(el.value).trim() : "";
+  if (!raw) return { state: "empty", name: "", mod: null };
+  const mod = MODULE_DB.find(m =>
+    String(m.name).trim().toUpperCase() === raw.toUpperCase());
+  return mod ? { state: "ok", name: mod.name, mod }
+             : { state: "unknown", name: raw, mod: null };
+}
+
+/**
+ * Whether the project has a usable module. Calculation, generation and the
+ * iPermit build all consult this, so the rule is stated in exactly one place.
+ */
+function moduleGate() {
+  const r = moduleResolve();
+  if (r.state === "ok") return { ok: true, resolved: r };
+  if (r.state === "empty") return { ok: false, resolved: r,
+    reason: "Choose a module type on Project Information first — PV Calc and " +
+            "the spec-sheet package both follow it." };
+  return { ok: false, resolved: r, reason:
+    `'${r.name}' is not in the PV modules reference table, so it has no ` +
+    `electrical data. Add it under Reference Data → PV modules first.` };
+}
+
+/** Send the user to the PV modules table with the model already filled in. */
+function moduleAddToTable(name) {
+  if (typeof rdCurrent === "undefined") return;
+  const rows = getTable("MODULE_DB");
+  let row = rows.find(r =>
+    String(r.name || "").trim().toUpperCase() === String(name).trim().toUpperCase());
+  if (!row) {
+    row = blankRow("MODULE_DB");
+    row.name = name;
+    rows.push(row);
+    RD_DIRTY.add("MODULE_DB");
+  }
+  rdCurrent = "MODULE_DB";
+  $("rd_search").value = "";
+  rdPopulateSelector(); rdRender(); rdValidate(true);
+  showView("reference");
+  const body = $("rd_body");
+  if (body) body.scrollTop = body.scrollHeight;
+  showMsg(`'${name}' added as a blank row. Fill in Wpeak, Voc, Isc, Vmp, Imp and ` +
+          `the size, then press Save to folder to keep it.`, "warn");
+}
+
+/** Draw the line under the Module type dropdown. */
+function moduleRenderStatus(r) {
+  const box = $("module_type_status");
+  if (!box) return;
+  box.textContent = "";
+  if (r.state === "empty") {
+    box.textContent = "PV Calc and the spec-sheet package both follow this field.";
+    return;
+  }
+  if (r.state === "ok") {
+    const m = r.mod;
+    box.innerHTML =
+      `<b style="color:#0a7d34">In the reference table</b> — ${m.Wpeak} W, ` +
+      `Voc ${m.Voc} V, Isc ${m.Isc} A, ${m.length}&times;${m.width} in` +
+      (m.specSheet
+        ? ` · spec sheet <b>${modEscHtml(m.specSheet)}</b>`
+        : ` · <b>no spec sheet linked</b> — set one on the PV modules tab`);
+    return;
+  }
+  const span = document.createElement("span");
+  span.innerHTML = `<b style="color:#b3261e">Not in the PV modules table.</b> ` +
+    `Nothing can be calculated or generated until it is added.`;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Add to PV modules";
+  btn.style.cssText = "margin-left:8px;padding:2px 9px";
+  btn.addEventListener("click", () => moduleAddToTable(r.name));
+  box.appendChild(span);
+  box.appendChild(btn);
+}
+
+/**
+ * Push the project's module into every dropdown that depends on it, then
+ * repaint the status line. Safe to call as often as you like.
+ */
+function moduleSyncDownstream() {
+  const r = moduleResolve();
+
+  // PV Calc's Module is a read-only mirror. It has to carry the value even
+  // when the module is unknown, otherwise the two screens would disagree.
+  const pv = $("pv_module");
+  if (pv) {
+    if (r.name && !Array.from(pv.options).some(o => o.value === r.name)) {
+      const opt = document.createElement("option");
+      opt.value = r.name;
+      opt.textContent = r.name +
+        (r.state === "unknown" ? "  — not in the PV modules table" : "");
+      pv.appendChild(opt);
+    }
+    pv.value = r.name;
+  }
+
+  // Location is reference-table data too, and follows the project address.
+  const cityEl = $("city"), stEl = $("state"), locEl = $("pv_location");
+  if (cityEl && stEl && locEl && cityEl.value.trim() && stEl.value.trim()) {
+    const city = cityEl.value.trim().toLowerCase();
+    const st = stEl.value.trim().toLowerCase();
+    const hit = RT_LOCATION.find(l =>
+      String(l.city).trim().toLowerCase() === city &&
+      String(l.state).trim().toLowerCase() === st);
+    if (hit && locEl.value !== hit.display) locEl.value = hit.display;
+  }
+
+  // Service voltage belongs to the microinverter. Adopt it only while the
+  // user has not set it by hand, so a deliberate override is never clobbered.
+  const miSel = $("pv_mi"), sv = $("service_voltage");
+  if (miSel && miSel.value && sv && !sv.dataset.userSet) {
+    const mi = RT_MI.find(m => m.miModel === miSel.value);
+    if (mi && mi.Vac && String(mi.Vac) !== sv.value) sv.value = String(mi.Vac);
+  }
+
+  moduleRenderStatus(r);
+  return r;
+}
+
 function pvPopulateSelectors() {
+  // Project Information owns the module choice, so its dropdown is rebuilt
+  // from the same table at the same moment.
+  moduleSelectPopulate();
+
   $("pv_module").innerHTML = '<option value="">(choose a module)</option>' +
     MODULE_DB.map(m =>
       `<option value="${m.name}">${m.name} — ${m.Wpeak}W ${m.brand}</option>`).join("");
 
-  $("pv_mi").innerHTML = '<option value="">(from module default)</option>' +
+  $("pv_mi").innerHTML = '<option value="">(choose a microinverter)</option>' +
     RT_MI.map(r =>
       `<option value="${r.miModel}">${r.miModel} — ${r.acSize}W, ${r.Iac}A @ ${r.Vac}V</option>`).join("");
 
@@ -4446,27 +4650,16 @@ function pvReadInput() {
   };
 }
 
-/** Pull module type and quantity from the project form into the calculator. */
-function pvSyncFromProject() {
-  const modName = $("module_type").value.trim();
-  if (modName) {
-    // Report values are model numbers; match loosely against the database.
-    const exact = MODULE_DB.find(m => m.name.toLowerCase() === modName.toLowerCase());
-    const loose = exact || MODULE_DB.find(m =>
-      m.name.toLowerCase().includes(modName.toLowerCase()) ||
-      modName.toLowerCase().includes(m.name.toLowerCase().split(" (")[0]));
-    if (loose) $("pv_module").value = loose.name;
-  }
-  const city = $("city").value.trim(), st = $("state").value.trim();
-  if (city && st) {
-    const hit = RT_LOCATION.find(l =>
-      l.city.trim().toLowerCase() === city.toLowerCase() &&
-      l.state.trim().toLowerCase() === st.toLowerCase());
-    if (hit) $("pv_location").value = hit.display;
-  }
-}
+/**
+ * Pull the project's module and location into the calculator. Kept as a thin
+ * wrapper so existing callers do not need to know about moduleSyncDownstream.
+ */
+function pvSyncFromProject() { return moduleSyncDownstream(); }
 
 function pvDoAutoDistribute() {
+  const gate = moduleGate();
+  if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
+
   const qty = Number($("module_quantity").value) || 0;
   if (qty <= 0) { showMsg("Set the module quantity first.", "err"); return; }
 
@@ -4557,6 +4750,12 @@ function pvRenderResults(r) {
 }
 
 function pvDoCalculate() {
+  // The module decides Wpeak, Voc, Isc and the array area. Without a row in
+  // MODULE_DB there is nothing to size against, so stop here rather than
+  // produce numbers built on an empty module.
+  const gate = moduleGate();
+  if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
+
   const input = pvReadInput();
   if (!input.branches.some(b => b.nMod > 0)) {
     showMsg("Add at least one branch with modules.", "err");
@@ -4591,13 +4790,13 @@ function pvInit() {
   $("pv_btn_add").addEventListener("click", () => pvAddBranchRow(0));
   $("pv_btn_clear").addEventListener("click", pvReset);
 
-  // Modules no longer carry a paired microinverter — it is chosen on its own,
-  // because AC current and branch limits are inverter properties.
-  $("pv_module").addEventListener("change", () => {
-    if (!$("pv_mi").value) {
-      showMsg("Now choose the microinverter — AC current and branch limits come from it.", "warn");
-    }
-  });
+  // pv_module is a disabled mirror of Project Information, so it has no
+  // listener of its own. The microinverter is still an independent choice —
+  // modules carry no AC data — and it supplies the service voltage.
+  $("pv_mi").addEventListener("change", () => moduleSyncDownstream());
+
+  // Paint the status line from whatever the form already holds.
+  moduleSyncDownstream();
 
   // Re-default the conductor count when the service type changes.
   $("pv_phase").addEventListener("change", () => {
