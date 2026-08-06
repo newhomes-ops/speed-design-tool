@@ -627,6 +627,11 @@
               <div id="module_type_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="module_quantity">Module qty</label>
               <input id="module_quantity" type="number" min="0" step="1" value="0"></div>
+            <div><label for="battery_type">Battery</label>
+              <select id="battery_type"></select>
+              <div id="battery_note" class="hint" style="margin-top:5px"></div></div>
+            <div><label for="combiner_type">Combiner type</label>
+              <select id="combiner_type"></select></div>
             <div><label for="inverter_model">Inverter model</label>
               <select id="inverter_model"></select>
               <div id="inverter_model_status" class="hint" style="margin-top:5px"></div></div>
@@ -1148,7 +1153,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.15.0";
+const APP_VERSION = "2.17.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1216,6 +1221,7 @@ const FORM_FIELDS = [
   "project_number","revision_code","code_year","account_name","street_address",
   "city","state","zip_code","ahj_name","utility_name","installer",
   "product_offering","module_type",
+  "combiner_type","battery_type",
   "module_quantity","inverter_model","roof_type","roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
   "date_drawn","notes"
@@ -1227,7 +1233,8 @@ const FIELD_LABELS = {
   railing_type:"Railing", layout_scheme:"Layout scheme",
   system_location:"System location", system_orientation:"Orientation",
   roof_type:"Roof type", utility_name:"Utility", module_type:"Module type",
-  product_offering:"Product offering",
+  product_offering:"Product offering", combiner_type:"Combiner type",
+  battery_type:"Battery",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -1548,12 +1555,16 @@ let RT_MI = [
    right sheets; blank model with always=true is included every time.
    `order` fixes the merge sequence so packages assemble consistently. */
 let SPEC_SHEETS = [
-  {"category":"Module","model":"Q.TRON BLK M-G2+","file":"Qcells_Data_sheet_Q.TRON_BLK_M-G2+_series_DCA_420-440_2026-04_Rev02_NA.pdf","order":10,"always":"false"},
-  {"category":"Inverter","model":"IQ8HC","file":"IQ8HC-Microinverter-DSH-00555-1.0-EN-SAR-2024-08-10.pdf","order":20,"always":"false"},
-  {"category":"Combiner","model":"IQ Combiner","file":"IQ-Combiner-5-5C-DSH-00007-8.0-EN-US-2025-12-29.pdf","order":30,"always":"false"},
-  {"category":"Racking","model":"Pegasus","file":"RailSystemDS_B.3.pdf","order":40,"always":"false"},
-  {"category":"Attachment","model":"InstaFlash","file":"InstaFlash_DS_2023_6-Print-.pdf","order":50,"always":"false"},
-  {"category":"Attachment","model":"HD","file":"HD Spec Sheet.pdf","order":60,"always":"false"}
+  // Module, Inverter, Racking and Attachment are NOT here: they are linked on
+  // the equipment tables that own them (PV modules, Microinverters, and Roof,
+  // attachment & railing). Keeping copies here would let two sources disagree
+  // about which datasheet a project uses.
+  {"category":"Combiner","model":"IQ Combiner 5","file":"IQ-Combiner-5-5C-DSH-00007-8.0-EN-US-2025-12-29.pdf","order":25,"always":"false"},
+  // The three approved batteries. 'Type / model' is what the Battery dropdown on
+  // Project Information offers; set each one's PDF on this tab.
+  {"category":"ESS","model":"Powerwall 3","file":"","order":50,"always":"false"},
+  {"category":"ESS","model":"Enphase 5P","file":"","order":50,"always":"false"},
+  {"category":"ESS","model":"Enphase 10C","file":"","order":50,"always":"false"}
 ];
 
 let MODULE_DB = [
@@ -1707,6 +1718,23 @@ function pvSizeBranch(o) {
     wireNEC: wireRowNEC.size, wire: wireRow.size, upsizedForVd,
     vdBranch, ocpd, egc: pvGetEGC(ocpd), conduit: pvConduitSize(wireRow.size)
   };
+}
+
+/**
+ * The filename prefix a spec-sheet column expects for a given row.
+ *
+ * Most columns have one fixed prefix. Spec sheets needs a different one per
+ * category (Gateway_, HD_), so the prefix is resolved per row rather than per
+ * column. A category with no agreed convention returns "" and lists every file.
+ */
+function specPrefixFor(field, row) {
+  if (field && field.prefixByCategory) {
+    const cat = String((row && row.category) || "").trim();
+    const hit = Object.keys(field.prefixByCategory)
+      .find(k => String(k).trim().toLowerCase() === cat.toLowerCase());
+    return hit ? field.prefixByCategory[hit] : "";
+  }
+  return (field && field.prefix) || "";
 }
 
 /** Case- and padding-insensitive comparison for free-text reference columns. */
@@ -2157,6 +2185,47 @@ function rdParsePasted(name, text) {
    ===================================================================== */
 
 /**
+ * Categories the Spec sheets table may hold.
+ *
+ * Deliberately excludes Module, Inverter, Racking and Attachment: each of those
+ * is linked on the equipment table that owns it, and allowing a second copy here
+ * is how two sources end up naming different datasheets for one project.
+ */
+const SPEC_CATEGORIES = [
+  "Combiner", "ESS", "Gateway", "Heat Detector", "Bollard",
+  "System Shutdown Switch", "EV"
+];
+
+/**
+ * Filename prefix per category, for the Spec sheets picker.
+ *
+ * Only the categories with an agreed convention are listed. A category that is
+ * absent lists every PDF in the folder rather than a guessed prefix — inventing
+ * one would hide correctly named files from the dropdown.
+ */
+const SPEC_PREFIX = {
+  "Gateway": "Gateway_",
+  "Heat Detector": "HD_"
+};
+
+/**
+ * Categories where more than one sheet is legitimate.
+ *
+ * Everything else is "(1)" — exactly one — because a reviewer seeing two
+ * different datasheets for one item cannot tell which is installed. A gateway is
+ * different: a system can genuinely ship more than one.
+ */
+const SPEC_MULTI = ["Gateway"];
+
+/** Categories owned by an equipment table, so never valid in Spec sheets. */
+const SPEC_CATEGORIES_OWNED_ELSEWHERE = {
+  "Module": "PV modules",
+  "Inverter": "Microinverters",
+  "Racking": "Roof, attachment & railing",
+  "Attachment": "Roof, attachment & railing"
+};
+
+/**
  * The offerings a designer can pick, and which systems each one includes.
  * Order is the order they appear in the dropdown.
  */
@@ -2183,7 +2252,7 @@ const OFFERING_COMPONENTS = {
   ],
   battery: [
     { category: "ESS",                     required: true  },
-    { category: "Gateway",                 required: true  },
+    { category: "Gateway",                 required: true, multi: true },
     { category: "Heat Detector",           required: false },
     { category: "Bollard",                 required: false },
     { category: "System Shutdown Switch",  required: false }
@@ -2192,6 +2261,44 @@ const OFFERING_COMPONENTS = {
     { category: "EV", required: true }
   ]
 };
+
+/** The combiner types the Spec sheets table offers, deduplicated, table order. */
+function combinerTypes() {
+  const out = [];
+  SPEC_SHEETS.forEach(r => {
+    if (!sameText(r.category, "Combiner")) return;
+    const m = String(r.model || "").trim();
+    if (m && !out.some(x => sameText(x, m))) out.push(m);
+  });
+  return out;
+}
+
+/** The battery types the Spec sheets table offers, deduplicated, table order. */
+function batteryTypes() {
+  const out = [];
+  SPEC_SHEETS.forEach(r => {
+    if (!sameText(r.category, "ESS")) return;
+    const m = String(r.model || "").trim();
+    if (m && !out.some(x => sameText(x, m))) out.push(m);
+  });
+  return out;
+}
+
+/** The Spec sheets row for a battery type. */
+function batteryRow(type) {
+  const t = String(type || "").trim();
+  if (!t) return null;
+  return SPEC_SHEETS.find(r =>
+    sameText(r.category, "ESS") && sameText(r.model, t)) || null;
+}
+
+/** The Spec sheets row for a combiner type. Exact match, like every other link. */
+function combinerRow(type) {
+  const t = String(type || "").trim();
+  if (!t) return null;
+  return SPEC_SHEETS.find(r =>
+    sameText(r.category, "Combiner") && sameText(r.model, t)) || null;
+}
 
 /** Look up an offering by name. */
 function offeringByName(name) {
@@ -2212,8 +2319,13 @@ function offeringComponents(name) {
     if (!o[group]) return;
     OFFERING_COMPONENTS[group].forEach(c => {
       const existing = out.find(x => sameText(x.category, c.category));
-      if (existing) { existing.required = existing.required || c.required; return; }
-      out.push({ category: c.category, required: c.required, group });
+      if (existing) {
+        existing.required = existing.required || c.required;
+        existing.multi = existing.multi || !!c.multi;
+        return;
+      }
+      out.push({ category: c.category, required: c.required,
+                 multi: !!c.multi, group });
     });
   });
   return out;
@@ -2239,9 +2351,10 @@ function offeringChecklist(name, selectedCategories) {
     const count = have.filter(h => sameText(h, c.category)).length;
     let state;
     if (count === 1) state = "ok";
-    else if (count > 1) state = "duplicate";
+    else if (count > 1) state = c.multi ? "ok" : "duplicate";
     else state = c.required ? "missing" : "absent";
-    return { category: c.category, required: c.required, group: c.group, count, state };
+    return { category: c.category, required: c.required, multi: c.multi,
+             group: c.group, count, state };
   });
 
   // Ticked sheets the offering does not call for: an ESS datasheet on a Solar
@@ -2293,16 +2406,27 @@ function rdDiffRows(name, incoming) {
 const TABLE_SCHEMAS = {
   SPEC_SHEETS: {
     label: "Spec sheets",
-    note: "Which PDF in the Spec Sheets folder covers which equipment. " +
-          "'Model matched' is compared against the project's module, inverter, " +
-          "attachment and racking to pre-tick sheets automatically. Leave it blank " +
-          "and set Always to true for sheets that belong in every package. " +
-          "'Merge order' fixes the sequence.",
+    note: "Equipment that is not covered by its own table: Combiner, ESS, " +
+          "Gateway, Heat Detector, Bollard, System Shutdown Switch and EV. " +
+          "Module, Inverter, Racking and Attachment are rejected here — those " +
+          "are linked on PV modules, Microinverters, and Roof, attachment & " +
+          "railing, and a second copy would let two sources disagree. " +
+          "A Combiner row's 'Type / model' is what the Combiner type dropdown " +
+          "on Project Information offers. For equipment with no field of its " +
+          "own, set Always to true or tick it by hand. 'Merge order' fixes the " +
+          "sequence: module 10, inverter 20, combiner 25, attachment 30, " +
+          "racking 40.",
     key: "file",
     fields: [
-      { name: "category", type: "text", required: true, label: "Equipment" },
-      { name: "model",    type: "text", label: "Model matched" },
-      { name: "file",     type: "text", required: true, label: "PDF filename" },
+      { name: "category", type: "text", required: true, label: "Equipment",
+        choices: SPEC_CATEGORIES },
+      { name: "model",    type: "text", label: "Type / model" },
+      // Optional: a row's job is partly to define a selectable type (a battery,
+      // a combiner), and a type can exist before its datasheet has been filed.
+      // A blank PDF cannot be ticked, so the offering checklist still blocks the
+      // build — the safety sits where it matters rather than at data entry.
+      { name: "file",     type: "specfile", label: "Spec sheet PDF",
+        prefixByCategory: SPEC_PREFIX },
       { name: "order",    type: "int",  required: true, label: "Merge order" },
       { name: "always",   type: "text", label: "Always (true/false)" }
     ]
@@ -2619,19 +2743,32 @@ function validateTable(name, rows) {
     }
   }
 
+  if (name === "SPEC_SHEETS") {
+    rows.forEach((row, i) => {
+      const cat = String(row.category || "").trim();
+      const owner = Object.keys(SPEC_CATEGORIES_OWNED_ELSEWHERE)
+        .find(k => sameText(k, cat));
+      if (owner) {
+        errors.push(`Row ${i + 1}: '${cat}' is linked on the ` +
+          `${SPEC_CATEGORIES_OWNED_ELSEWHERE[owner]} tab, not here. Two sources ` +
+          `could name different datasheets for one project. Delete this row.`);
+      }
+    });
+  }
+
   // Spec-sheet columns: check every table that has one, not just MODULE_DB.
   // This block used to read MODULE_DB's prefix unconditionally, which would have
   // judged the Microinverters tab against 'module_'.
   (schema.fields || []).filter(f => f.type === "specfile").forEach(f => {
-    // Keep the prefix in its declared case for messages; compare in lower case,
-    // so 'Inverter_IQ8HC.pdf' and 'inverter_iq8hc.pdf' are both accepted.
-    const pre = String(f.prefix || "");
-    const preLc = pre.toLowerCase();
     // typeof guard: the folder listing is declared later in the file, and this
     // function is also exercised by the test harness in isolation.
     const known = (typeof SPEC_FOLDER_FILES !== "undefined" &&
                    Array.isArray(SPEC_FOLDER_FILES)) ? SPEC_FOLDER_FILES : null;
     rows.forEach((row, i) => {
+      // Resolved per row: Spec sheets expects a different prefix per category.
+      // Keep it in its declared case for messages, compare in lower case.
+      const pre = String(specPrefixFor(f, row) || "");
+      const preLc = pre.toLowerCase();
       const sheet = String(row[f.name] || "").trim();
       if (!sheet) return;
       // A named datasheet that is not in the folder would block a package build,
@@ -2735,13 +2872,15 @@ function blankRow(name) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = Object.assign({}, SPEED_LOGIC, {
     RT_LOCATION, RT_AMPACITY, RT_TEMP_CORR, RT_HEIGHT_ADDER, RT_FILL_DERATING,
-    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION, RT_ROOF,
+    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION, RT_ROOF, SPEC_SHEETS,
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
     SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
-    offeringChecklist, roofLookup, roofTypesAll, sameText,
+    offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
+    SPEC_CATEGORIES, SPEC_CATEGORIES_OWNED_ELSEWHERE, combinerTypes, combinerRow,
+    SPEC_PREFIX, SPEC_MULTI, batteryTypes, batteryRow,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -3851,6 +3990,8 @@ function wireControls() {
   $("btnGenerate").addEventListener("click", doGenerate);
   $("btnClear").addEventListener("click", clearForm);
   $("btnSaveProject").addEventListener("click", saveProjectJson);
+  // The offering decides whether a battery applies at all.
+  $("product_offering").addEventListener("change", batteryRefreshState);
   refreshSaveButton();
 
   // Module type is the source of truth, so every dependent dropdown is
@@ -3873,17 +4014,20 @@ function wireControls() {
   });
 
   // The address feeds the design-temperature lookup and the AHJ/utility lookup.
-  ["city", "state", "zip_code"].forEach(id =>
+  ["city", "zip_code"].forEach(id =>
     $(id).addEventListener("change", () => moduleSyncDownstream()));
+  // The state changes which attachment applies, so it re-adopts too.
+  $("state").addEventListener("change", () => { moduleSyncDownstream(); roofSync(true); });
 
   // Typing over a suggested value should update the strip, not leave it stale.
   ["ahj_name", "utility_name"].forEach(id =>
     $(id).addEventListener("change", jurRender));
 
   // The roof type, paired with the state, decides attachment and railing.
+  // Changing the roof type adopts that roof's attachment and railing.
   $("roof_type").addEventListener("change", () => {
     if ($("roof_type").value === ROOF_NEW) roofAddNewType();
-    else roofSync();
+    else roofSync(true);
   });
   ["attachment_type", "railing_type"].forEach(id =>
     $(id).addEventListener("change", roofRender));
@@ -4369,6 +4513,50 @@ function equipmentSheets(project) {
     });
   }
 
+  // ---- combiner --------------------------------------------------------
+  // Exact match on the project's combiner type, the same contract as the module
+  // and the inverter. Merge order 25 puts it between the two.
+  const combName = String(project.combiner_type || "").trim();
+  if (combName) {
+    const cr = combinerRow(combName);
+    if (cr && String(cr.file || "").trim()) {
+      out.push({ category: "Combiner", model: cr.model, file: String(cr.file).trim(),
+                 order: Number(cr.order) || 25, source: "SPEC_SHEETS",
+                 why: `linked to combiner "${cr.model}"` });
+    } else if (cr) {
+      out.push({ category: "Combiner", model: cr.model, file: "",
+                 order: Number(cr.order) || 25, source: "SPEC_SHEETS",
+                 why: `"${cr.model}" has no spec sheet set — add one on the Spec sheets tab`,
+                 problem: true });
+    } else {
+      out.push({ category: "Combiner", model: combName, file: "", order: 25,
+                 source: "SPEC_SHEETS",
+                 why: `"${combName}" has no Combiner row on the Spec sheets tab`,
+                 problem: true });
+    }
+  }
+
+  // ---- battery ---------------------------------------------------------
+  const battName = String(project.battery_type || "").trim();
+  if (battName) {
+    const br = batteryRow(battName);
+    if (br && String(br.file || "").trim()) {
+      out.push({ category: "ESS", model: br.model, file: String(br.file).trim(),
+                 order: Number(br.order) || 50, source: "SPEC_SHEETS",
+                 why: `linked to battery "${br.model}"` });
+    } else if (br) {
+      out.push({ category: "ESS", model: br.model, file: "",
+                 order: Number(br.order) || 50, source: "SPEC_SHEETS",
+                 why: `"${br.model}" has no spec sheet set — add one on the Spec sheets tab`,
+                 problem: true });
+    } else {
+      out.push({ category: "ESS", model: battName, file: "", order: 50,
+                 source: "SPEC_SHEETS",
+                 why: `"${battName}" has no ESS row on the Spec sheets tab`,
+                 problem: true });
+    }
+  }
+
   // ---- roof: attachment and railing -----------------------------------
   // One row names two products, so it carries two sheets. A combined system
   // datasheet set on both columns must still merge once, hence the dedupe.
@@ -4411,10 +4599,11 @@ function equipmentSheets(project) {
 
 /** Which spec sheets does this project's equipment call for? */
 function suggestSheets(project) {
-  const hay = [
-    project.module_type, project.inverter_model, project.attachment_type,
-    project.railing_type, project.roof_type
-  ].filter(Boolean).map(s => String(s).toUpperCase());
+  // Module, inverter, attachment, racking and combiner are all exact-linked in
+  // equipmentSheets now, so matching on them here could only ever duplicate a
+  // sheet or attach a wrong one. What remains has no project field of its own,
+  // so it relies on Always or a manual tick.
+  const hay = [project.roof_type].filter(Boolean).map(s => String(s).toUpperCase());
 
   return SPEC_SHEETS.map((row, i) => {
     const model = String(row.model || "").trim().toUpperCase();
@@ -4956,7 +5145,7 @@ function rdRender() {
           }
           if (f.type === "specfile") {
             const all = Array.isArray(SPEC_FOLDER_FILES) ? SPEC_FOLDER_FILES : [];
-            const pre = String(f.prefix || "").toLowerCase();
+            const pre = String(specPrefixFor(f, r) || "").toLowerCase();
             // Only files following the naming convention, so the list stays usable
             // as the folder grows.
             const files = pre
@@ -5504,12 +5693,27 @@ function roofRender() {
   box.appendChild(upd);
 }
 
-/** Fill a blank attachment or railing from the table, then repaint. */
-function roofSync() {
+/**
+ * Bring the attachment and railing into line with the roof type.
+ *
+ * `adopt` is true when the roof type or the state has just changed. In that case
+ * the fields are overwritten, because whatever was there belonged to the previous
+ * roof — leaving it would silently pair a new roof with an old fastener.
+ *
+ * Every other call fills blanks only, so an override the designer made on purpose
+ * survives unrelated edits elsewhere on the form.
+ */
+function roofSync(adopt) {
   roofSelectPopulate();
   const hit = roofLookup($("state").value, $("roof_type").value);
-  // Blanks only: a value the designer already set is never overwritten.
-  if (hit.row) roofApply(hit.row, true);
+  if (hit.row) {
+    const nn = roofApply(hit.row, !adopt);
+    if (adopt && nn) {
+      showMsg(`Attachment and railing set from ${hit.row.roofType}` +
+              `${hit.row.state ? " in " + hit.row.state : " (any state)"}. ` +
+              `Change either one if this project needs something else.`, "ok");
+    }
+  }
   roofRender();
 }
 
@@ -5851,6 +6055,7 @@ function moduleSyncDownstream() {
   inverterRenderStatus(inv);
   jurRender();
   roofSync();
+  batteryRefreshState();
   return r;
 }
 
@@ -5859,6 +6064,8 @@ function pvPopulateSelectors() {
   // rebuilt from the same tables at the same moment.
   moduleSelectPopulate();
   miSelectPopulate();
+  combinerSelectPopulate();
+  batterySelectPopulate();
   specPopulateOfferings();
 
   // Built from SERVICE_VOLTAGES, the same list the Vac column is constrained

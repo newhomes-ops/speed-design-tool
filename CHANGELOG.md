@@ -3,6 +3,137 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.17.0 — 2026-08-06
+
+### Attachment and railing adopt the roof type, and stay editable
+
+Changing the **roof type** — or the **state** — now **overwrites** attachment and
+railing from the matching row, and says so:
+
+> Attachment and railing set from Comp shingle in TX. Change either one if this
+> project needs something else.
+
+Previously it only filled blanks, so switching roof type left the previous roof's
+fastener in place. That is the failure worth fixing: a new roof silently paired
+with an old attachment.
+
+Every *other* refresh still fills blanks only, so an override the designer makes
+on purpose survives unrelated edits elsewhere on the form. Verified both ways: an
+override survives a resync, and is replaced when the roof type actually changes.
+
+A roof type with no matching row leaves the fields untouched rather than clearing
+them.
+
+### Battery on Project Information
+
+New **Battery** dropdown: **Powerwall 3**, **Enphase 5P**, **Enphase 10C**. Saved
+to `project.json`, exact match, contributed to the package at merge order 50.
+
+The options come from the **ESS** rows of Spec sheets, so the list is yours to edit
+— the same arrangement as Combiner. The three are seeded with **no PDF yet**; set
+each one's datasheet on that tab.
+
+It is **enabled only when the offering includes a battery**, and the field says
+which: *"Required — this offering includes a battery"* or *"Not used — this
+offering has no battery."* Switching to a solar-only offering **clears** any
+battery already chosen, because otherwise it would stay in `project.json` and pull
+an ESS datasheet into a solar-only package.
+
+### Gateway and Heat Detector conventions
+
+Prefixes are now resolved **per row, from its category**, rather than per column:
+
+| Category | Prefix |
+|---|---|
+| Gateway | `Gateway_` |
+| Heat Detector | `HD_` |
+
+Only those two. A category with no agreed convention lists **every** PDF rather
+than a guessed prefix — inventing one would hide correctly named files.
+
+### Gateway may be selected more than once
+
+`(1)` is still exactly one for every other category, but a system can genuinely
+ship more than one gateway, so Gateway accepts any number. Multi does **not** mean
+optional: zero gateways still blocks.
+
+### One consequence worth knowing
+
+`Spec sheet PDF` is no longer a required column. A row's job is partly to define a
+selectable **type** — a battery, a combiner — and a type can exist before its
+datasheet has been filed. A blank PDF cannot be ticked, so the offering checklist
+still blocks the build; the safety sits where it matters rather than at data entry.
+
+### Tests
+
+318 passing, up from 302. Sixteen new, including per-row prefix resolution, that a
+fixed-prefix column still behaves the old way, three gateways being acceptable
+while two batteries are not, and that several rows may share a blank PDF without
+counting as duplicate keys.
+
+## 2.16.0 — 2026-08-06
+
+### One source per category
+
+Every category the iPermit package needs is now owned by exactly one table:
+
+| Category | Comes from | Order |
+|---|---|---|
+| Module | PV modules | 10 |
+| Inverter | Microinverters | 20 |
+| **Combiner** | **Spec sheets** | **25** |
+| Attachment | Roof, attachment & railing | 30 |
+| Racking | Roof, attachment & railing | 40 |
+| ESS, Gateway, Heat Detector, Bollard, System Shutdown Switch, EV | Spec sheets | as set |
+
+Racking and attachment were already pulled from **Roof, attachment & railing** as
+of 2.12.0 — verified end to end, and each row now states its source and the roof
+and state it matched: *"linked to racking 'XR-10' for Comp shingle in TX"*.
+
+### Combiner type
+
+New **Combiner type** dropdown on Project Information, offering the `Type / model`
+of every **Combiner** row in Spec sheets. Saved to `project.json`, resolved by
+exact match, and contributed at merge order 25 — between the inverter and the
+attachment.
+
+Three states, all reported rather than silently skipped: linked, row exists but
+has no PDF, and no Combiner row at all for that type.
+
+### Spec sheets: Module, Inverter, Racking and Attachment removed
+
+Those four rows are gone from the seeded table, and the `Equipment` column is now
+a **dropdown** restricted to what this table still owns: Combiner, ESS, Gateway,
+Heat Detector, Bollard, System Shutdown Switch, EV.
+
+Adding one of the four back is a **validation error**, not a warning, and it names
+where the row belongs:
+
+> Row 2: 'Module' is linked on the PV modules tab, not here. Two sources could
+> name different datasheets for one project. Delete this row.
+
+That is the whole point of the change: a second copy of a module's datasheet in a
+second table is how two sources end up disagreeing about which PDF a stamped
+permit set carries. Case-insensitive, so `module` does not slip through.
+
+`PDF filename` is now a **spec-sheet picker** listing the files actually in the
+folder, rather than a typed filename.
+
+### Fuzzy matching removed from suggestSheets
+
+It matched a row's model against the project's module, inverter, attachment and
+racking. All five of those are exact-linked now, so the only thing that matching
+could still do is duplicate a sheet or attach a wrong one. The remaining
+categories have no project field of their own and rely on **Always** or a manual
+tick.
+
+### Tests
+
+302 passing, up from 291. Eleven new, including one asserting that **every
+component any offering asks for is covered by exactly one source** — no orphans,
+no category claimed twice. If a future offering adds a category with nowhere to
+come from, that test fails rather than the designer discovering it mid-build.
+
 ## 2.15.0 — 2026-08-06
 
 ### Roof type is a dropdown

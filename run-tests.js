@@ -690,14 +690,14 @@ t("coerceCell refuses an off-list choice", () => {
   eq(L.coerceCell("abc", f), undefined);
 });
 
-t("constraining Vac does not constrain anything else", () => {
-  // Only Vac carries choices; Iac and acSize stay free numbers.
+t("exactly two columns are constrained to a fixed set", () => {
+  // Iac, acSize and the rest stay free. This list must stay deliberate.
   const constrained = [];
   Object.entries(L.TABLE_SCHEMAS).forEach(([name, sc]) =>
     (sc.fields || []).forEach(f => {
       if (Array.isArray(f.choices)) constrained.push(name + "." + f.name);
     }));
-  eq(constrained, ["RT_MI.Vac"]);
+  eq(constrained.sort(), ["RT_MI.Vac", "SPEC_SHEETS.category"]);
 });
 
 t("a service voltage from the dropdown always picks a variant", () => {
@@ -1339,6 +1339,203 @@ t("a project with no offering yields an empty checklist that cannot pass as done
   eq(L.offeringByName(""), null);
 });
 
+console.log("\n=== one source per category (2.16.0) ===");
+t("Spec sheets holds only the categories no other table owns", () =>
+  eq(L.SPEC_CATEGORIES, ["Combiner", "ESS", "Gateway", "Heat Detector",
+                         "Bollard", "System Shutdown Switch", "EV"]));
+
+t("the four owned categories name their owning table", () =>
+  eq(L.SPEC_CATEGORIES_OWNED_ELSEWHERE, {
+    "Module": "PV modules",
+    "Inverter": "Microinverters",
+    "Racking": "Roof, attachment & railing",
+    "Attachment": "Roof, attachment & railing"
+  }));
+
+t("no category is both allowed and owned elsewhere", () => {
+  const clash = L.SPEC_CATEGORIES
+    .filter(c => Object.keys(L.SPEC_CATEGORIES_OWNED_ELSEWHERE).includes(c));
+  eq(clash, []);
+});
+
+t("every offering component is sourced from exactly one place", () => {
+  // The union of Spec sheets categories and the owned ones must cover every
+  // component any offering asks for, or that offering can never be completed.
+  const owned = Object.keys(L.SPEC_CATEGORIES_OWNED_ELSEWHERE);
+  const covered = L.SPEC_CATEGORIES.concat(owned);
+  const asked = [...new Set(L.PRODUCT_OFFERINGS
+    .flatMap(o => L.offeringComponents(o.name).map(c => c.category)))];
+  const orphans = asked.filter(c => !covered.some(x => L.sameText(x, c)));
+  eq(orphans, []);
+  // ...and nothing is claimed by two sources.
+  const both = L.SPEC_CATEGORIES.filter(c => owned.some(o => L.sameText(o, c)));
+  eq(both, []);
+});
+
+t("the seeded table no longer carries module, inverter, racking or attachment", () => {
+  const cats = [...new Set(L.SPEC_SHEETS.map(r => r.category))];
+  eq(cats, ["Combiner", "ESS"]);
+  eq(L.validateTable("SPEC_SHEETS", L.SPEC_SHEETS).errors, []);
+});
+
+t("a Module row in Spec sheets is rejected, and says where it belongs", () => {
+  const rows = L.SPEC_SHEETS.concat([
+    { category: "Module", model: "REC470AA PURE-RX", file: "module_x.pdf",
+      order: 10, always: "false" }]);
+  const e = L.validateTable("SPEC_SHEETS", rows).errors.join(" | ");
+  if (!/'Module' is linked on the PV modules tab/.test(e)) throw new Error(e);
+});
+
+t("each owned category is rejected and points at the right tab", () => {
+  const want = { Module: "PV modules", Inverter: "Microinverters",
+                 Racking: "Roof, attachment & railing",
+                 Attachment: "Roof, attachment & railing" };
+  Object.entries(want).forEach(([cat, tab]) => {
+    const e = L.validateTable("SPEC_SHEETS",
+      [{ category: cat, model: "x", file: "f.pdf", order: 10, always: "false" }])
+      .errors.join(" | ");
+    if (!e.includes("is linked on the " + tab + " tab"))
+      throw new Error(cat + " -> " + e);
+  });
+});
+
+t("rejection ignores case, so 'module' does not slip through", () => {
+  const e = L.validateTable("SPEC_SHEETS",
+    [{ category: "module", model: "x", file: "f.pdf", order: 10, always: "false" }])
+    .errors.join(" | ");
+  if (!/linked on the PV modules tab/.test(e)) throw new Error(e);
+});
+
+t("combiner types come from the Combiner rows only", () => {
+  const saved = L.getTable("SPEC_SHEETS");
+  try {
+    L.setTable("SPEC_SHEETS", [
+      { category: "Combiner", model: "IQ Combiner 5", file: "a.pdf", order: 25, always: "false" },
+      { category: "Combiner", model: "IQ Combiner 6", file: "b.pdf", order: 25, always: "false" },
+      { category: "Combiner", model: " iq combiner 5 ", file: "c.pdf", order: 25, always: "false" },
+      { category: "ESS",      model: "Encharge 10",   file: "d.pdf", order: 50, always: "false" }
+    ]);
+    // Deduplicated, ESS excluded.
+    eq(L.combinerTypes(), ["IQ Combiner 5", "IQ Combiner 6"]);
+    eq(L.combinerRow("IQ Combiner 6").file, "b.pdf");
+    eq(L.combinerRow(" iq combiner 5 ").file, "a.pdf");   // first match wins
+    eq(L.combinerRow("Encharge 10"), null);               // not a combiner
+    eq(L.combinerRow(""), null);
+    eq(L.combinerRow("Nope"), null);
+  } finally { L.setTable("SPEC_SHEETS", saved); }
+});
+
+t("a combiner with no model is not offered", () => {
+  const saved = L.getTable("SPEC_SHEETS");
+  try {
+    L.setTable("SPEC_SHEETS", [
+      { category: "Combiner", model: "", file: "a.pdf", order: 25, always: "false" }]);
+    eq(L.combinerTypes(), []);
+  } finally { L.setTable("SPEC_SHEETS", saved); }
+});
+
+t("combiner_type is saved with the project", () => {
+  if (!L.FORM_FIELDS.includes("combiner_type"))
+    throw new Error("combiner_type is not in FORM_FIELDS, so it is never written");
+  eq(L.FIELD_LABELS.combiner_type, "Combiner type");
+});
+
+console.log("\n=== battery, gateway prefixes and multi-select (2.17.0) ===");
+t("the three approved batteries are offered", () =>
+  eq(L.batteryTypes(), ["Powerwall 3", "Enphase 5P", "Enphase 10C"]));
+
+t("battery lookup is exact, and ignores non-ESS rows", () => {
+  eq(L.batteryRow("Enphase 5P").category, "ESS");
+  eq(L.batteryRow(" enphase 10c ").model, "Enphase 10C");
+  eq(L.batteryRow("IQ Combiner 5"), null);      // that is a Combiner
+  eq(L.batteryRow(""), null);
+  eq(L.batteryRow("Powerwall 2"), null);
+});
+
+t("battery_type is saved with the project", () => {
+  if (!L.FORM_FIELDS.includes("battery_type")) throw new Error("not in FORM_FIELDS");
+  eq(L.FIELD_LABELS.battery_type, "Battery");
+});
+
+t("only Gateway and Heat Detector have a filename convention", () =>
+  eq(L.SPEC_PREFIX, { "Gateway": "Gateway_", "Heat Detector": "HD_" }));
+
+t("the prefix is resolved per row, from its category", () => {
+  const f = L.TABLE_SCHEMAS.SPEC_SHEETS.fields.find(x => x.name === "file");
+  eq(L.specPrefixFor(f, { category: "Gateway" }), "Gateway_");
+  eq(L.specPrefixFor(f, { category: "Heat Detector" }), "HD_");
+  eq(L.specPrefixFor(f, { category: "gateway" }), "Gateway_");   // case-insensitive
+  // No agreed convention: list every file rather than guess a prefix.
+  eq(L.specPrefixFor(f, { category: "ESS" }), "");
+  eq(L.specPrefixFor(f, { category: "Combiner" }), "");
+  eq(L.specPrefixFor(f, {}), "");
+});
+
+t("a fixed-prefix column still works the old way", () => {
+  const f = L.TABLE_SCHEMAS.MODULE_DB.fields.find(x => x.name === "specSheet");
+  eq(L.specPrefixFor(f, { name: "anything" }), "module_");
+});
+
+t("a Gateway file is judged against Gateway_, not the module prefix", () => {
+  const base = { category: "Gateway", model: "IQ Gateway", order: 60, always: "false" };
+  const w = f => L.validateTable("SPEC_SHEETS",
+    [Object.assign({}, base, { file: f })]).warnings.join(" ");
+  if (/does not start with/.test(w("Gateway_IQ.pdf"))) throw new Error("correct name flagged");
+  if (!/does not start with 'Gateway_'/.test(w("IQ-Gateway.pdf")))
+    throw new Error("off-convention name accepted: " + w("IQ-Gateway.pdf"));
+});
+
+t("a Heat Detector file is judged against HD_", () => {
+  const base = { category: "Heat Detector", model: "Nest", order: 70, always: "false" };
+  const w = f => L.validateTable("SPEC_SHEETS",
+    [Object.assign({}, base, { file: f })]).warnings.join(" ");
+  if (/does not start with/.test(w("HD_Nest.pdf"))) throw new Error("correct name flagged");
+  if (!/does not start with 'HD_'/.test(w("Nest.pdf"))) throw new Error("accepted");
+});
+
+t("a category with no convention accepts any filename", () => {
+  const w = L.validateTable("SPEC_SHEETS",
+    [{ category: "EV", model: "Charger", file: "anything at all.pdf",
+       order: 80, always: "false" }]).warnings.join(" ");
+  if (/does not start with/.test(w)) throw new Error("wrongly flagged: " + w);
+});
+
+t("Gateway is the only category that may appear more than once", () =>
+  eq(L.SPEC_MULTI, ["Gateway"]));
+
+t("two gateways are accepted, two of anything else are not", () => {
+  const two = L.offeringChecklist("Battery Only",
+    ["ESS", "Gateway", "Gateway"]);
+  eq([two.ok, two.duplicated], [true, []]);
+  eq(two.rows.find(r => r.category === "Gateway").count, 2);
+
+  const twoEss = L.offeringChecklist("Battery Only",
+    ["ESS", "ESS", "Gateway"]);
+  eq([twoEss.ok, twoEss.duplicated], [false, ["ESS"]]);
+});
+
+t("three gateways are fine too — multi is not a limit of two", () => {
+  const c = L.offeringChecklist("Battery Only",
+    ["ESS", "Gateway", "Gateway", "Gateway"]);
+  eq([c.ok, c.rows.find(r => r.category === "Gateway").count], [true, 3]);
+});
+
+t("Gateway is still required — multi does not mean optional", () => {
+  const c = L.offeringChecklist("Battery Only", ["ESS"]);
+  eq([c.ok, c.missing], [false, ["Gateway"]]);
+});
+
+t("the multi flag reaches the checklist rows", () => {
+  const c = L.offeringChecklist("Solar + Battery + EV", []);
+  const multi = c.rows.filter(r => r.multi).map(r => r.category);
+  eq(multi, ["Gateway"]);
+});
+
+t("a battery offering asks for exactly the battery components", () =>
+  eq(L.offeringComponents("Battery Only").map(c => [c.category, c.required, c.multi]),
+     [["ESS", true, false], ["Gateway", true, true], ["Heat Detector", false, false],
+      ["Bollard", false, false], ["System Shutdown Switch", false, false]]));
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });
@@ -1723,12 +1920,20 @@ t("SPEC_SHEETS is registered and seeded", () => {
   if (!rows.length) throw new Error("empty");
   rows.forEach(r => {
     if (!r.category) throw new Error("row missing category");
-    if (!r.file) throw new Error("row missing file");
-    if (!/\.pdf$/i.test(r.file)) throw new Error("not a pdf: " + r.file);
+    // A blank file is legal: the row still defines a selectable type. Anything
+    // non-blank must be a PDF.
+    if (r.file && !/\.pdf$/i.test(r.file)) throw new Error("not a pdf: " + r.file);
   });
 });
 t("seeded rows validate clean", () =>
   eq(L.validateTable("SPEC_SHEETS", L.getTable("SPEC_SHEETS")).errors, []));
+t("several rows may share a blank PDF without counting as duplicates", () => {
+  // The three seeded batteries all have no file yet. If blank counted as a key,
+  // the table would refuse to validate the moment a second type was added.
+  const blanks = L.getTable("SPEC_SHEETS").filter(r => !String(r.file || "").trim());
+  if (blanks.length < 2) throw new Error("expected at least two blank-file rows");
+  eq(L.validateTable("SPEC_SHEETS", L.getTable("SPEC_SHEETS")).errors, []);
+});
 t("duplicate PDF filename is rejected", () => {
   const rows = JSON.parse(JSON.stringify(L.getTable("SPEC_SHEETS")));
   rows.push(JSON.parse(JSON.stringify(rows[0])));
