@@ -1133,7 +1133,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.9.0";
+const APP_VERSION = "2.10.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -4938,18 +4938,36 @@ function jurRender() {
 
 /* ---- inverter model: the same contract as module type -------------- */
 
-/** Rebuild the Inverter model dropdown from RT_MI, keeping any off-list value. */
+/**
+ * Rebuild the Inverter model dropdown from RT_MI.
+ *
+ * One entry per model, not per voltage build — Service voltage already decides
+ * which build is used, so listing both here would ask the same question twice
+ * and let the two answers contradict each other.
+ */
 function miSelectPopulate() {
   const sel = $("inverter_model");
   if (!sel) return;
-  const keep = sel.value;
-  // The value is model + voltage, so a selection is never ambiguous.
+  let keep = sel.value;
+
+  // A value saved before 2.10.0 is a composite key; reduce it to the bare model
+  // so it still selects, rather than showing as an unknown part number.
+  if (keep) {
+    const hit = miResolve(keep);
+    if (hit.row) keep = hit.row.miModel;
+  }
+
+  const models = [];
+  RT_MI.forEach(r => {
+    const m = String(r.miModel || "").trim();
+    if (m && !models.some(x => x.toUpperCase() === m.toUpperCase())) models.push(m);
+  });
+
   sel.innerHTML = '<option value="">(choose a microinverter)</option>' +
-    RT_MI.map(r =>
-      `<option value="${modEscAttr(miKey(r))}">${modEscHtml(r.miModel)} — ` +
-      `${r.Vac} V, ${r.acSize} W, ${r.Iac} A, ${r.minBranch}-${r.maxBranch}/branch` +
-      `</option>`).join("");
-  if (keep && !Array.from(sel.options).some(o => o.value === keep)) {
+    models.map(m =>
+      `<option value="${modEscAttr(m)}">${modEscHtml(m)}</option>`).join("");
+
+  if (keep && !models.some(m => m.toUpperCase() === keep.toUpperCase())) {
     const opt = document.createElement("option");
     opt.value = keep;
     opt.textContent = keep + "  — not in the Microinverters table";
@@ -4968,11 +4986,21 @@ function inverterResolve() {
   const raw = el ? String(el.value).trim() : "";
   if (!raw) return { state: "empty", name: "", mi: null };
   const sv = $("service_voltage");
-  const hit = miResolve(raw, sv ? Number(sv.value) || undefined : undefined);
+  const wantVac = sv ? Number(sv.value) || undefined : undefined;
+  const hit = miResolve(raw, wantVac);
   if (hit.state === "unknown") return { state: "unknown", name: raw, mi: null };
-  if (!hit.row) return { state: "ambiguous", name: raw, mi: null, candidates: hit.candidates };
-  return { state: hit.state === "defaulted" ? "defaulted" : "ok",
-           name: raw, mi: hit.row, defaultedTo: hit.defaultedTo };
+  if (!hit.row) {
+    return { state: "ambiguous", name: raw, mi: null,
+             candidates: hit.candidates, wantVac };
+  }
+  if (hit.state === "defaulted") {
+    // Two different situations, and the designer needs to tell them apart: no
+    // voltage chosen at all, versus a voltage this part is not built for.
+    return { state: "defaulted", name: raw, mi: hit.row,
+             defaultedTo: hit.defaultedTo, candidates: hit.candidates,
+             wantVac, noBuildAtVac: !!wantVac };
+  }
+  return { state: "ok", name: raw, mi: hit.row, wantVac };
 }
 
 /** Whether the project has a usable microinverter. */
@@ -4997,7 +5025,10 @@ function miAddToTable(name) {
   const m = String(name).match(/^(.*?)\s*@\s*(\d{2,4})\s*V\s*$/i) ||
             String(name).match(/^(.*?)\s*\((\d{2,4})\s*V\)\s*$/i);
   const model = m ? m[1].trim() : String(name).trim();
-  const vac = m ? Number(m[2]) : MI_DEFAULT_VAC;
+  // Seed at the voltage the project is actually on, not a blanket default.
+  const sv = $("service_voltage");
+  const vac = m ? Number(m[2])
+                : (Number(sv && sv.value) || MI_DEFAULT_VAC);
   const rows = getTable("RT_MI");
   let row = rows.find(r =>
     String(r.miModel || "").trim().toUpperCase() === model.toUpperCase() &&
@@ -5025,16 +5056,23 @@ function inverterRenderStatus(r) {
   if (!box) return;
   box.textContent = "";
   if (r.state === "empty") {
-    box.textContent = "Iac, AC voltage and the per-branch limits all come from this.";
+    box.textContent = "Iac and the per-branch limits come from this, paired with " +
+                    "the Service voltage below.";
     return;
   }
   if (r.state === "ok" || r.state === "defaulted") {
     const mi = r.mi;
-    box.innerHTML =
-      (r.state === "defaulted"
-        ? `<b style="color:#8a5b00">Defaulted to ${r.defaultedTo} V</b> — `
-        : `<b style="color:#0a7d34">In the reference table</b> — `) +
-      `${mi.Vac} V, Iac ${mi.Iac} A, ${mi.acSize} W, ` +
+    const builds = (r.candidates || []).length > 1
+      ? ` (built in ${r.candidates.map(c => c.Vac + " V").join(" and ")})` : "";
+    const head = r.state !== "defaulted"
+      ? `<b style="color:#0a7d34">${mi.Vac} V build</b> — `
+      : (r.noBuildAtVac
+          ? `<b style="color:#b3261e">No ${r.wantVac} V build of this part</b> — ` +
+            `using ${mi.Vac} V${builds}. Change Service voltage. `
+          : `<b style="color:#8a5b00">No service voltage set</b> — ` +
+            `assumed ${r.defaultedTo} V${builds}. `);
+    box.innerHTML = head +
+      `Iac ${mi.Iac} A, ${mi.acSize} W, ` +
       `${mi.minBranch}&ndash;${mi.maxBranch} modules per branch` +
       (mi.specSheet
         ? ` · spec sheet <b>${modEscHtml(mi.specSheet)}</b>`
