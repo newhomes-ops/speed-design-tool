@@ -628,7 +628,9 @@
             <div><label for="inverter_model">Inverter model</label>
               <select id="inverter_model"></select>
               <div id="inverter_model_status" class="hint" style="margin-top:5px"></div></div>
-            <div><label for="roof_type">Roof type</label><input id="roof_type" autocomplete="off"></div>
+            <div><label for="roof_type">Roof type</label>
+              <input id="roof_type" list="roof_type_list" autocomplete="off">
+              <datalist id="roof_type_list"></datalist></div>
             <div><label for="roof_pitch">Roof pitch</label>
               <input id="roof_pitch" placeholder="5:12" autocomplete="off"></div>
             <div><label for="story_type">Stories</label><input id="story_type" autocomplete="off"></div>
@@ -637,6 +639,7 @@
             <div><label for="service_voltage">Service voltage</label>
               <select id="service_voltage"></select></div>
           </div>
+          <div id="roof_suggest" style="display:none; margin-top:12px"></div>
         </fieldset>
 
         <fieldset>
@@ -1133,7 +1136,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.10.0";
+const APP_VERSION = "2.12.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1490,6 +1493,20 @@ let RT_BREAKERS = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 15
  */
 let RT_JURISDICTION = [];
 
+/**
+ * Roof type to attachment and railing, per state.
+ *
+ * State matters because the attachment is driven by state-adopted wind and snow
+ * loads and by what the local inspectors accept, not by the roof alone. A row
+ * with a blank state is a national default, used only when no row exists for the
+ * project's state.
+ *
+ * Ships EMPTY for the same reason as RT_JURISDICTION: inventing an attachment
+ * for a roof type would put a fastener on a stamped drawing that nobody
+ * approved. It fills as you work — see roofRemember().
+ */
+let RT_ROOF = [];
+
 const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
 
 /**
@@ -1675,6 +1692,46 @@ function pvSizeBranch(o) {
     wireNEC: wireRowNEC.size, wire: wireRow.size, upsizedForVd,
     vdBranch, ocpd, egc: pvGetEGC(ocpd), conduit: pvConduitSize(wireRow.size)
   };
+}
+
+/** Case- and padding-insensitive comparison for free-text reference columns. */
+const sameText = (a, b) =>
+  String(a === undefined || a === null ? "" : a).trim().toLowerCase() ===
+  String(b === undefined || b === null ? "" : b).trim().toLowerCase();
+
+/**
+ * Find the attachment and railing for a roof type in a state.
+ *
+ * The project's state wins over a national default row, so a state-specific
+ * fastener is never overridden by the generic one.
+ */
+function roofLookup(state, roofType) {
+  const rt = String(roofType || "").trim();
+  if (!rt) return { row: null, matchedOn: null };
+
+  const st = String(state || "").trim();
+  if (st) {
+    const hit = RT_ROOF.find(r => sameText(r.state, st) && sameText(r.roofType, rt));
+    if (hit) return { row: hit, matchedOn: "state" };
+  }
+  // Blank state = applies anywhere. Only reached when the state has no row.
+  const any = RT_ROOF.find(r =>
+    !String(r.state || "").trim() && sameText(r.roofType, rt));
+  return any ? { row: any, matchedOn: "any" } : { row: null, matchedOn: null };
+}
+
+/** Roof types known for a state, plus the national defaults. */
+function roofTypesFor(state) {
+  const st = String(state || "").trim();
+  const out = [];
+  RT_ROOF.forEach(r => {
+    const rt = String(r.roofType || "").trim();
+    if (!rt) return;
+    const rowState = String(r.state || "").trim();
+    if (rowState && st && !sameText(rowState, st)) return;
+    if (!out.some(x => sameText(x, rt))) out.push(rt);
+  });
+  return out;
 }
 
 /** Five-digit ZIP, ignoring a +4 suffix and stray spaces. */
@@ -2149,6 +2206,31 @@ const TABLE_SCHEMAS = {
         label: "Spec sheet PDF" }
     ]
   },
+  RT_ROOF: {
+    label: "Roof, attachment & railing",
+    note: "Which attachment and railing go with a roof type, per state — the " +
+          "attachment follows state-adopted wind and snow loads, not the roof " +
+          "alone. Leave State blank for a row that applies anywhere; a row for " +
+          "the project's state always wins over it. Ships empty: press Remember " +
+          "this roof on the Project tab once you have filled the fields in, and " +
+          "every later project with that roof in that state is filled for you. " +
+          "The two spec-sheet columns are separate because a row names two " +
+          "products — files starting 'Attachment_' and 'Racking_' respectively. " +
+          "For a combined system datasheet, set it on the attachment and leave " +
+          "the railing blank; it is only merged once either way.",
+    keyFields: ["state", "roofType"],
+    allowEmpty: true,
+    fields: [
+      { name: "state",      type: "text", label: "State" },
+      { name: "roofType",   type: "text", required: true, label: "Roof type" },
+      { name: "attachment", type: "text", label: "Attachment" },
+      { name: "attachmentSheet", type: "specfile", prefix: "Attachment_",
+        label: "Attachment spec sheet" },
+      { name: "railing",    type: "text", label: "Railing" },
+      { name: "railingSheet",    type: "specfile", prefix: "Racking_",
+        label: "Railing spec sheet" }
+    ]
+  },
   RT_JURISDICTION: {
     label: "AHJ & utility",
     note: "Fills the AHJ and Utility fields from the service address. A ZIP row " +
@@ -2479,6 +2561,7 @@ function getTable(name) {
   switch (name) {
     case "SPEC_SHEETS": return SPEC_SHEETS;
     case "MODULE_DB": return MODULE_DB;
+    case "RT_ROOF": return RT_ROOF;
     case "RT_JURISDICTION": return RT_JURISDICTION;
     case "RT_MI": return RT_MI;
     case "RT_LOCATION": return RT_LOCATION;
@@ -2497,6 +2580,7 @@ function setTable(name, rows) {
   switch (name) {
     case "SPEC_SHEETS": SPEC_SHEETS = rows; break;
     case "MODULE_DB": MODULE_DB = rows; break;
+    case "RT_ROOF": RT_ROOF = rows; break;
     case "RT_JURISDICTION": RT_JURISDICTION = rows; break;
     case "RT_MI": RT_MI = rows; break;
     case "RT_LOCATION": RT_LOCATION = rows; break;
@@ -2523,11 +2607,11 @@ function blankRow(name) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = Object.assign({}, SPEED_LOGIC, {
     RT_LOCATION, RT_AMPACITY, RT_TEMP_CORR, RT_HEIGHT_ADDER, RT_FILL_DERATING,
-    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION,
+    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION, RT_ROOF,
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
-    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
+    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip, roofLookup, roofTypesFor, sameText,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -3534,6 +3618,11 @@ function wireControls() {
   ["ahj_name", "utility_name"].forEach(id =>
     $(id).addEventListener("change", jurRender));
 
+  // The roof type, paired with the state, decides attachment and railing.
+  $("roof_type").addEventListener("change", roofSync);
+  ["attachment_type", "railing_type"].forEach(id =>
+    $(id).addEventListener("change", roofRender));
+
   // Once the voltage is set by hand, stop adopting the inverter's Vac — and
   // re-resolve, because the voltage is what picks between two builds.
   $("service_voltage").addEventListener("change", e => {
@@ -4015,7 +4104,42 @@ function equipmentSheets(project) {
     });
   }
 
-  return out;
+  // ---- roof: attachment and railing -----------------------------------
+  // One row names two products, so it carries two sheets. A combined system
+  // datasheet set on both columns must still merge once, hence the dedupe.
+  const roof = roofLookup(project.state, project.roof_type).row;
+  if (roof) {
+    [["Attachment", roof.attachment, roof.attachmentSheet, 30],
+     ["Railing",    roof.railing,    roof.railingSheet,    40]]
+      .forEach(([category, model, file, order]) => {
+        const name = String(model || "").trim();
+        const sheet = String(file || "").trim();
+        if (!name && !sheet) return;          // this roof has no such product
+        if (sheet) {
+          out.push({ category, model: name || "—", file: sheet, order,
+                     source: "RT_ROOF",
+                     why: `linked to ${category.toLowerCase()} "${name || sheet}"` +
+                          ` for ${roof.roofType}${roof.state ? " in " + roof.state : ""}` });
+        } else {
+          out.push({ category, model: name, file: "", order,
+                     source: "RT_ROOF",
+                     why: `"${name}" has no spec sheet set — add one on the ` +
+                          `Roof, attachment & railing tab`,
+                     problem: true });
+        }
+      });
+  }
+
+  // A file named on two rows would otherwise be merged twice. Keep the first,
+  // which is the lower merge order, and drop the later duplicate.
+  const seenFile = new Set();
+  return out.filter(r => {
+    const f = String(r.file || "").trim().toLowerCase();
+    if (!f) return true;                       // problem rows carry no file
+    if (seenFile.has(f)) return false;
+    seenFile.add(f);
+    return true;
+  });
 }
 
 /** Which spec sheets does this project's equipment call for? */
@@ -4819,6 +4943,159 @@ function moduleRenderStatus(r) {
   box.appendChild(btn);
 }
 
+/* ---- roof type to attachment and railing ----------------------------
+
+   Fills a blank field, asks about a conflicting one. That split is deliberate:
+   a blank attachment means the designer has not chosen yet, so filling it saves
+   a lookup; a different attachment means they chose something else on purpose,
+   and silently replacing it would be the tool overruling a person.
+
+   Unlike the AHJ table this is your own standard, not an outside guess, which is
+   why filling a blank is acceptable here at all.
+*/
+
+/** Offer the roof types this state has rows for. */
+function roofRefreshList() {
+  const dl = $("roof_type_list");
+  if (!dl) return;
+  const st = $("state") ? $("state").value : "";
+  dl.innerHTML = roofTypesFor(st)
+    .map(rt => `<option value="${modEscAttr(rt)}"></option>`).join("");
+}
+
+/** Add or update the row for this state and roof type from the form. */
+function roofRemember() {
+  const st = $("state").value.trim();
+  const rt = $("roof_type").value.trim();
+  const att = $("attachment_type").value.trim();
+  const rail = $("railing_type").value.trim();
+  if (!rt) { showMsg("Enter a roof type first.", "err"); return; }
+  if (!att && !rail) {
+    showMsg("Fill in the attachment or the railing first — there is nothing to " +
+            "remember yet.", "err");
+    return;
+  }
+  const rows = getTable("RT_ROOF");
+  let row = rows.find(r => sameText(r.state, st) && sameText(r.roofType, rt));
+  const isNew = !row;
+  if (isNew) { row = blankRow("RT_ROOF"); rows.push(row); }
+  row.state = st; row.roofType = rt; row.attachment = att; row.railing = rail;
+  RD_DIRTY.add("RT_ROOF");
+  if (typeof rdCurrent !== "undefined" && rdCurrent === "RT_ROOF") {
+    rdRender(); rdValidate(true);
+  }
+  if (typeof rdPopulateSelector === "function") rdPopulateSelector();
+  roofRefreshList(); roofRender();
+  showMsg(`${isNew ? "Added" : "Updated"} ${rt}${st ? " in " + st : " (any state)"} ` +
+          `in Roof, attachment & railing. Press Save to folder on the Reference ` +
+          `Data tab to keep it.`, "ok");
+}
+
+/**
+ * Copy a matched row into the form. Only from the Use button, or into a blank.
+ * Does not repaint — the caller does, so the strip is never drawn twice.
+ */
+function roofApply(row, blanksOnly) {
+  let filled = 0;
+  [["attachment_type", row.attachment], ["railing_type", row.railing]]
+    .forEach(([id, v]) => {
+      if (!v) return;
+      const el = $(id);
+      if (!el) return;
+      if (blanksOnly && el.value.trim()) return;
+      if (el.value !== v) { el.value = v; filled++; }
+    });
+  return filled;
+}
+
+/** Draw the roof suggestion strip, filling blanks as a side effect. */
+function roofRender() {
+  const box = $("roof_suggest");
+  if (!box) return;
+  box.textContent = "";
+
+  const st = $("state").value.trim(), rt = $("roof_type").value.trim();
+  const att = $("attachment_type").value.trim(), rail = $("railing_type").value.trim();
+  const hit = roofLookup(st, rt);
+
+  if (!hit.row) {
+    // Nothing known. Offer to record it, which is how the table gets built.
+    if (!rt || (!att && !rail)) { box.style.display = "none"; return; }
+    box.style.display = "block";
+    box.className = "msg show warn";
+    const span = document.createElement("span");
+    span.innerHTML = `<b>${modEscHtml(rt)}</b>` +
+      (st ? ` in <b>${modEscHtml(st)}</b>` : "") +
+      ` is not in <b>Roof, attachment &amp; railing</b> yet.`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Remember this roof";
+    btn.style.cssText = "margin-left:10px;padding:2px 9px";
+    btn.addEventListener("click", roofRemember);
+    box.appendChild(span); box.appendChild(btn);
+    return;
+  }
+
+  const r = hit.row;
+  const conflicts = [];
+  if (r.attachment && att && !sameText(r.attachment, att)) {
+    conflicts.push(`attachment <b>${modEscHtml(r.attachment)}</b> not <b>${modEscHtml(att)}</b>`);
+  }
+  if (r.railing && rail && !sameText(r.railing, rail)) {
+    conflicts.push(`railing <b>${modEscHtml(r.railing)}</b> not <b>${modEscHtml(rail)}</b>`);
+  }
+
+  box.style.display = "block";
+  const span = document.createElement("span");
+
+  if (conflicts.length) {
+    box.className = "msg show warn";
+    span.innerHTML =
+      (hit.matchedOn === "any"
+        ? `The <b>any state</b> row for <b>${modEscHtml(r.roofType)}</b> says `
+        : `<b>${modEscHtml(r.roofType)}</b> in <b>${modEscHtml(r.state)}</b> says `) +
+      conflicts.join(" and ") + `. The form was left as you set it.`;
+    box.appendChild(span);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Use the table";
+    btn.style.cssText = "margin-left:10px;padding:2px 9px";
+    btn.addEventListener("click", () => {
+      const nn = roofApply(r, false);
+      roofRender();
+      showMsg(nn ? `Set ${nn} field(s) from Roof, attachment & railing.`
+                 : "Nothing to change.", "ok");
+    });
+    box.appendChild(btn);
+  } else {
+    box.className = "msg show " + (hit.matchedOn === "any" ? "warn" : "ok");
+    span.innerHTML =
+      (hit.matchedOn === "any"
+        ? `No <b>${modEscHtml(st || "state")}</b> row — using the <b>any state</b> ` +
+          `default for <b>${modEscHtml(r.roofType)}</b>: `
+        : `<b>${modEscHtml(r.roofType)}</b> in <b>${modEscHtml(r.state)}</b>: `) +
+      `attachment <b>${modEscHtml(r.attachment || "—")}</b>, ` +
+      `railing <b>${modEscHtml(r.railing || "—")}</b>.`;
+    box.appendChild(span);
+  }
+
+  const upd = document.createElement("button");
+  upd.type = "button";
+  upd.textContent = "Update from form";
+  upd.style.cssText = "margin-left:8px;padding:2px 9px";
+  upd.addEventListener("click", roofRemember);
+  box.appendChild(upd);
+}
+
+/** Fill a blank attachment or railing from the table, then repaint. */
+function roofSync() {
+  roofRefreshList();
+  const hit = roofLookup($("state").value, $("roof_type").value);
+  // Blanks only: a value the designer already set is never overwritten.
+  if (hit.row) roofApply(hit.row, true);
+  roofRender();
+}
+
 /* ---- AHJ and utility from the address ------------------------------
 
    Suggested, never auto-filled. The AHJ goes on a PE-stamped permit set, and a
@@ -5156,6 +5433,7 @@ function moduleSyncDownstream() {
   moduleRenderStatus(r);
   inverterRenderStatus(inv);
   jurRender();
+  roofSync();
   return r;
 }
 

@@ -3,6 +3,123 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.12.0 — 2026-08-05
+
+### Spec sheet columns on Roof, attachment & railing
+
+**Two** columns, not one — a row names two products, and a single filename could
+not say which of them it documents.
+
+| Column | Prefix |
+|---|---|
+| Attachment spec sheet | `Attachment_` |
+| Railing spec sheet | `Racking_` |
+
+Both optional. Each is validated against its own prefix, so a `Racking_` file in
+the attachment column is flagged rather than accepted. Case is ignored, so
+`racking_xr10.pdf` is fine.
+
+A test pins `Racking_` against the truncated `Rackin_`, because prefix matching
+compares characters literally and neither name satisfies the other — the two were
+briefly confused during this change.
+
+### Both sheets reach the iPermit package
+
+`equipmentSheets` now contributes four categories in merge order:
+
+| Order | Category | From |
+|---|---|---|
+| 10 | Module | PV modules |
+| 20 | Inverter | Microinverters |
+| 30 | Attachment | Roof, attachment & railing |
+| 40 | Railing | Roof, attachment & railing |
+
+Each row's reason names the roof and state — *"linked to attachment
+'IronRidge HUG' for Comp shingle in TX"* — so a built package can be audited
+after the fact.
+
+### Combined system datasheets are merged once
+
+Some manufacturers publish one PDF covering the attachment and the rail
+together; `SPEC SHEET - Protea x Pegasus.pdf` in the template folder is exactly
+that. Set it on **both** columns and it still merges **once**.
+
+The dedupe keeps the **lower** merge order, so if a module and an attachment ever
+named the same file, the module's copy at 10 wins and the attachment's at 30 is
+dropped. Without this a stamped permit set would carry duplicate pages.
+
+### A product with no sheet is flagged, and nothing is invented
+
+An attachment with no linked PDF produces a flagged row, the same as modules and
+inverters. A roof with no railing at all produces **no railing row** — absence
+and "not yet linked" are different states and are reported differently.
+
+### Tests
+
+265 passing, up from 254. Eleven new, including the combined-datasheet dedupe,
+the dedupe keeping the earlier merge order, per-column prefix validation, and the
+`Racking_` prefix rejecting a truncated `Rackin_`.
+
+## 2.11.0 — 2026-08-05
+
+### New table: Roof, attachment & railing
+
+| State | Roof type | Attachment | Railing |
+|---|---|---|---|
+| TX | Comp shingle | IronRidge HUG | XR-10 |
+| CA | Comp shingle | Pegasus InstaFLASH | XR-100 |
+| *(blank)* | Comp shingle | IronRidge FlashFoot2 | XR-10 |
+
+State is a **key column**, not a filter, because the attachment follows
+state-adopted wind and snow loads and what local inspectors accept — the same
+roof genuinely takes a different fastener in Texas than in California.
+
+A row with a **blank state applies anywhere**, and is used only when the
+project's state has no row of its own. A state row always wins, so a
+state-specific fastener can never be overridden by the generic one.
+
+The `Roof type` field now offers the types known for the project's state, and
+still accepts anything typed — the table starts empty, so a dropdown would have
+locked designers out on day one.
+
+### Fills a blank, asks about a conflict
+
+- **Attachment or railing blank** → filled from the table.
+- **Already set to something else** → the form is left alone, the strip says what
+  the table expected, and a **Use the table** button applies it.
+
+That split is the point. A blank field means the designer has not chosen yet, so
+filling it saves a lookup. A *different* value means they chose deliberately, and
+overwriting it would be the tool overruling a person.
+
+This differs from the AHJ table, which only ever suggests. The reason is that
+this table is **your own standard**, whereas the AHJ is an outside fact that ends
+up on a stamped drawing.
+
+### Ships empty, fills as you work
+
+Same approach as AHJ & utility, for the same reason: inventing an attachment
+would put a fastener on a stamped drawing that nobody approved. **Remember this
+roof** writes the row once you have filled the three fields in.
+
+`allowEmpty` now covers two tables, and the test that guarded it was tightened
+rather than loosened — it asserts the permitted list is *exactly*
+`["RT_JURISDICTION", "RT_ROOF"]`, so a third cannot be added quietly.
+
+### Fixed
+
+`roofSync` painted the suggestion strip twice per change — `roofApply` repainted,
+then the caller repainted again. Harmless in a browser, but it is the shape of
+bug that turns into duplicated event listeners later, so `roofApply` no longer
+renders and the callers do.
+
+### Tests
+
+254 passing, up from 239. Fifteen new, including the same roof giving different
+attachments in two states, the any-state row losing to a state row, an unknown
+roof returning nothing rather than the nearest match, and roof types being
+filtered to the state.
+
 ## 2.10.0 — 2026-08-05
 
 ### The inverter dropdown lists models, not voltage builds
