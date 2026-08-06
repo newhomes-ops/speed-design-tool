@@ -1153,8 +1153,8 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.17.0";
-const APP_BUILD   = "2026-08-05";
+const APP_VERSION = "2.17.1";
+const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
   templateFolder: "Project Template",
@@ -5843,6 +5843,66 @@ function jurRender() {
  * which build is used, so listing both here would ask the same question twice
  * and let the two answers contradict each other.
  */
+/** Fill the Combiner type dropdown from the Combiner rows of Spec sheets. */
+function combinerSelectPopulate() {
+  const sel = $("combiner_type");
+  if (!sel) return;
+  const keep = sel.value;
+  const types = combinerTypes();
+  sel.innerHTML = '<option value="">(choose a combiner)</option>' +
+    types.map(t => `<option value="${modEscAttr(t)}">${modEscHtml(t)}</option>`).join("");
+  if (keep && !types.some(t => sameText(t, keep))) {
+    const opt = document.createElement("option");
+    opt.value = keep;
+    opt.textContent = keep + "  \u2014 no Combiner row in Spec sheets";
+    sel.appendChild(opt);
+  }
+  sel.value = keep;
+}
+
+/**
+ * Fill the Battery dropdown from the ESS rows of Spec sheets, and enable it only
+ * when the chosen product offering actually includes a battery.
+ */
+function batterySelectPopulate() {
+  const sel = $("battery_type");
+  if (!sel) return;
+  const keep = sel.value;
+  const types = batteryTypes();
+  sel.innerHTML = '<option value="">(choose a battery)</option>' +
+    types.map(t => `<option value="${modEscAttr(t)}">${modEscHtml(t)}</option>`).join("");
+  if (keep && !types.some(t => sameText(t, keep))) {
+    const opt = document.createElement("option");
+    opt.value = keep;
+    opt.textContent = keep + "  \u2014 no ESS row in Spec sheets";
+    sel.appendChild(opt);
+  }
+  sel.value = keep;
+  batteryRefreshState();
+}
+
+/** Grey the Battery field out when the offering has no battery in it. */
+function batteryRefreshState() {
+  const sel = $("battery_type"), note = $("battery_note");
+  if (!sel) return;
+  const off = offeringByName(($("product_offering") || {}).value || "");
+  const included = !!(off && off.battery);
+  sel.disabled = !included;
+  if (note) {
+    note.textContent = !off
+      ? "Choose a product offering first."
+      : (included
+          ? "Required \u2014 this offering includes a battery."
+          : "Not used \u2014 this offering has no battery.");
+  }
+  // A battery left over from a previous offering would be written to
+  // project.json and pull an ESS datasheet into a solar-only package.
+  if (!included && sel.value) {
+    sel.value = "";
+    showMsg("Cleared the battery \u2014 the chosen offering does not include one.", "warn");
+  }
+}
+
 function miSelectPopulate() {
   const sel = $("inverter_model");
   if (!sel) return;

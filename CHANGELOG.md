@@ -3,6 +3,60 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.17.1 — 2026-08-06
+
+### Fixes a startup crash I shipped
+
+`batteryRefreshState is not defined` — the tool failed while wiring the interface
+and did not start.
+
+Three functions were **missing entirely**: `combinerSelectPopulate`,
+`batterySelectPopulate` and `batteryRefreshState`. They were referenced from
+`wireControls` and `pvPopulateSelectors` but never declared.
+
+**How it happened.** In 2.10.0 a doc comment was reformatted from one line to a
+block. The 2.16.0 edit that added `combinerSelectPopulate` anchored on the old
+one-line text, found nothing, and made no change — silently, because the edit did
+not assert that its anchor matched. 2.17.0 then anchored on that missing block and
+failed the same way. Two releases, one unchecked assumption.
+
+**2.16.0 was affected too.** The combiner dropdown never worked; the crash only
+became obvious in 2.17.0 because `wireControls` referenced a missing name
+directly rather than through a guarded phase.
+
+### New: startup smoke test
+
+`tests/smoke-startup.js` runs the real `init()` against a stubbed DOM.
+
+The unit tests cover pure logic and never touch the DOM. A syntax check proves the
+file parses. **Neither can catch a function that is called but never defined** —
+that only appears in a browser. This closes that gap:
+
+```
+$ node tests/smoke-startup.js
+ok — init() completed, 54 listeners wired across 54 elements
+```
+
+Verified against the bug itself: with `batteryRefreshState` deleted it reports
+
+```
+FAIL — startup did not complete cleanly:
+  wiring the interface: batteryRefreshState is not defined
+      at wireControls (SPEED.html:2849:52)
+```
+
+— the same message a designer sees, before release rather than after.
+
+It also intercepts `fatal()`, so a startup failure that the tool *handles*
+gracefully still fails the test rather than looking like a pass.
+
+**Run both before every release:**
+
+```
+node tests/run-tests.js        # 318 logic tests
+node tests/smoke-startup.js    # does it actually start
+```
+
 ## 2.17.0 — 2026-08-06
 
 ### Attachment and railing adopt the roof type, and stay editable
