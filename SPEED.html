@@ -1154,7 +1154,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.18.0";
+const APP_VERSION = "2.19.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1530,6 +1530,28 @@ let RT_JURISDICTION = [];
  */
 let RT_ROOF = [];
 
+/**
+ * Filename prefix per equipment, and the single source for every spec-sheet
+ * dropdown in the tool.
+ *
+ * Editable, because the convention is yours rather than the tool's. A blank
+ * prefix means "list every PDF in the folder" — which is exactly how attachment
+ * datasheets ended up selectable for a battery, so blanks are worth filling in.
+ */
+let RT_PREFIX = [
+  {equipment:"Module",                 prefix:"Module_"},
+  {equipment:"Inverter",               prefix:"Inverter_"},
+  {equipment:"Combiner",               prefix:"Combiner_"},
+  {equipment:"Attachment",             prefix:"Attachment_"},
+  {equipment:"Racking",                prefix:"Racking_"},
+  {equipment:"ESS",                    prefix:"ESS_"},
+  {equipment:"Gateway",                prefix:"Gateway_"},
+  {equipment:"Heat Detector",          prefix:"HD_"},
+  {equipment:"Bollard",                prefix:"Bollard_"},
+  {equipment:"System Shutdown Switch", prefix:"SSS_"},
+  {equipment:"EV",                     prefix:"EV_"}
+];
+
 const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
 
 /**
@@ -1729,13 +1751,13 @@ function pvSizeBranch(o) {
  * column. A category with no agreed convention returns "" and lists every file.
  */
 function specPrefixFor(field, row) {
-  if (field && field.prefixByCategory) {
-    const cat = String((row && row.category) || "").trim();
-    const hit = Object.keys(field.prefixByCategory)
-      .find(k => String(k).trim().toLowerCase() === cat.toLowerCase());
-    return hit ? field.prefixByCategory[hit] : "";
-  }
-  return (field && field.prefix) || "";
+  if (!field) return "";
+  // A column tied to one equipment names it directly. Spec sheets holds several,
+  // so it takes the category from the row. Either way the prefix itself comes
+  // from RT_PREFIX, never from the column.
+  const cat = field.prefixCategory ||
+              (field.categoryFromRow ? String((row && row.category) || "").trim() : "");
+  return cat ? categoryPrefix(cat) : "";
 }
 
 /** Case- and padding-insensitive comparison for free-text reference columns. */
@@ -2197,6 +2219,12 @@ const SPEC_CATEGORIES = [
   "System Shutdown Switch", "EV"
 ];
 
+/** Everything that has a spec sheet anywhere in the tool, so everything that
+ *  can carry a filename prefix. */
+const PREFIXABLE_EQUIPMENT = [
+  "Module", "Inverter", "Attachment", "Racking"
+].concat(SPEC_CATEGORIES);
+
 /**
  * Filename prefix per category, for the Spec sheets picker.
  *
@@ -2204,13 +2232,7 @@ const SPEC_CATEGORIES = [
  * absent lists every PDF in the folder rather than a guessed prefix — inventing
  * one would hide correctly named files from the dropdown.
  */
-const SPEC_PREFIX = {
-  "Gateway":                "Gateway_",
-  "Heat Detector":          "HD_",
-  "Bollard":                "Bollard_",
-  "System Shutdown Switch": "SSS_",
-  "EV":                     "EV_"
-};
+/* Prefixes now live in the editable RT_PREFIX table — see categoryPrefix(). */
 
 /**
  * Categories where more than one sheet is legitimate.
@@ -2222,22 +2244,17 @@ const SPEC_PREFIX = {
 const SPEC_MULTI = ["Attachment", "Racking", "Gateway"];
 
 /**
- * The filename prefix for a category, read from wherever that category is
- * actually defined rather than restated here. Four copies of "Attachment_" in
- * four files is how they drift apart.
+ * The filename prefix for an equipment category.
+ *
+ * One lookup, one table. Every spec-sheet dropdown in the tool goes through
+ * here, so changing a prefix on the Spec sheet prefixes tab changes every
+ * dropdown at once rather than leaving copies to drift apart.
  */
 function categoryPrefix(category) {
-  const c = String(category || "").trim().toLowerCase();
-  const fromField = (table, field) => {
-    const f = ((TABLE_SCHEMAS[table] || {}).fields || []).find(x => x.name === field);
-    return (f && f.prefix) || "";
-  };
-  if (c === "module")     return fromField("MODULE_DB", "specSheet");
-  if (c === "inverter")   return fromField("RT_MI", "specSheet");
-  if (c === "attachment") return fromField("RT_ROOF", "attachmentSheet");
-  if (c === "racking")    return fromField("RT_ROOF", "railingSheet");
-  const hit = Object.keys(SPEC_PREFIX).find(k => k.toLowerCase() === c);
-  return hit ? SPEC_PREFIX[hit] : "";
+  const c = String(category || "").trim();
+  if (!c) return "";
+  const row = RT_PREFIX.find(r => sameText(r.equipment, c));
+  return row ? String(row.prefix || "").trim() : "";
 }
 
 /**
@@ -2467,7 +2484,7 @@ const TABLE_SCHEMAS = {
       // A blank PDF cannot be ticked, so the offering checklist still blocks the
       // build — the safety sits where it matters rather than at data entry.
       { name: "file",     type: "specfile", label: "Spec sheet PDF",
-        prefixByCategory: SPEC_PREFIX },
+        categoryFromRow: true },
       { name: "order",    type: "int",  required: true, label: "Merge order" },
       { name: "always",   type: "text", label: "Always (true/false)" }
     ]
@@ -2495,8 +2512,24 @@ const TABLE_SCHEMAS = {
       { name: "Wptc",    type: "number", nullable: true, label: "Wptc (W)" },
       { name: "length",  type: "number", label: "Length (in)" },
       { name: "width",   type: "number", label: "Width (in)" },
-      { name: "specSheet", type: "specfile", prefix: "module_",
+      { name: "specSheet", type: "specfile", prefixCategory: "Module",
         label: "Spec sheet PDF" }
+    ]
+  },
+  RT_PREFIX: {
+    label: "Spec sheet prefixes",
+    note: "The filename each equipment's spec-sheet dropdown is filtered to. " +
+          "Every dropdown in the tool reads this table, so a change here applies " +
+          "everywhere at once. Matching ignores case. Leave a prefix blank and " +
+          "that dropdown lists EVERY PDF in the folder — which is how an " +
+          "attachment datasheet became selectable for a battery. A file that " +
+          "does not match is still kept and flagged rather than dropped, so " +
+          "tightening a prefix never loses data silently.",
+    keyFields: ["equipment"],
+    fields: [
+      { name: "equipment", type: "text", required: true, label: "Equipment",
+        choices: PREFIXABLE_EQUIPMENT },
+      { name: "prefix",    type: "text", label: "Filename starts with" }
     ]
   },
   RT_ROOF: {
@@ -2517,10 +2550,10 @@ const TABLE_SCHEMAS = {
       { name: "state",      type: "text", label: "State" },
       { name: "roofType",   type: "text", required: true, label: "Roof type" },
       { name: "attachment", type: "text", label: "Attachment" },
-      { name: "attachmentSheet", type: "specfile", prefix: "Attachment_",
+      { name: "attachmentSheet", type: "specfile", prefixCategory: "Attachment",
         label: "Attachment spec sheet" },
       { name: "railing",    type: "text", label: "Railing" },
-      { name: "railingSheet",    type: "specfile", prefix: "Racking_",
+      { name: "railingSheet",    type: "specfile", prefixCategory: "Racking",
         label: "Railing spec sheet" }
     ]
   },
@@ -2566,7 +2599,7 @@ const TABLE_SCHEMAS = {
       { name: "Iac",       type: "number", required: true, label: "Iac (A)" },
       { name: "Vac",       type: "int", required: true, label: "Vac (V)",
         choices: SERVICE_VOLTAGES },
-      { name: "specSheet", type: "specfile", prefix: "Inverter_",
+      { name: "specSheet", type: "specfile", prefixCategory: "Inverter",
         label: "Spec sheet PDF" }
     ]
   },
@@ -2867,6 +2900,7 @@ function getTable(name) {
   switch (name) {
     case "SPEC_SHEETS": return SPEC_SHEETS;
     case "MODULE_DB": return MODULE_DB;
+    case "RT_PREFIX": return RT_PREFIX;
     case "RT_ROOF": return RT_ROOF;
     case "RT_JURISDICTION": return RT_JURISDICTION;
     case "RT_MI": return RT_MI;
@@ -2886,6 +2920,7 @@ function setTable(name, rows) {
   switch (name) {
     case "SPEC_SHEETS": SPEC_SHEETS = rows; break;
     case "MODULE_DB": MODULE_DB = rows; break;
+    case "RT_PREFIX": RT_PREFIX = rows; break;
     case "RT_ROOF": RT_ROOF = rows; break;
     case "RT_JURISDICTION": RT_JURISDICTION = rows; break;
     case "RT_MI": RT_MI = rows; break;
@@ -2913,7 +2948,7 @@ function blankRow(name) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = Object.assign({}, SPEED_LOGIC, {
     RT_LOCATION, RT_AMPACITY, RT_TEMP_CORR, RT_HEIGHT_ADDER, RT_FILL_DERATING,
-    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION, RT_ROOF, SPEC_SHEETS,
+    RT_EGC, RT_ESS, RT_BREAKERS, RT_MI, MODULE_DB, RT_JURISDICTION, RT_ROOF, SPEC_SHEETS, RT_PREFIX,
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
@@ -2922,7 +2957,7 @@ if (typeof module !== "undefined" && module.exports) {
     offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
     SPEC_CATEGORIES, SPEC_CATEGORIES_OWNED_ELSEWHERE, SPEC_CHOSEN_ON_PROJECT,
     combinerTypes, combinerRow,
-    SPEC_PREFIX, SPEC_MULTI, batteryTypes, batteryRow, categoryPrefix,
+    SPEC_MULTI, PREFIXABLE_EQUIPMENT, batteryTypes, batteryRow, categoryPrefix,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,

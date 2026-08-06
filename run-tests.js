@@ -329,10 +329,11 @@ t("a module absent from the table is an error, never a near-miss match", () => {
 });
 
 console.log("\n=== microinverter spec sheet linking (2.5.0) ===");
-t("RT_MI has a filtered spec-sheet picker with the Inverter_ prefix", () => {
+t("RT_MI's picker is tied to the Inverter prefix", () => {
   const f = L.TABLE_SCHEMAS.RT_MI.fields.find(x => x.name === "specSheet");
   if (!f) throw new Error("no specSheet field on RT_MI");
-  eq([f.type, f.prefix], ["specfile", "Inverter_"]);
+  eq([f.type, f.prefixCategory], ["specfile", "Inverter"]);
+  eq(L.specPrefixFor(f, {}), "Inverter_");
 });
 
 t("every microinverter row has a specSheet field", () => {
@@ -373,11 +374,11 @@ t("an off-convention inverter filename warns but does not block", () => {
     throw new Error("expected a convention warning, got " + JSON.stringify(r.warnings));
 });
 
-t("modules are still judged against module_", () => {
+t("modules are still judged against the Module prefix", () => {
   const rows = JSON.parse(JSON.stringify(L.MODULE_DB));
   rows[0].specSheet = "Inverter_IQ8HC.pdf";
   const r = L.validateTable("MODULE_DB", rows);
-  if (!r.warnings.some(x => x.includes("does not start with 'module_'")))
+  if (!r.warnings.some(x => x.includes("does not start with 'Module_'")))
     throw new Error("module prefix check regressed: " + JSON.stringify(r.warnings));
 });
 
@@ -697,7 +698,7 @@ t("exactly two columns are constrained to a fixed set", () => {
     (sc.fields || []).forEach(f => {
       if (Array.isArray(f.choices)) constrained.push(name + "." + f.name);
     }));
-  eq(constrained.sort(), ["RT_MI.Vac", "SPEC_SHEETS.category"]);
+  eq(constrained.sort(), ["RT_MI.Vac", "RT_PREFIX.equipment", "SPEC_SHEETS.category"]);
 });
 
 t("a service voltage from the dropdown always picks a variant", () => {
@@ -1131,14 +1132,15 @@ t("an empty roof table invents nothing", () => {
 });
 
 console.log("\n=== roof spec sheets reach the package (2.12.0) ===");
-t("two pickers, one per product, with their own prefixes", () => {
+t("two pickers, one per product, tied to different equipment", () => {
   const f = L.TABLE_SCHEMAS.RT_ROOF.fields;
   const att = f.find(x => x.name === "attachmentSheet");
   const rail = f.find(x => x.name === "railingSheet");
-  eq([att.type, att.prefix], ["specfile", "Attachment_"]);
-  eq([rail.type, rail.prefix], ["specfile", "Racking_"]);
+  eq([att.type, att.prefixCategory], ["specfile", "Attachment"]);
+  eq([rail.type, rail.prefixCategory], ["specfile", "Racking"]);
+  eq([L.specPrefixFor(att, {}), L.specPrefixFor(rail, {})], ["Attachment_", "Racking_"]);
   // One column could not say which of the two products it documents.
-  if (att.prefix === rail.prefix) throw new Error("prefixes collide");
+  if (att.prefixCategory === rail.prefixCategory) throw new Error("prefixes collide");
 });
 
 t("each roof sheet column is validated against its own prefix", () => {
@@ -1457,19 +1459,58 @@ t("battery_type is saved with the project", () => {
   eq(L.FIELD_LABELS.battery_type, "Battery");
 });
 
-t("the agreed filename conventions", () =>
-  eq(L.SPEC_PREFIX, {
-    "Gateway": "Gateway_", "Heat Detector": "HD_", "Bollard": "Bollard_",
-    "System Shutdown Switch": "SSS_", "EV": "EV_" }));
-
-t("Combiner and ESS have no convention, so they list every file", () => {
-  eq(L.categoryPrefix("Combiner"), "");
-  eq(L.categoryPrefix("ESS"), "");
+t("the prefixes are an editable table, not hardcoded", () => {
+  eq(L.RT_PREFIX.map(r => [r.equipment, r.prefix]), [
+    ["Module", "Module_"], ["Inverter", "Inverter_"], ["Combiner", "Combiner_"],
+    ["Attachment", "Attachment_"], ["Racking", "Racking_"], ["ESS", "ESS_"],
+    ["Gateway", "Gateway_"], ["Heat Detector", "HD_"], ["Bollard", "Bollard_"],
+    ["System Shutdown Switch", "SSS_"], ["EV", "EV_"]]);
+  eq(L.validateTable("RT_PREFIX", L.RT_PREFIX).errors, []);
 });
 
-t("every Spec sheets category except Combiner and ESS has a prefix", () => {
-  const bare = L.SPEC_CATEGORIES.filter(c => !L.categoryPrefix(c));
-  eq(bare, ["Combiner", "ESS"]);
+t("every equipment that has a spec sheet has a prefix row", () => {
+  const missing = L.PREFIXABLE_EQUIPMENT.filter(e => !L.categoryPrefix(e));
+  eq(missing, []);
+});
+
+t("editing the table changes every dropdown at once", () => {
+  const saved = L.getTable("RT_PREFIX");
+  try {
+    L.setTable("RT_PREFIX", [{ equipment: "Module", prefix: "PV_" }]);
+    eq(L.categoryPrefix("Module"), "PV_");
+    const f = L.TABLE_SCHEMAS.MODULE_DB.fields.find(x => x.name === "specSheet");
+    eq(L.specPrefixFor(f, {}), "PV_");
+    // An equipment with no row lists everything, as documented.
+    eq(L.categoryPrefix("Inverter"), "");
+  } finally { L.setTable("RT_PREFIX", saved); }
+});
+
+t("a blank prefix means list every file", () => {
+  const saved = L.getTable("RT_PREFIX");
+  try {
+    L.setTable("RT_PREFIX", [{ equipment: "ESS", prefix: "" }]);
+    eq(L.categoryPrefix("ESS"), "");
+    // ...and nothing is flagged, because there is no convention to break.
+    const w = L.validateTable("SPEC_SHEETS",
+      [{ category: "ESS", model: "Powerwall 3", file: "Attachment_Comp.pdf",
+         order: 50, always: "false" }]).warnings.join(" ");
+    if (/does not start with/.test(w)) throw new Error("flagged against a blank prefix");
+  } finally { L.setTable("RT_PREFIX", saved); }
+});
+
+t("the same equipment twice is a duplicate", () => {
+  const dup = L.RT_PREFIX.concat([{ equipment: "Module", prefix: "X_" }]);
+  const e = L.validateTable("RT_PREFIX", dup).errors.join(" | ");
+  if (!/duplicate equipment/.test(e)) throw new Error(e);
+});
+
+t("Combiner and ESS are now filtered too — the gap that let a battery take an attachment sheet", () => {
+  eq([L.categoryPrefix("Combiner"), L.categoryPrefix("ESS")], ["Combiner_", "ESS_"]);
+  const w = L.validateTable("SPEC_SHEETS",
+    [{ category: "ESS", model: "Powerwall 3", file: "Attachment_Pegasus_Comp_Mount.pdf",
+       order: 50, always: "false" }]).warnings.join(" ");
+  if (!/does not start with 'ESS_'/.test(w))
+    throw new Error("an attachment sheet on a battery is no longer flagged: " + w);
 });
 
 t("the prefix is resolved per row, from its category", () => {
@@ -1480,15 +1521,16 @@ t("the prefix is resolved per row, from its category", () => {
   eq(L.specPrefixFor(f, { category: "Bollard" }), "Bollard_");
   eq(L.specPrefixFor(f, { category: "System Shutdown Switch" }), "SSS_");
   eq(L.specPrefixFor(f, { category: "EV" }), "EV_");
-  // No agreed convention: list every file rather than guess a prefix.
-  eq(L.specPrefixFor(f, { category: "ESS" }), "");
-  eq(L.specPrefixFor(f, { category: "Combiner" }), "");
+  eq(L.specPrefixFor(f, { category: "ESS" }), "ESS_");
+  eq(L.specPrefixFor(f, { category: "Combiner" }), "Combiner_");
+  // An unknown category has no row, so no filter.
+  eq(L.specPrefixFor(f, { category: "Hovercraft" }), "");
   eq(L.specPrefixFor(f, {}), "");
 });
 
-t("a fixed-prefix column still works the old way", () => {
+t("a column tied to one equipment ignores the row entirely", () => {
   const f = L.TABLE_SCHEMAS.MODULE_DB.fields.find(x => x.name === "specSheet");
-  eq(L.specPrefixFor(f, { name: "anything" }), "module_");
+  eq(L.specPrefixFor(f, { name: "anything", category: "Gateway" }), "Module_");
 });
 
 t("a Gateway file is judged against Gateway_, not the module prefix", () => {
@@ -1508,12 +1550,15 @@ t("a Heat Detector file is judged against HD_", () => {
   if (!/does not start with 'HD_'/.test(w("Nest.pdf"))) throw new Error("accepted");
 });
 
-t("a category with no convention accepts any filename", () => {
-  // Combiner has none — Kevin's file is IQ_Combiner_5.pdf.
-  const w = L.validateTable("SPEC_SHEETS",
+t("an off-convention file is flagged, never dropped", () => {
+  // IQ_Combiner_5.pdf predates the Combiner_ convention. It still merges; the
+  // table just says to rename it. Tightening a prefix must not lose data.
+  const r = L.validateTable("SPEC_SHEETS",
     [{ category: "Combiner", model: "IQ Combiner 5", file: "IQ_Combiner_5.pdf",
-       order: 25, always: "false" }]).warnings.join(" ");
-  if (/does not start with/.test(w)) throw new Error("wrongly flagged: " + w);
+       order: 25, always: "false" }]);
+  eq(r.errors, []);
+  if (!/does not start with 'Combiner_'/.test(r.warnings.join(" ")))
+    throw new Error("not flagged: " + r.warnings.join(" "));
 });
 
 t("an EV sheet is judged against EV_", () => {
@@ -1602,10 +1647,11 @@ t("category prefixes are read from the tables that define them", () => {
   eq(L.categoryPrefix("Gateway"), "Gateway_");
   eq(L.categoryPrefix("Heat Detector"), "HD_");
   eq(L.categoryPrefix("Inverter"), "Inverter_");
-  eq(L.categoryPrefix("Module"), "module_");
+  eq(L.categoryPrefix("Module"), "Module_");
   eq(L.categoryPrefix("attachment"), "Attachment_");   // case-insensitive
-  eq(L.categoryPrefix("Combiner"), "");                // no convention agreed
+  eq(L.categoryPrefix("Combiner"), "Combiner_");
   eq(L.categoryPrefix(""), "");
+  eq(L.categoryPrefix("Not An Equipment"), "");
 });
 
 t("every repeatable category has a prefix to filter its picker by", () => {
@@ -1858,7 +1904,7 @@ t("very long customer names are not truncated into an invalid name", () => {
 
 
 console.log("\n=== reference data: schemas ===");
-t("all thirteen tables have a schema", () => eq(Object.keys(L.TABLE_SCHEMAS).length, 13));
+t("all fourteen tables have a schema", () => eq(Object.keys(L.TABLE_SCHEMAS).length, 14));
 t("getTable resolves every schema name", () =>
   Object.keys(L.TABLE_SCHEMAS).forEach(n => {
     if (!Array.isArray(L.getTable(n))) throw new Error("no table for " + n);
@@ -2205,10 +2251,11 @@ t("every module row has a specSheet field", () => {
     if (!("specSheet" in m)) throw new Error("row " + (i + 1) + " missing specSheet");
   });
 });
-t("specSheet is a filtered picker with the module_ prefix", () => {
+t("specSheet is a filtered picker tied to the Module prefix", () => {
   const f = L.TABLE_SCHEMAS.MODULE_DB.fields.find(x => x.name === "specSheet");
   eq(f.type, "specfile");
-  eq(f.prefix, "module_");
+  eq(f.prefixCategory, "Module");
+  eq(L.specPrefixFor(f, {}), "Module_");
 });
 t("specfile values are treated as text, not numbers", () =>
   eq(L.coerceCell("module_REC470AA.pdf", { name: "specSheet", type: "specfile" }),
@@ -2228,7 +2275,7 @@ t("off-convention filename warns but does not block", () => {
   rows[0].specSheet = "Qcells_legacy_name.pdf";
   const r = L.validateTable("MODULE_DB", rows);
   eq(r.errors, []);
-  if (!r.warnings.some(w => w.includes("does not start with 'module_'")))
+  if (!r.warnings.some(w => w.includes("does not start with 'Module_'")))
     throw new Error("no convention warning");
 });
 t("validation does not throw when the folder listing is unavailable", () => {

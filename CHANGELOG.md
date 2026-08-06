@@ -3,6 +3,57 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.19.0 — 2026-08-06
+
+### Spec sheet prefixes are a table you edit
+
+New **Spec sheet prefixes** tab. Every spec-sheet dropdown in the tool now reads
+its filter from it, so changing a prefix there changes every dropdown at once.
+
+| Equipment | Starts with | | Equipment | Starts with |
+|---|---|---|---|---|
+| Module | `Module_` | | Gateway | `Gateway_` |
+| Inverter | `Inverter_` | | Heat Detector | `HD_` |
+| Combiner | `Combiner_` | | Bollard | `Bollard_` |
+| Attachment | `Attachment_` | | System Shutdown Switch | `SSS_` |
+| Racking | `Racking_` | | EV | `EV_` |
+| ESS | `ESS_` | | | |
+
+The prefix was previously hardcoded in four separate places — `module_` on the
+modules schema, `Inverter_` on microinverters, `Attachment_`/`Racking_` on the
+roof table, and a map for the rest. `categoryPrefix()` is now the only lookup.
+
+### This closes the gap that let a battery take an attachment datasheet
+
+**Combiner and ESS had no prefix**, so their dropdowns listed every PDF in the
+folder. That is how `Powerwall 3` ended up pointing at
+`Attachment_Pegasus_Comp_Mount.pdf` and `Enphase 5P` at `Attachment_S-5-U.pdf`.
+Both now filter to `ESS_`, and an attachment sheet on a battery is flagged.
+
+**A blank prefix still means "list everything"** — deliberately, so an equipment
+with no agreed convention is usable. It is now a visible choice in a table rather
+than an invisible omission in code.
+
+### Tightening a prefix never loses data
+
+A filename that no longer matches is **kept and flagged**, not dropped. Against
+the current Spec Sheets folder, exactly two rows are affected:
+
+```
+SPEC_SHEETS  Combiner  IQ Combiner 5  ->  IQ_Combiner_5.pdf    (wants Combiner_)
+SPEC_SHEETS  Combiner  IQ Combiner 6  ->  Inverter_IQ8HC.pdf   (wants Combiner_)
+```
+
+The first needs renaming. The second was pointing at an inverter datasheet
+regardless, which the prefix now makes obvious.
+
+### Tests
+
+345 passing, up from 342. Including one that changes a prefix at run time and
+asserts the module dropdown follows, and one asserting every equipment with a
+spec sheet has a prefix row — a new category with no row would silently list
+every file.
+
 ## 2.18.0 — 2026-08-06
 
 ### Only one combiner and one ESS can reach a project
