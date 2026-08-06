@@ -3,6 +3,72 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.20.0 — 2026-08-06
+
+### Folders collapse to one line
+
+The Folders panel is now a status strip with a **Folders…** button that opens a
+dialog. It is set once, so it no longer occupies a third of the Project tab.
+
+```
+SPEED folder SPEED · reports Reports                    [Folders…]
+```
+
+### The folder survives a restart
+
+**Cause:** startup called `requestPermission()`, which Chrome only honours during
+a click. With no gesture it quietly declined and the stored handle was thrown
+away — so the folder had to be chosen again after every restart.
+
+The handle itself was never lost; it has always been in IndexedDB. Startup now
+only *queries*, and when the permission has lapsed it keeps the handle and offers:
+
+```
+SPEED is remembered from last time, but the browser needs
+one click before it will open it again.        [Reconnect]
+```
+
+One click, no folder picker, and Reconnect does the same full reload as choosing
+the folder by hand rather than leaving it half-loaded.
+
+**To stop it asking at all:** choose **"Allow on every visit"** in Chrome's
+permission prompt. Chrome has offered persistent File System Access permissions
+since version 122; the three-way prompt is *Allow this time* / *Allow on every
+visit* / *Don't allow*. Picking the middle one survives restarts. Existing grants
+can be changed in Chrome's site settings.
+
+**On the `.ini` file idea:** a web page cannot write to `C:\` — the browser
+sandbox has no API for an arbitrary path, and the only file access there is runs
+through the very folder handle we are trying to persist. Even if it could write
+one, reading it back would need the same permission. "Allow on every visit" is
+the mechanism that actually exists for this.
+
+### Typed data survives a reload
+
+Every Project Information field is saved to browser storage as it is typed, and
+restored on the next load:
+
+> Restored what you last typed for **8961BOLA — BADER BOLAND** (6 Aug, 14:32).
+> **Check this is the right project** before generating. [Discard and start clean]
+
+The banner is deliberate. A form silently pre-filled with the previous customer is
+exactly how one customer's details end up on another customer's drawing, so the
+restore names whose data it is and offers to throw it away.
+
+- **Importing a report or loading a project replaces the draft** — the fresher
+  source wins, as asked.
+- **Clear** wipes it, so the next project starts clean.
+- Boilerplate alone (Checked by, Date drawn) is not worth remembering, so a form
+  containing only those saves nothing.
+- A browser that refuses storage — a private window, some enterprise policies —
+  is detected and the tool carries on without the feature.
+- Corrupt stored data is ignored rather than thrown.
+
+### Tests
+
+352 passing, up from 345. Seven cover the draft, including the refused-storage and
+corrupt-data paths. Startup wires 111 listeners cleanly, up from 54.
+
 ## 2.19.0 — 2026-08-06
 
 ### Spec sheet prefixes are a table you edit

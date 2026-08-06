@@ -1816,6 +1816,111 @@ t("exactly one combiner and one ESS can reach a package", () => {
   eq([c.ok, c.duplicated], [true, []]);
 });
 
+/* The draft lives in the DOM section, so it is extracted and exercised. */
+console.log("\n=== the form is remembered across a reload (2.20.0) ===");
+(() => {
+  const whole = blocks[blocks.length - 1];
+  const from = whole.indexOf("const DRAFT_KEY =");
+  const to = whole.indexOf("/* ---- AHJ and utility");
+  if (from < 0 || to < 0) throw new Error("could not extract the draft functions");
+  const FIELDS = ["project_number", "account_name", "city", "state",
+                  "module_type", "checked_by", "date_drawn"];
+  const build = store => {
+    const els = {};
+    FIELDS.concat(["draftBar"]).forEach(f => els[f] = {
+      value: "", tagName: "INPUT", style: {}, options: [], className: "",
+      innerHTML: "", appendChild() {}, textContent: "" });
+    const mk = () => ({ style: { cssText: "" }, addEventListener() {},
+                        innerHTML: "", textContent: "" });
+    let cleared = 0;
+    const F = new Function("$", "FORM_FIELDS", "localStorage", "APP_VERSION",
+      "document", "clearForm", "showMsg", "modEscHtml", "moduleSyncDownstream",
+      "setTimeout", "clearTimeout",
+      whole.slice(from, to) + " return { draftSave, draftRestore, draftClear, draftStore };")(
+        id => els[id] || null, FIELDS, store, "test", { createElement: mk },
+        () => cleared++, () => {}, x => String(x), () => {},
+        fn => { fn(); return 0; }, () => {});
+    return { F, els, cleared: () => cleared };
+  };
+  const memStore = () => { const m = new Map(); return {
+    getItem: k => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k),
+    _size: () => m.size }; };
+
+  t("what was typed comes back after a reload", () => {
+    const store = memStore();
+    const a = build(store);
+    a.els.project_number.value = "8961BOLA";
+    a.els.account_name.value = "BADER BOLAND";
+    a.els.state.value = "TX";
+    a.F.draftSave();
+    // A fresh page, same storage.
+    const b = build(store);
+    b.F.draftRestore();
+    eq([b.els.project_number.value, b.els.account_name.value, b.els.state.value],
+       ["8961BOLA", "BADER BOLAND", "TX"]);
+  });
+
+  t("boilerplate alone is not worth remembering", () => {
+    // checked_by and date_drawn are filled in by the tool, not the designer.
+    const store = memStore();
+    const a = build(store);
+    a.els.checked_by.value = "EOR";
+    a.els.date_drawn.value = "2026-08-06";
+    a.F.draftSave();
+    eq(store.getItem("speed.draft.v1"), null);
+  });
+
+  t("clearing removes it, so the next project starts clean", () => {
+    const store = memStore();
+    const a = build(store);
+    a.els.project_number.value = "X";
+    a.F.draftSave();
+    if (!store.getItem("speed.draft.v1")) throw new Error("nothing saved");
+    a.F.draftClear();
+    eq(store.getItem("speed.draft.v1"), null);
+  });
+
+  t("a restored draft is announced, not applied silently", () => {
+    // A form quietly pre-filled with the previous customer is how one
+    // customer's details reach another customer's drawing.
+    const store = memStore();
+    const a = build(store);
+    a.els.project_number.value = "8961BOLA";
+    a.els.account_name.value = "BADER BOLAND";
+    a.F.draftSave();
+    const b = build(store);
+    b.F.draftRestore();
+    eq(b.els.draftBar.style.display, "");
+  });
+
+  t("nothing is announced when there is no draft", () => {
+    const b = build(memStore());
+    b.F.draftRestore();
+    if (b.els.draftBar.style.display === "") throw new Error("banner shown for nothing");
+  });
+
+  t("a browser that refuses storage does not break the tool", () => {
+    // Private windows and some enterprise policies throw on setItem.
+    const refuse = { getItem: () => null, removeItem: () => {},
+                     setItem: () => { throw new Error("denied"); } };
+    const a = build(refuse);
+    eq(a.F.draftStore(), null);
+    a.els.project_number.value = "X";
+    a.F.draftSave();      // must not throw
+    a.F.draftRestore();   // must not throw
+    a.F.draftClear();
+  });
+
+  t("corrupt stored data is ignored rather than thrown", () => {
+    const store = memStore();
+    store.setItem("speed.draft.v1", "{not json");
+    const a = build(store);
+    a.F.draftRestore();
+    eq(a.els.project_number.value, "");
+  });
+})();
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });

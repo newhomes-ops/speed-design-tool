@@ -491,7 +491,18 @@
   <!-- ============ VIEW: Project ============ -->
   <div class="view active" id="view-project">
     <div class="col">
-    <div class="panel">
+    <div id="draftBar" style="display:none; margin-bottom:12px"></div>
+    <div id="folderBar" class="msg show ok" style="display:flex; align-items:center;
+         gap:10px; flex-wrap:wrap; margin-bottom:14px">
+      <span id="folderBarText" style="flex:1 1 auto"></span>
+      <button id="btnReconnect" type="button" class="primary"
+              style="display:none; padding:3px 10px">Reconnect</button>
+      <button id="btnFolders" type="button" style="padding:3px 10px">Folders…</button>
+    </div>
+
+    <dialog id="folderDialog" style="max-width:640px; width:92%; border:1px solid var(--border);
+            border-radius:10px; padding:0">
+      <div class="panel" style="margin:0; border:0">
       <h2>Folders</h2>
       <div class="body">
         <div class="kv" id="folderStatus" style="margin-bottom:12px"></div>
@@ -520,8 +531,22 @@
           <code>sf_report_extractor.py</code> writes its CSVs — leave it unset to
           look inside the SPEED folder.
         </div>
+
+        <div class="hint" style="margin-top:12px">
+          <strong>After restarting the computer</strong> the browser remembers which
+          folder you chose but not the permission to read it, and it will only
+          re-grant that on a click. Press <strong>Reconnect</strong> when the bar
+          asks — you do not have to find the folder again. Chrome can stop asking
+          entirely if you choose <em>Allow on every visit</em> in its permission
+          prompt.
+        </div>
+
+        <div class="actions" style="margin-top:16px">
+          <button id="btnFoldersClose" class="primary" type="button">Done</button>
+        </div>
       </div>
-    </div>
+      </div>
+    </dialog>
 
     <div class="panel">
       <h2>Import from the Salesforce report</h2>
@@ -1154,7 +1179,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.19.0";
+const APP_VERSION = "2.20.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -3035,7 +3060,7 @@ async function clearHandles() {
   } catch (e) { console.warn("Could not clear handles:", e); }
 }
 
-async function ensurePermission(handle, mode) {
+async function ensurePermission(handle, mode, queryOnly) {
   if (!handle) return false;
   const opts = { mode: mode || "readwrite" };
   try {
@@ -3043,6 +3068,10 @@ async function ensurePermission(handle, mode) {
     // enterprise policy, or when a stored handle no longer resolves.
     if (typeof handle.queryPermission !== "function") return false;
     if ((await handle.queryPermission(opts)) === "granted") return true;
+    // Asking is only allowed from a user gesture. Calling it during startup
+    // silently fails and throws the stored handle away, which is why the folder
+    // had to be chosen again after every restart.
+    if (queryOnly) return false;
     if (typeof handle.requestPermission !== "function") return false;
     return (await handle.requestPermission(opts)) === "granted";
   } catch (e) {
@@ -3361,6 +3390,9 @@ if (typeof window !== "undefined") {
 }
 const state = { root: null, reports: null, csv: null, plan: null,
                 canGenerate: false, pvResult: null, rootPath: "",
+                // Folders remembered from a previous session whose permission has
+                // lapsed. One click on Reconnect revives them.
+                pendingRoot: null, pendingReports: null,
                 // The project whose folder already exists and whose project.json
                 // can therefore be rewritten in place. Null until one is loaded
                 // or generated.
@@ -3594,6 +3626,9 @@ function doImport() {
 
   // The report may name a module that is not in the table; surface that now.
   moduleSyncDownstream();
+  // Imported data supersedes whatever was typed before.
+  draftClear();
+  draftSave();
 
   $("importReport").style.display = "block";
   $("importKv").innerHTML =
@@ -3904,6 +3939,9 @@ async function loadProject(pid) {
     // Generate stays disabled.
     state.loaded = { id: pid, folder: entry.folder, handle, data };
     refreshSaveButton();
+    // A loaded project supersedes whatever was typed before.
+    draftClear();
+    draftSave();
 
     // Loading is not the same as being ready to generate — that folder exists.
     state.plan = null;
@@ -3971,6 +4009,7 @@ function clearForm() {
   // whose values are no longer on screen.
   state.loaded = null;
   refreshSaveButton();
+  draftClear();
   moduleSyncDownstream();
   $("previewBox").style.display = "none";
   $("previewEmpty").style.display = "block";
@@ -4067,6 +4106,17 @@ function wireControls() {
   $("btnGenerate").addEventListener("click", doGenerate);
   $("btnClear").addEventListener("click", clearForm);
   $("btnSaveProject").addEventListener("click", saveProjectJson);
+  $("btnFolders").addEventListener("click", () => $("folderDialog").showModal());
+  $("btnFoldersClose").addEventListener("click", () => $("folderDialog").close());
+  $("btnReconnect").addEventListener("click", reconnectFolders);
+
+  // Remember what is typed, so a reload does not lose an afternoon's entry.
+  FORM_FIELDS.forEach(f => {
+    const el = $(f);
+    if (!el) return;
+    el.addEventListener("input", draftSave);
+    el.addEventListener("change", draftSave);
+  });
   // The offering decides whether a battery applies at all.
   $("product_offering").addEventListener("change", batteryRefreshState);
   refreshSaveButton();
@@ -4191,12 +4241,18 @@ async function init() {
   let savedRoot = null;
   try {
     savedRoot = await loadHandle("root");
-    if (savedRoot && await ensurePermission(savedRoot, "readwrite")) {
+    if (savedRoot && await ensurePermission(savedRoot, "readwrite", true)) {
       state.root = savedRoot;
+    } else if (savedRoot) {
+      // The handle survived the restart; only the permission lapsed. Hold it and
+      // let the Reconnect button ask, which gives the gesture Chrome requires.
+      state.pendingRoot = savedRoot;
     }
     const savedReports = await loadHandle("reports");
-    if (savedReports && await ensurePermission(savedReports, "read")) {
+    if (savedReports && await ensurePermission(savedReports, "read", true)) {
       state.reports = savedReports;
+    } else if (savedReports) {
+      state.pendingReports = savedReports;
     }
     const savedPath = await loadHandle("rootPath");
     if (typeof savedPath === "string" && savedPath) {
@@ -4210,6 +4266,10 @@ async function init() {
     showMsg("Could not restore your saved folder (" + (e.message || e) + "). " +
             "Press 'Choose SPEED folder' — everything else works normally.", "warn");
   }
+
+  // Phase B2: the folder bar and the remembered draft. Neither may stop startup.
+  try { renderFolderBar(); } catch (e) { console.warn("folder bar:", e); }
+  try { draftRestore(); } catch (e) { console.warn("draft restore:", e); }
 
   // ---- Phase C: reading the folder. Also allowed to fail. -------------
   try {
@@ -5924,6 +5984,156 @@ function roofSync(adopt) {
     }
   }
   roofRender();
+}
+
+/* ---- folder bar, reconnect, and the remembered draft ----------------- */
+
+/** One line saying where things point, and what needs a click. */
+function renderFolderBar() {
+  const bar = $("folderBar"), txt = $("folderBarText"), rec = $("btnReconnect");
+  if (!bar || !txt) return;
+  const pending = state.pendingRoot || state.pendingReports;
+
+  if (state.root) {
+    bar.className = "msg show ok";
+    txt.innerHTML = `SPEED folder <b>${modEscHtml(state.root.name)}</b>` +
+      (state.reports ? ` · reports <b>${modEscHtml(state.reports.name)}</b>` : "") +
+      (state.rootPath ? "" : ` · <span class="hint" style="display:inline">no full path set</span>`);
+  } else if (pending) {
+    bar.className = "msg show warn";
+    txt.innerHTML = `<b>${modEscHtml(pending.name)}</b> is remembered from last time, ` +
+      `but the browser needs one click before it will open it again.`;
+  } else {
+    bar.className = "msg show warn";
+    txt.textContent = "No SPEED folder chosen yet.";
+  }
+  if (rec) rec.style.display = (!state.root && pending) ? "" : "none";
+}
+
+/**
+ * Re-grant a folder remembered from a previous session.
+ *
+ * Must run from a click: Chrome only allows requestPermission() during a user
+ * gesture, which is why startup cannot do this by itself.
+ */
+async function reconnectFolders() {
+  let got = false;
+  try {
+    if (state.pendingRoot &&
+        await ensurePermission(state.pendingRoot, "readwrite")) {
+      state.root = state.pendingRoot; state.pendingRoot = null; got = true;
+    }
+    if (state.pendingReports &&
+        await ensurePermission(state.pendingReports, "read")) {
+      state.reports = state.pendingReports; state.pendingReports = null;
+    }
+  } catch (e) {
+    showMsg("Could not reopen the folder: " + (e.message || e), "err");
+  }
+  if (got) {
+    // Same work as choosing the folder by hand, so the tool ends up in the same
+    // state rather than a half-loaded one.
+    await renderFolderStatus();
+    await rdApplyFolderData();
+    await Promise.all([refreshProjects(), reloadReports()]);
+    await specLoadFolder();
+    specPopulateProjects();
+    showMsg("Reconnected to " + state.root.name + ". Tip: choose " +
+            "\u201cAllow on every visit\u201d in Chrome's permission prompt and it " +
+            "will stop asking after a restart.", "ok");
+  } else {
+    showMsg("Permission was not granted, so the folder stays closed.", "warn");
+  }
+  renderFolderBar();
+}
+
+/* ---- draft: remember what was typed --------------------------------- */
+
+const DRAFT_KEY = "speed.draft.v1";
+let draftTimer = null;
+
+/** Is there somewhere to store a draft? Private windows can refuse. */
+function draftStore() {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    localStorage.setItem(DRAFT_KEY + ".probe", "1");
+    localStorage.removeItem(DRAFT_KEY + ".probe");
+    return localStorage;
+  } catch (e) { return null; }
+}
+
+/** Save the form as it stands, debounced so typing is not a write per keystroke. */
+function draftSave() {
+  const store = draftStore();
+  if (!store) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      const o = { _saved: new Date().toISOString(), _version: APP_VERSION };
+      FORM_FIELDS.forEach(f => { const el = $(f); if (el) o[f] = el.value; });
+      const anything = FORM_FIELDS.some(f =>
+        String(o[f] || "").trim() && f !== "checked_by" && f !== "date_drawn");
+      if (anything) store.setItem(DRAFT_KEY, JSON.stringify(o));
+      else store.removeItem(DRAFT_KEY);
+    } catch (e) { /* quota or policy — the tool works without it */ }
+  }, 400);
+}
+
+/** Throw the saved draft away. */
+function draftClear() {
+  const store = draftStore();
+  if (store) { try { store.removeItem(DRAFT_KEY); } catch (e) {} }
+  const b = $("draftBar");
+  if (b) b.style.display = "none";
+}
+
+/**
+ * Put back what was last typed.
+ *
+ * Deliberately loud: a form silently pre-filled with the previous customer is
+ * how one customer's details reach another customer's drawing. The banner names
+ * whose data it is and offers to discard it.
+ */
+function draftRestore() {
+  const store = draftStore();
+  if (!store) return;
+  let o = null;
+  try { o = JSON.parse(store.getItem(DRAFT_KEY) || "null"); } catch (e) { return; }
+  if (!o || typeof o !== "object") return;
+
+  let filled = 0;
+  FORM_FIELDS.forEach(f => {
+    const el = $(f), v = o[f];
+    if (!el || v === undefined || v === null || v === "") return;
+    if (el.tagName === "SELECT" &&
+        !Array.from(el.options).some(x => x.value === String(v))) {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = String(v);
+      el.appendChild(opt);
+    }
+    el.value = v;
+    filled++;
+  });
+  if (!filled) return;
+
+  const bar = $("draftBar");
+  if (bar) {
+    bar.style.display = "";
+    bar.className = "msg show warn";
+    bar.textContent = "";
+    const who = [o.project_number, o.account_name].filter(Boolean).join(" — ");
+    const span = document.createElement("span");
+    span.innerHTML = `Restored what you last typed${who ? " for <b>" + modEscHtml(who) + "</b>" : ""}` +
+      `${o._saved ? " (" + new Date(o._saved).toLocaleString() + ")" : ""}. ` +
+      `<b>Check this is the right project</b> before generating.`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Discard and start clean";
+    btn.style.cssText = "margin-left:10px;padding:2px 9px";
+    btn.addEventListener("click", () => { clearForm(); showMsg("Draft discarded.", "ok"); });
+    bar.appendChild(span); bar.appendChild(btn);
+  }
+  if (typeof moduleSyncDownstream === "function") moduleSyncDownstream();
 }
 
 /* ---- AHJ and utility from the address ------------------------------
