@@ -3,6 +3,51 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.15.0 — 2026-08-06
+
+### Roof type is a dropdown
+
+`Roof type` on **Project Information** now offers **every roof type in Roof,
+attachment & railing** — the same treatment as Module type and Inverter model.
+
+It is deliberately **not filtered by state.** Filtering would hide a roof type
+from the very state you are about to add a row for. The state still decides the
+*attachment*, through `roofLookup`; it does not decide whether a roof type may be
+picked. `roofTypesFor(state)` is therefore replaced by `roofTypesAll()`.
+
+Duplicates collapse: a roof type listed for TX, CA and any-state appears once,
+matched case- and padding-insensitively.
+
+### The deadlock a strict dropdown would have created
+
+The table ships empty. A dropdown with no options would leave nothing to choose
+on day one — and **Remember this roof** cannot save a row until a roof type is
+entered, so the two would have blocked each other permanently.
+
+The list therefore carries **"+ Add a new roof type…"**. Choosing it asks for the
+name, writes the row for the project's current state, selects it, and tells you to
+fill in the attachment and railing. Cancelling the prompt leaves the field
+untouched and adds nothing.
+
+An imported or previously saved roof type that is not in the table is **kept and
+flagged** rather than dropped, and sits above the Add entry.
+
+### Fixed
+
+The test harness sliced `roofLookup` out of the source using a comment string as
+its end boundary. Renaming that comment silently made the slice run to the end of
+the file and every `equipmentSheets` test threw. It now slices on a function
+declaration and **fails loudly** if the boundary cannot be found, so the next
+rename produces a clear error instead of a stack trace.
+
+### Tests
+
+291 passing, up from 289. The state-filter tests were replaced rather than
+deleted — they now pin the all-types contract, deduplication across states, and
+that blank roof types are never offered. The dropdown itself was exercised
+against a stub: empty table, adding via the prompt, cancelling the prompt, and an
+off-list imported value.
+
 ## 2.14.0 — 2026-08-05
 
 ### Product offering moved to Project Information and saved

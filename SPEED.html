@@ -631,8 +631,7 @@
               <select id="inverter_model"></select>
               <div id="inverter_model_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="roof_type">Roof type</label>
-              <input id="roof_type" list="roof_type_list" autocomplete="off">
-              <datalist id="roof_type_list"></datalist></div>
+              <select id="roof_type"></select></div>
             <div><label for="roof_pitch">Roof pitch</label>
               <input id="roof_pitch" placeholder="5:12" autocomplete="off"></div>
             <div><label for="story_type">Stories</label><input id="story_type" autocomplete="off"></div>
@@ -1149,7 +1148,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.14.0";
+const APP_VERSION = "2.15.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1736,16 +1735,19 @@ function roofLookup(state, roofType) {
   return any ? { row: any, matchedOn: "any" } : { row: null, matchedOn: null };
 }
 
-/** Roof types known for a state, plus the national defaults. */
-function roofTypesFor(state) {
-  const st = String(state || "").trim();
+/**
+ * Every roof type in the table, deduplicated, in table order.
+ *
+ * Not filtered by state on purpose: the dropdown offers all of them and the
+ * state then decides the attachment through roofLookup. Filtering here would
+ * hide a roof type from a state that has no row yet — which is exactly the
+ * state you are about to add a row for.
+ */
+function roofTypesAll() {
   const out = [];
   RT_ROOF.forEach(r => {
     const rt = String(r.roofType || "").trim();
-    if (!rt) return;
-    const rowState = String(r.state || "").trim();
-    if (rowState && st && !sameText(rowState, st)) return;
-    if (!out.some(x => sameText(x, rt))) out.push(rt);
+    if (rt && !out.some(x => sameText(x, rt))) out.push(rt);
   });
   return out;
 }
@@ -2739,7 +2741,7 @@ if (typeof module !== "undefined" && module.exports) {
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
     SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
-    offeringChecklist, roofLookup, roofTypesFor, sameText,
+    offeringChecklist, roofLookup, roofTypesAll, sameText,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -3879,7 +3881,10 @@ function wireControls() {
     $(id).addEventListener("change", jurRender));
 
   // The roof type, paired with the state, decides attachment and railing.
-  $("roof_type").addEventListener("change", roofSync);
+  $("roof_type").addEventListener("change", () => {
+    if ($("roof_type").value === ROOF_NEW) roofAddNewType();
+    else roofSync();
+  });
   ["attachment_type", "railing_type"].forEach(id =>
     $(id).addEventListener("change", roofRender));
 
@@ -5314,12 +5319,65 @@ function moduleRenderStatus(r) {
 */
 
 /** Offer the roof types this state has rows for. */
-function roofRefreshList() {
-  const dl = $("roof_type_list");
-  if (!dl) return;
-  const st = $("state") ? $("state").value : "";
-  dl.innerHTML = roofTypesFor(st)
-    .map(rt => `<option value="${modEscAttr(rt)}"></option>`).join("");
+const ROOF_NEW = "\u0000add-new-roof-type";
+
+/**
+ * Fill the Roof type dropdown from the table.
+ *
+ * The table ships empty, so the list carries an "Add a new roof type" entry.
+ * Without it a strict dropdown would have nothing to choose on day one, and
+ * "Remember this roof" needs a roof type before it can save a row — the two
+ * would deadlock.
+ */
+function roofSelectPopulate() {
+  const sel = $("roof_type");
+  if (!sel) return;
+  const keep = sel.value === ROOF_NEW ? "" : sel.value;
+  const types = roofTypesAll();
+
+  sel.innerHTML = '<option value="">(choose a roof type)</option>' +
+    types.map(rt =>
+      `<option value="${modEscAttr(rt)}">${modEscHtml(rt)}</option>`).join("") +
+    `<option value="${ROOF_NEW}">+ Add a new roof type\u2026</option>`;
+
+  // An imported or previously saved roof type that is not in the table must
+  // still show, or the project would look as though it has no roof.
+  if (keep && !types.some(rt => sameText(rt, keep))) {
+    const opt = document.createElement("option");
+    opt.value = keep;
+    opt.textContent = keep + "  \u2014 not in the Roof, attachment & railing table";
+    sel.insertBefore(opt, sel.lastElementChild);
+  }
+  sel.value = keep;
+}
+
+/** Ask for a roof type, add it to the table, and select it. */
+function roofAddNewType() {
+  const sel = $("roof_type");
+  const name = (window.prompt(
+    "New roof type\n\nIt is added to Roof, attachment & railing for " +
+    ($("state").value.trim() || "any state") +
+    ". Fill in the attachment and railing next, then Save to folder.") || "").trim();
+  if (!name) { roofSelectPopulate(); return; }
+
+  const rows = getTable("RT_ROOF");
+  const st = $("state").value.trim();
+  if (!rows.some(r => sameText(r.roofType, name) && sameText(r.state, st))) {
+    const row = blankRow("RT_ROOF");
+    row.roofType = name; row.state = st;
+    rows.push(row);
+    RD_DIRTY.add("RT_ROOF");
+    if (typeof rdPopulateSelector === "function") rdPopulateSelector();
+    if (typeof rdCurrent !== "undefined" && rdCurrent === "RT_ROOF") {
+      rdRender(); rdValidate(true);
+    }
+  }
+  roofSelectPopulate();
+  sel.value = name;
+  roofSync();
+  showMsg(`Added '${name}'${st ? " for " + st : " (any state)"} to Roof, attachment ` +
+          `& railing. Set the attachment and railing, then press Save to folder ` +
+          `on the Reference Data tab.`, "warn");
 }
 
 /** Add or update the row for this state and roof type from the form. */
@@ -5344,7 +5402,7 @@ function roofRemember() {
     rdRender(); rdValidate(true);
   }
   if (typeof rdPopulateSelector === "function") rdPopulateSelector();
-  roofRefreshList(); roofRender();
+  roofSelectPopulate(); roofRender();
   showMsg(`${isNew ? "Added" : "Updated"} ${rt}${st ? " in " + st : " (any state)"} ` +
           `in Roof, attachment & railing. Press Save to folder on the Reference ` +
           `Data tab to keep it.`, "ok");
@@ -5448,7 +5506,7 @@ function roofRender() {
 
 /** Fill a blank attachment or railing from the table, then repaint. */
 function roofSync() {
-  roofRefreshList();
+  roofSelectPopulate();
   const hit = roofLookup($("state").value, $("roof_type").value);
   // Blanks only: a value the designer already set is never overwritten.
   if (hit.row) roofApply(hit.row, true);
