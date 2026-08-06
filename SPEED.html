@@ -620,6 +620,8 @@
         <fieldset>
           <legend>Equipment &amp; roof</legend>
           <div class="grid three">
+            <div><label for="product_offering">Product offering</label>
+              <select id="product_offering"></select></div>
             <div><label for="module_type">Module type</label>
               <select id="module_type"></select>
               <div id="module_type_status" class="hint" style="margin-top:5px"></div></div>
@@ -658,12 +660,15 @@
         <div class="actions">
           <button id="btnPreview" type="button">Preview</button>
           <button id="btnGenerate" class="primary" type="button" disabled>Generate project folder</button>
+          <button id="btnSaveProject" type="button" disabled>Update project.json</button>
           <button id="btnClear" type="button">Clear</button>
           <span id="busy" style="display:none"><span class="spin"></span><span id="busyText">working…</span></span>
         </div>
         <div class="bar" id="progressBar" style="display:none"><i></i></div>
         <div class="hint" style="margin-top:8px">
           Preview writes nothing. Generate never overwrites an existing folder.
+          <b>Update project.json</b> becomes available once a project is loaded, and
+          rewrites only that one file — it shows what will change and asks first.
         </div>
       </div>
     </div>
@@ -970,6 +975,7 @@
               <button id="btnSpecReload" type="button">Reload</button>
             </div>
           </div>
+          <div class="hint" id="specOfferingNote" style="margin-top:8px"></div>
 
           <div id="specDetail" style="display:none; margin-top:16px">
             <div id="specPlot"></div>
@@ -992,6 +998,8 @@
               </table>
             </div>
 
+            <div id="specChecklist" style="margin-top:14px"></div>
+
             <div class="kv" id="specSummary" style="margin-top:14px"></div>
 
             <div class="actions" style="margin-top:14px">
@@ -1004,6 +1012,11 @@
               The CAD plot goes first, then the ticked sheets in the order shown.
               The result is written to the project's <code>Deliverables</code>
               folder as <code>&lt;Project Number&gt; - &lt;CUSTOMER&gt; - iPermit Package.pdf</code>.
+              <br><br>
+              <strong>The offering decides what the package must contain.</strong>
+              One sheet each, and the build is refused while a required one is
+              missing or ticked twice — a reviewer seeing two different modules
+              cannot tell which is installed. Optional sheets are noted only.
               <br><br>
               <strong>Encrypted datasheets cannot be merged.</strong> Many
               manufacturer PDFs carry permissions-only protection. The build is
@@ -1136,7 +1149,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.12.0";
+const APP_VERSION = "2.14.0";
 const APP_BUILD   = "2026-08-05";
 
 const CONFIG = {
@@ -1202,7 +1215,8 @@ const NOT_IN_CRM = [
 
 const FORM_FIELDS = [
   "project_number","revision_code","code_year","account_name","street_address",
-  "city","state","zip_code","ahj_name","utility_name","installer","module_type",
+  "city","state","zip_code","ahj_name","utility_name","installer",
+  "product_offering","module_type",
   "module_quantity","inverter_model","roof_type","roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
   "date_drawn","notes"
@@ -1214,6 +1228,7 @@ const FIELD_LABELS = {
   railing_type:"Railing", layout_scheme:"Layout scheme",
   system_location:"System location", system_orientation:"Orientation",
   roof_type:"Roof type", utility_name:"Utility", module_type:"Module type",
+  product_offering:"Product offering",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -1441,7 +1456,8 @@ function mapReportRow(row, keyColumn) {
 const SPEED_LOGIC = {
   sanitizeComponent, cleanText, toInt, stripHtml, splitRevision,
   displayName, folderName, destFileName, validateForFolder, parseCsv, csvToRecords,
-  findKeyColumn, mapReportRow, COLUMN_MAP, NOT_IN_CRM, CONFIG
+  findKeyColumn, mapReportRow, COLUMN_MAP, NOT_IN_CRM, CONFIG,
+  FORM_FIELDS, FIELD_LABELS
 };
 /* Phase 3 engine is appended to the export below, after it is defined. */
 
@@ -2134,6 +2150,116 @@ function rdParsePasted(name, text) {
   return { rows, warnings };
 }
 
+/* =====================================================================
+   Product offering — what a package must contain
+   ===================================================================== */
+
+/**
+ * The offerings a designer can pick, and which systems each one includes.
+ * Order is the order they appear in the dropdown.
+ */
+const PRODUCT_OFFERINGS = [
+  { name: "Solar Only",           solar: true,  battery: false, ev: false },
+  { name: "Solar + Battery",      solar: true,  battery: true,  ev: false },
+  { name: "Solar + EV",           solar: true,  battery: false, ev: true  },
+  { name: "Solar + Battery + EV", solar: true,  battery: true,  ev: true  },
+  { name: "Battery Only",         solar: false, battery: true,  ev: false },
+  { name: "EV Only",              solar: false, battery: false, ev: true  }
+];
+
+/**
+ * One of each of these per system. `required: false` means the sheet is
+ * legitimately absent on some designs, so its absence is noted but never blocks.
+ */
+const OFFERING_COMPONENTS = {
+  solar: [
+    { category: "Module",     required: true },
+    { category: "Combiner",   required: true },
+    { category: "Inverter",   required: true },
+    { category: "Racking",    required: true },
+    { category: "Attachment", required: true }
+  ],
+  battery: [
+    { category: "ESS",                     required: true  },
+    { category: "Gateway",                 required: true  },
+    { category: "Heat Detector",           required: false },
+    { category: "Bollard",                 required: false },
+    { category: "System Shutdown Switch",  required: false }
+  ],
+  ev: [
+    { category: "EV", required: true }
+  ]
+};
+
+/** Look up an offering by name. */
+function offeringByName(name) {
+  return PRODUCT_OFFERINGS.find(o => sameText(o.name, name)) || null;
+}
+
+/**
+ * The components an offering calls for, in order, each tagged with the system it
+ * came from. A category listed by two systems appears once, keeping the stricter
+ * requirement — nothing today does that, but silently duplicating a row would be
+ * a confusing way to find out.
+ */
+function offeringComponents(name) {
+  const o = offeringByName(name);
+  if (!o) return [];
+  const out = [];
+  ["solar", "battery", "ev"].forEach(group => {
+    if (!o[group]) return;
+    OFFERING_COMPONENTS[group].forEach(c => {
+      const existing = out.find(x => sameText(x.category, c.category));
+      if (existing) { existing.required = existing.required || c.required; return; }
+      out.push({ category: c.category, required: c.required, group });
+    });
+  });
+  return out;
+}
+
+/**
+ * Compare an offering against the sheets actually ticked.
+ *
+ * "(1) Module" is read as exactly one, so two ticked module sheets is a fault,
+ * not a bonus — a permit reviewer seeing two different modules cannot tell which
+ * is installed.
+ *
+ * Returns { rows, missing, duplicated, unexpected, ok } where `ok` means the
+ * package may be built.
+ */
+function offeringChecklist(name, selectedCategories) {
+  const want = offeringComponents(name);
+  const have = (selectedCategories || [])
+    .map(c => String(c === undefined || c === null ? "" : c).trim())
+    .filter(Boolean);
+
+  const rows = want.map(c => {
+    const count = have.filter(h => sameText(h, c.category)).length;
+    let state;
+    if (count === 1) state = "ok";
+    else if (count > 1) state = "duplicate";
+    else state = c.required ? "missing" : "absent";
+    return { category: c.category, required: c.required, group: c.group, count, state };
+  });
+
+  // Ticked sheets the offering does not call for: an ESS datasheet on a Solar
+  // Only job is a warning, not a blocker — it may be deliberate.
+  const unexpected = [];
+  have.forEach(h => {
+    if (want.some(c => sameText(c.category, h))) return;
+    if (!unexpected.some(u => sameText(u, h))) unexpected.push(h);
+  });
+
+  return {
+    rows,
+    missing: rows.filter(r => r.state === "missing").map(r => r.category),
+    duplicated: rows.filter(r => r.state === "duplicate").map(r => r.category),
+    absent: rows.filter(r => r.state === "absent").map(r => r.category),
+    unexpected,
+    ok: !rows.some(r => r.state === "missing" || r.state === "duplicate")
+  };
+}
+
 /** Compare incoming rows against what is loaded, so a paste is reviewable. */
 function rdDiffRows(name, incoming) {
   const schema = TABLE_SCHEMAS[name];
@@ -2611,7 +2737,9 @@ if (typeof module !== "undefined" && module.exports) {
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
-    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip, roofLookup, roofTypesFor, sameText,
+    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
+    PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
+    offeringChecklist, roofLookup, roofTypesFor, sameText,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -2915,7 +3043,8 @@ async function generateProject(state, project, plan, onProgress) {
   await w.write(JSON.stringify(manifest, null, 2));
   await w.close();
 
-  return { name: plan.name, filesCopied, dirsCreated, bytesCopied, failures, renamed };
+  return { name: plan.name, filesCopied, dirsCreated, bytesCopied, failures,
+           renamed, handle: projectDir, manifest };
 }
 
 async function listProjects(state) {
@@ -3013,7 +3142,11 @@ if (typeof window !== "undefined") {
   });
 }
 const state = { root: null, reports: null, csv: null, plan: null,
-                canGenerate: false, pvResult: null, rootPath: "" };
+                canGenerate: false, pvResult: null, rootPath: "",
+                // The project whose folder already exists and whose project.json
+                // can therefore be rewritten in place. Null until one is loaded
+                // or generated.
+                loaded: null };
 
 /** Folder handles for the listed projects, so a row can load or locate one. */
 const PROJECT_HANDLES = new Map();
@@ -3256,6 +3389,116 @@ function doImport() {
   else showMsg(`Imported ${result.populated.length} fields. Complete the rest, then Preview.`, "ok");
 }
 
+/**
+ * Rewrite project.json for a project whose folder already exists.
+ *
+ * Generate refuses to touch an existing folder, which left changes made after a
+ * project was created with nowhere to go. This writes that one file and nothing
+ * else — no drawing is renamed, no folder is created or removed.
+ *
+ * The original _generated block is preserved verbatim and a separate _updated
+ * block records the edit, so how a project was created stays distinguishable
+ * from how it was later changed.
+ */
+async function saveProjectJson() {
+  const L = state.loaded;
+  if (!L || !L.handle) {
+    showMsg("Load a project first — there is no existing project.json to update.", "err");
+    return;
+  }
+
+  const now = collect();
+  const before = L.data || {};
+
+  // Only report fields the form owns; _generated and anything an older tool left
+  // behind is carried through untouched.
+  const changes = FORM_FIELDS
+    .filter(f => $(f))
+    .map(f => ({ field: f, from: before[f], to: now[f] }))
+    .filter(c => String(c.from ?? "") !== String(c.to ?? ""));
+
+  if (!changes.length) {
+    showMsg(`Nothing to write — project.json in '${L.folder}' already matches the form.`, "ok");
+    return;
+  }
+
+  const lines = changes.map(c =>
+    `  ${label(c.field)}: ${c.from === undefined || c.from === "" ? "(empty)" : c.from}` +
+    `  ->  ${c.to === "" ? "(empty)" : c.to}`);
+
+  // The drawing was named at generation time and is not renamed here; say so
+  // rather than leaving a project.json that disagrees with the file on disk.
+  const nameChanged = changes.some(c => c.field === "account_name");
+  const drawing = (before._generated || {}).drawing_file;
+
+  if (!confirm(
+      `Overwrite project.json in '${L.folder}' with ${changes.length} change(s)?\n\n` +
+      lines.join("\n") +
+      (nameChanged && drawing
+        ? `\n\nNote: the drawing is still called '${drawing}'. This does not ` +
+          `rename it — do that in Explorer if the customer name really changed.`
+        : "") +
+      `\n\nOnly project.json is written. No other file is touched.`)) {
+    return;
+  }
+
+  busy(true, "writing project.json…");
+  try {
+    // Merge over whatever is on disk now, rather than over what was loaded, so a
+    // key added by another tool since loading is not silently dropped.
+    let current = before;
+    try {
+      const fh = await L.handle.getFileHandle("project.json", { create: false });
+      current = JSON.parse(await (await fh.getFile()).text());
+    } catch (e) { /* fall back to the loaded copy */ }
+
+    const out = Object.assign({}, current, now);
+    if (current._generated) out._generated = current._generated;
+    out._updated = {
+      updated_at: new Date().toISOString(),
+      tool_version: APP_VERSION,
+      tool_build: APP_BUILD,
+      fields_changed: changes.map(c => c.field),
+      previous_update: (current._updated || {}).updated_at || null
+    };
+
+    const fh = await L.handle.getFileHandle("project.json", { create: true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(out, null, 2) + "\n");
+    await w.close();
+
+    L.data = out;
+    // Keep the in-memory project list in step so the Spec Sheets tab sees the
+    // new offering without a Refresh.
+    const entry = (LAST_PROJECT_LIST || []).find(p => p.id === L.id);
+    if (entry) entry.manifest = out;
+    if (SPEC_PROJECT && SPEC_PROJECT.id === L.id) {
+      SPEC_PROJECT.entry.manifest = out;
+      specRefreshBuildState();
+    }
+
+    showMsg(`Updated project.json in '${L.folder}' — ` +
+            `${changes.map(c => label(c.field)).join(", ")}.` +
+            (nameChanged && drawing ? ` The drawing is still '${drawing}'.` : ""),
+            nameChanged && drawing ? "warn" : "ok");
+  } catch (e) {
+    showMsg("Could not write project.json: " + e.message, "err");
+  } finally {
+    busy(false);
+    refreshSaveButton();
+  }
+}
+
+/** Enable the update button only when there is a file to update. */
+function refreshSaveButton() {
+  const btn = $("btnSaveProject");
+  if (!btn) return;
+  btn.disabled = !(state.loaded && state.loaded.handle);
+  btn.title = state.loaded
+    ? `Rewrite project.json in '${state.loaded.folder}'`
+    : "Load a project first";
+}
+
 async function doPreview() {
   // Refuse at Preview rather than at Generate: Preview is where the designer
   // looks for problems, and failing later would waste a folder copy.
@@ -3334,6 +3577,11 @@ async function doGenerate() {
     }
     state.canGenerate = false;
     state.plan = null;
+    // A project just created is as updatable as one just loaded — otherwise the
+    // designer would have to Refresh and Load their own new project to fix a typo.
+    state.loaded = { id: result.name, folder: result.name,
+                     handle: result.handle, data: result.manifest };
+    refreshSaveButton();
     await refreshProjects();
   } catch (e) {
     showMsg(e.message, "err");
@@ -3434,6 +3682,11 @@ async function loadProject(pid) {
 
     moduleSyncDownstream();
 
+    // The folder exists, so project.json can be rewritten in place even though
+    // Generate stays disabled.
+    state.loaded = { id: pid, folder: entry.folder, handle, data };
+    refreshSaveButton();
+
     // Loading is not the same as being ready to generate — that folder exists.
     state.plan = null;
     state.canGenerate = false;
@@ -3450,7 +3703,8 @@ async function loadProject(pid) {
     const parts = [`Loaded ${entry.project_number || entry.folder} — ${filled} fields.`];
     if (gen.tool_version) parts.push(`Created by v${gen.tool_version}.`);
     if (gen.drawing_file) parts.push(`Drawing: ${gen.drawing_file}.`);
-    parts.push("Generate is disabled — this folder already exists.");
+    parts.push("Generate is disabled — this folder already exists. " +
+               "Use Update project.json to save changes.");
     showMsg(parts.join(" "), skipped.length ? "warn" : "ok");
     if (skipped.length) console.warn("Non-standard values:", skipped);
   } finally {
@@ -3495,6 +3749,10 @@ function clearForm() {
     else el.value = "";
   }
   delete $("service_voltage").dataset.userSet;
+  // Clearing the form must not leave the update button pointed at a project
+  // whose values are no longer on screen.
+  state.loaded = null;
+  refreshSaveButton();
   moduleSyncDownstream();
   $("previewBox").style.display = "none";
   $("previewEmpty").style.display = "block";
@@ -3590,6 +3848,8 @@ function wireControls() {
   $("btnPreview").addEventListener("click", doPreview);
   $("btnGenerate").addEventListener("click", doGenerate);
   $("btnClear").addEventListener("click", clearForm);
+  $("btnSaveProject").addEventListener("click", saveProjectJson);
+  refreshSaveButton();
 
   // Module type is the source of truth, so every dependent dropdown is
   // refreshed the moment it changes.
@@ -4110,7 +4370,9 @@ function equipmentSheets(project) {
   const roof = roofLookup(project.state, project.roof_type).row;
   if (roof) {
     [["Attachment", roof.attachment, roof.attachmentSheet, 30],
-     ["Railing",    roof.railing,    roof.railingSheet,    40]]
+     // "Racking" is the category name the offering checklist uses; the table
+     // column is still called Railing, which is what it was named.
+     ["Racking",    roof.railing,    roof.railingSheet,    40]]
       .forEach(([category, model, file, order]) => {
         const name = String(model || "").trim();
         const sheet = String(file || "").trim();
@@ -4366,6 +4628,97 @@ async function specChooseProject(pid) {
   }
 }
 
+/** Fill the Product offering dropdown on Project Information. */
+function specPopulateOfferings() {
+  const sel = $("product_offering");
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">(choose an offering)</option>' +
+    PRODUCT_OFFERINGS
+      .map(o => `<option value="${modEscAttr(o.name)}">${modEscHtml(o.name)}</option>`)
+      .join("");
+  sel.value = keep && PRODUCT_OFFERINGS.some(o => sameText(o.name, keep)) ? keep : "";
+}
+
+/**
+ * The offering for the package being built.
+ *
+ * Read from the selected project's manifest, not from a control on this tab — the
+ * package must reflect what the project was designed as, not what is convenient
+ * at merge time.
+ */
+function specOfferingName() {
+  const p = SPEC_PROJECT ? (SPEC_PROJECT.entry.manifest || {}) : {};
+  return String(p.product_offering || "").trim();
+}
+
+/** The checklist for the project's offering against the ticked sheets. */
+function specChecklist() {
+  return offeringChecklist(specOfferingName(),
+                           specSelected().map(s => s.category));
+}
+
+/** Draw the checklist. */
+function specRenderChecklist(chk) {
+  const box = $("specChecklist");
+  if (!box) return;
+
+  // No offering on the project: say so here rather than showing an empty
+  // checklist that looks like everything passed.
+  const name = specOfferingName();
+  const note = $("specOfferingNote");
+  if (note) {
+    note.innerHTML = name
+      ? `Product offering: <b>${modEscHtml(name)}</b>` +
+        (offeringByName(name) ? "" :
+          ` — <span style="color:var(--err)">not one of the six offerings</span>`)
+      : `<span style="color:var(--err)">This project has no product offering.</span> ` +
+        `Set it on Project Information, load the project, then Update project.json.`;
+  }
+  if (!name || !offeringByName(name)) {
+    box.innerHTML = `<div class="msg show err" style="margin:0">Cannot build: ` +
+      (name ? `'${modEscHtml(name)}' is not a known product offering.`
+            : `the project has no product offering, so there is nothing to check ` +
+              `the sheets against.`) + `</div>`;
+    return;
+  }
+  const label = {
+    ok: ["\u2713", "var(--ok)"],
+    missing: ["missing", "var(--err)"],
+    duplicate: ["ticked twice", "var(--err)"],
+    absent: ["not included", "var(--muted, #6b7280)"]
+  };
+  const cells = chk.rows.map(r => {
+    const [txt, colour] = label[r.state];
+    return `<div><span>${modEscHtml(r.category)}` +
+           `${r.required ? "" : " <em>(optional)</em>"}</span>` +
+           `<span style="color:${colour}">${txt}` +
+           `${r.count > 1 ? " (" + r.count + ")" : ""}</span></div>`;
+  }).join("");
+
+  const notes = [];
+  if (chk.missing.length) {
+    notes.push(`<div class="msg show err" style="margin:8px 0 0">Cannot build: ` +
+      `no sheet ticked for <b>${chk.missing.map(modEscHtml).join("</b>, <b>")}</b>. ` +
+      `Add the row on Reference Data \u2192 Spec sheets, or link it on the ` +
+      `equipment table it belongs to.</div>`);
+  }
+  if (chk.duplicated.length) {
+    notes.push(`<div class="msg show err" style="margin:8px 0 0">Cannot build: ` +
+      `more than one sheet ticked for ` +
+      `<b>${chk.duplicated.map(modEscHtml).join("</b>, <b>")}</b>. ` +
+      `Exactly one is expected.</div>`);
+  }
+  if (chk.unexpected.length) {
+    notes.push(`<div class="msg show warn" style="margin:8px 0 0">` +
+      `<b>${chk.unexpected.map(modEscHtml).join("</b>, <b>")}</b> ` +
+      `${chk.unexpected.length === 1 ? "is" : "are"} not part of this offering. ` +
+      `Ticked anyway \u2014 untick, or change the offering.</div>`);
+  }
+
+  box.innerHTML = `<div class="kv">${cells}</div>` + notes.join("");
+}
+
 function specRenderRows() {
   if (!SPEC_ROWS.length) {
     $("specBody").innerHTML =
@@ -4415,13 +4768,19 @@ function specSelected() {
 
 function specRefreshBuildState() {
   const sel = specSelected();
-  const ready = !!(SPEC_PROJECT && SPEC_PLOT && sel.length);
+  const chk = specChecklist();
+  specRenderChecklist(chk);
+  // The offering is part of the definition of done, so it gates the build the
+  // same way a missing plot does.
+  const ready = !!(SPEC_PROJECT && SPEC_PLOT && sel.length && chk.ok &&
+                   offeringByName(specOfferingName()));
   $("btnSpecBuild").disabled = !ready;
   const p = SPEC_PROJECT ? (SPEC_PROJECT.entry.manifest || {}) : {};
   const title = [p.project_number, String(p.account_name || "").toUpperCase(),
                  "iPermit Package"].filter(Boolean).join(" - ");
   $("specSummary").innerHTML =
     `<div><span>CAD plot</span><span>${SPEC_PLOT ? SPEC_PLOT.name : "not found"}</span></div>` +
+    `<div><span>Product offering</span><span>${specOfferingName() || "not set"}</span></div>` +
     `<div><span>Spec sheets selected</span><span>${sel.length}</span></div>` +
     `<div><span>Output</span><span>Deliverables\\${sanitizeComponent(title, "iPermit Package")}.pdf</span></div>`;
 }
@@ -5442,6 +5801,7 @@ function pvPopulateSelectors() {
   // rebuilt from the same tables at the same moment.
   moduleSelectPopulate();
   miSelectPopulate();
+  specPopulateOfferings();
 
   // Built from SERVICE_VOLTAGES, the same list the Vac column is constrained
   // to, so a service voltage can always match a microinverter variant.

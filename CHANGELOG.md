@@ -3,6 +3,135 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.14.0 — 2026-08-05
+
+### Product offering moved to Project Information and saved
+
+It is now a field on **Project Information**, sits in `FORM_FIELDS`, and is
+therefore written to `project.json` like every other project attribute. Set it
+before generating the folder.
+
+The Spec Sheets tab no longer has its own control — it **reads the offering from
+the selected project's manifest**. A package should reflect what the project was
+designed as, not what was convenient at merge time.
+
+A project with **no** offering, or one that is not among the six, now **blocks the
+build** and says so. Previously an empty offering produced an empty checklist,
+which looked like everything had passed. `offeringChecklist` still reports `ok`
+for an unknown offering — nothing is required, so nothing is missing — so the
+build gate tests `offeringByName` as well. There is a test documenting that
+pairing so it is not "simplified" away later.
+
+### Update project.json — answering "how does a loaded project get saved?"
+
+This was a real gap. `Generate` refuses to touch an existing folder, so any change
+made after a project was created had nowhere to go.
+
+A new **Update project.json** button, next to Generate, enabled once a project is
+loaded. It writes **that one file and nothing else** — no folder is created, no
+drawing renamed, nothing deleted.
+
+It shows the change list and asks first:
+
+```
+Overwrite project.json in '8961BOLA - BADER BOLAND' with 1 change(s)?
+
+  Product offering: (empty)  ->  Solar + Battery
+
+Only project.json is written. No other file is touched.
+```
+
+Details that matter:
+
+- **`_generated` is preserved verbatim.** How a project was created stays
+  distinguishable from how it was later changed. A separate `_updated` block
+  records the timestamp, tool version, the fields that changed, and a
+  `previous_update` pointer.
+- **It merges over what is on disk, not over what was loaded.** If another tool
+  added a key since you loaded the project, that key survives. Verified.
+- **No changes means no write.** The file is not touched just to bump a timestamp.
+- **Renaming the customer warns that the drawing is not renamed.** The `.dwg` was
+  named at generation time; the prompt says *"the drawing is still called 'BADER
+  BOLAND.dwg'"* and points at Explorer. Silently leaving `project.json`
+  disagreeing with the file on disk would be worse.
+- **A freshly generated project is immediately updatable.** `generateProject` now
+  returns its folder handle, so fixing a typo does not require Refresh → Load
+  your own new project.
+- **Clear forgets it**, so the button can never point at a project whose values
+  have left the screen.
+- The in-memory project list and the Spec Sheets tab are updated in step, so a
+  newly saved offering takes effect without a Reload.
+
+### Tests
+
+289 passing, up from 284. Five new on the offering being a persisted field,
+including that every offering name survives a JSON round-trip — the names contain
+`+` and spaces. The writer itself was exercised end-to-end against a stub
+filesystem: nine behaviours checked, including `_generated` preservation, foreign
+key survival, the no-op case, and the drawing-rename warning.
+
+## 2.13.0 — 2026-08-05
+
+### Product offering on the Spec Sheets tab
+
+A dropdown — Solar Only, Solar + Battery, Solar + EV, Solar + Battery + EV,
+Battery Only, EV Only — that defines what the package must contain.
+
+| System | One sheet each |
+|---|---|
+| Solar | Module, Combiner, Inverter, Racking, Attachment |
+| Battery | ESS, Gateway, and *optionally* Heat Detector, Bollard, System Shutdown Switch |
+| EV | EV |
+
+A checklist appears above the summary and marks each category ✓, **missing**,
+**ticked twice**, or *not included* for an optional one.
+
+### "(1)" is read as exactly one
+
+Two ticked module sheets is a **fault**, not a bonus. A permit reviewer looking at
+two different module datasheets cannot tell which is installed, so the build is
+refused. That applies to optional categories too: *optional* means it may be
+absent, not that duplicates are acceptable.
+
+The build is now gated on the checklist the same way it is on a missing CAD plot.
+Both blocking conditions name the categories at fault.
+
+**A sheet outside the offering warns but does not block** — an ESS datasheet on a
+Solar Only job may well be deliberate, so it is flagged and left ticked.
+
+### Racking
+
+`RT_ROOF` now emits its second product as category **Racking** rather than
+Railing, so it lines up with the checklist. The table column is still called
+Railing, which is what it was named.
+
+### Where each sheet comes from
+
+Four of the five solar categories are already supplied automatically — Module
+from PV modules, Inverter from Microinverters, Attachment and Racking from Roof,
+attachment & railing. **Only Combiner has to come from the Spec sheets table**, as
+do all the battery and EV categories.
+
+There is a test pinning that split. If an equipment table ever stopped emitting
+its category, every solar job would block, and the test says which four to check.
+
+### Worth knowing
+
+The offering is **not saved to `project.json`.** It is chosen per session on the
+Spec Sheets tab, as asked. If a package should record what it was built as, that
+is a small addition to the manifest.
+
+Nothing seeds the Combiner, ESS, Gateway, Heat Detector, Bollard, System Shutdown
+Switch or EV categories yet — they need rows on **Reference Data → Spec sheets**
+with those exact category names, or every offering will block on them.
+
+### Tests
+
+284 passing, up from 265. Nineteen new, covering each offering's component list,
+duplicates blocking even when optional, unexpected categories warning only, blank
+ticks being ignored, and an unknown offering asking for nothing rather than
+everything.
+
 ## 2.12.0 — 2026-08-05
 
 ### Spec sheet columns on Roof, attachment & railing
