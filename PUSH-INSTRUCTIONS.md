@@ -1,82 +1,118 @@
-# Pushing this to GitHub
+# Releasing SPEED
 
-The repository is already initialised, committed and tagged `v1.0.0`.
-Nothing is staged or pending — you only need to add a remote and push.
+Everything is committed locally. Publishing is `git push`.
 
-## Read this first
+Open **Git Bash** or **PowerShell** in this folder:
 
-**GitHub Pages sites are public by default, even from a private repository.**
-Making the published site private requires GitHub Enterprise Cloud with access
-control enabled.
-
-This file embeds SunPower engineering reference data — a 517-city design
-temperature database, electrical specs for 12 modules and 6 microinverters, the
-SunPower logo, and Salesforce report column names. There are no credentials and
-no secrets, but it is internal data.
-
-**Confirm with your security team before enabling Pages.**
-
-## 1. Create the repository
-
-On github.com, create a repository named **`speed-design-tool`** under the
-**newhomes-ops** account: https://github.com/newhomes-ops/speed-design-tool
-Do not initialise it with a README, licence or .gitignore — this repo already
-has them and GitHub's versions would conflict.
-
-## 2. Push
-
-Open a terminal in this folder and run:
-
-```bash
-git remote add origin https://github.com/newhomes-ops/speed-design-tool.git
-git push -u origin main
-git push origin v1.0.0
+```
+cd "C:\Users\MTO-MarkKevinOlivar\OneDrive - SunPower\Documents\New Homes Operations\7. SPWR Business Services, Inc\AI Initiative\Design Tool\SPEED\speed-design-tool"
 ```
 
-Git will prompt for authentication. Use a **personal access token** as the
-password, or install GitHub CLI and run `gh auth login` first. Do not paste a
-token into any file in this repository.
+## Every release, from now on
 
-## 3. Optional — enable Pages
-
-`newhomes-ops` is a **user account, not an organisation**. GitHub Pages access
-control requires an organisation on Enterprise Cloud, so a Pages site published
-from this account **cannot be made private** — it will be publicly readable and
-indexable. That is not configurable.
-
-Your five existing repositories are already public, so this matches your current
-practice. Proceed knowingly:
-
-1. Repository **Settings** → **Pages**
-2. Source: **Deploy from a branch**
-3. Branch: **main**, folder: **/ (root)**
-4. There is no private-visibility option on a user account. The site is public.
-
-The site will serve at **https://newhomes-ops.github.io/speed-design-tool/**
-`index.html` redirects to `SPEED.html`.
-
-**Pages gives you one genuine advantage:** a real HTTPS origin. That is what
-would let a Salesforce admin add the origin to the CORS allowlist and enable
-live report access from the browser — which is impossible from a `file://` page.
-
-## 4. Releasing an update
-
-```bash
-# Edit APP_VERSION and APP_BUILD near the top of SPEED.html's <script> block,
-# and add a CHANGELOG entry.
-node tests/run-tests.js          # must pass before you ship
-git commit -am "SPEED 1.0.1 — <what changed>"
-git tag -a v1.0.1 -m "SPEED 1.0.1"
-git push && git push --tags
+```
+git push origin main
+git push --tags origin
 ```
 
-Then copy `SPEED.html` to the synced SharePoint library. **Keep the filename
-exactly `SPEED.html`** — browser folder permissions are tied to the file origin,
-so renaming it forces every designer to re-pick their folder.
+That is it. The first push opens a browser window to sign in to GitHub; Git
+Credential Manager remembers it afterwards.
 
-## What is deliberately excluded
+Give it a minute — Pages rebuilds on push. Then check the version in the header at
+https://newhomes-ops.github.io/speed-design-tool/ against `APP_VERSION` in
+`SPEED.html`.
 
-`.gitignore` blocks `*.csv`, `*.xlsm`, `*.dwg`, `*-extract-*.bas`, `config.ini`
-and `credentials*`. Salesforce report exports contain customer names and
-addresses; the VBA extracts contain hardcoded report URLs and network paths.
-Verified clean before the first commit.
+## Before pushing
+
+```
+node tests/run-tests.js
+```
+
+All tests must pass. They extract the logic from `SPEED.html` at run time, so they
+test the file that actually ships.
+
+Bump both constants near the top of the `<script>` block and add a `CHANGELOG.md`
+entry:
+
+```js
+const APP_VERSION = "2.14.0";
+const APP_BUILD   = "2026-08-05";
+```
+
+---
+
+## One-time: the first real push
+
+The local repository and the GitHub repository began as **unrelated histories** —
+27 commits here, 17 there, no common ancestor. All seventeen of GitHub's were made
+through the web interface (their committer is `GitHub`, not a push), which is why
+`git push` had never worked and every update went through the upload page.
+
+Run in this order:
+
+```
+git push origin github-web-history      # keep the old history on GitHub too
+git push --force origin main            # replace main with the local history
+git push --force --tags origin
+```
+
+The first line is optional but costs nothing, and it means abandoning the old
+history only removes it from `main` rather than from the repository. It is also
+kept locally as the branch `github-web-history` and the tag
+`pre-force-push-github`.
+
+### To undo
+
+```
+git reset --hard pre-force-push-github
+git push --force origin main
+```
+
+### Verified before force-pushing — nothing is lost
+
+| | |
+|---|---|
+| Files only on GitHub, would be deleted | **none** |
+| Files added | `tests/run-tests.js` |
+| Files changed | `SPEED.html`, `CHANGELOG.md` |
+| Files already identical | `README.md`, `index.html`, `.gitignore`, `.nojekyll` |
+
+---
+
+## Stop using the web upload page
+
+It works, but it commits as *"Add files via upload"* with no version, no message
+and no tag, and it leaves this local repository as the only place the real history
+exists. Eleven of GitHub's seventeen commits were that.
+
+## Do not rename `SPEED.html`
+
+Browser folder permissions are tied to the file origin. A new filename looks like
+a different application and every designer has to re-pick their SPEED folder.
+Version with `APP_VERSION` and git tags, never the filename.
+
+## Pages is public
+
+`newhomes-ops` is a **user account, not an organisation**. Pages access control
+requires an organisation on Enterprise Cloud, so this site **cannot be made
+private** — it is publicly readable and search-indexable. That is not
+configurable.
+
+The published file embeds SunPower engineering reference data: the 517-city design
+temperature database, module and microinverter electrical specs, the SunPower
+logo, and Salesforce report column names. No credentials, no secrets, but it is
+internal data. Your other repositories are already public, so this matches current
+practice — but it is worth a deliberate decision rather than a default.
+
+## Reference data is not in git by default
+
+`Reference Data/*.json` lives in the SPEED folder, not here, so designers' edits
+persist without touching GitHub. If you want an audit trail for values that reach a
+stamped drawing, commit those files too — they are small, and one row per line
+means a diff shows exactly which row changed.
+
+## What `.gitignore` deliberately excludes
+
+`*.csv`, `*.xlsm`, `*.dwg`, `*-extract-*.bas`, `config.ini`, `credentials*`.
+Salesforce report exports contain customer names and addresses; the VBA extracts
+contain hardcoded report URLs and network paths.
