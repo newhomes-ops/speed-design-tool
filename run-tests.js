@@ -1457,14 +1457,29 @@ t("battery_type is saved with the project", () => {
   eq(L.FIELD_LABELS.battery_type, "Battery");
 });
 
-t("only Gateway and Heat Detector have a filename convention", () =>
-  eq(L.SPEC_PREFIX, { "Gateway": "Gateway_", "Heat Detector": "HD_" }));
+t("the agreed filename conventions", () =>
+  eq(L.SPEC_PREFIX, {
+    "Gateway": "Gateway_", "Heat Detector": "HD_", "Bollard": "Bollard_",
+    "System Shutdown Switch": "SSS_", "EV": "EV_" }));
+
+t("Combiner and ESS have no convention, so they list every file", () => {
+  eq(L.categoryPrefix("Combiner"), "");
+  eq(L.categoryPrefix("ESS"), "");
+});
+
+t("every Spec sheets category except Combiner and ESS has a prefix", () => {
+  const bare = L.SPEC_CATEGORIES.filter(c => !L.categoryPrefix(c));
+  eq(bare, ["Combiner", "ESS"]);
+});
 
 t("the prefix is resolved per row, from its category", () => {
   const f = L.TABLE_SCHEMAS.SPEC_SHEETS.fields.find(x => x.name === "file");
   eq(L.specPrefixFor(f, { category: "Gateway" }), "Gateway_");
   eq(L.specPrefixFor(f, { category: "Heat Detector" }), "HD_");
   eq(L.specPrefixFor(f, { category: "gateway" }), "Gateway_");   // case-insensitive
+  eq(L.specPrefixFor(f, { category: "Bollard" }), "Bollard_");
+  eq(L.specPrefixFor(f, { category: "System Shutdown Switch" }), "SSS_");
+  eq(L.specPrefixFor(f, { category: "EV" }), "EV_");
   // No agreed convention: list every file rather than guess a prefix.
   eq(L.specPrefixFor(f, { category: "ESS" }), "");
   eq(L.specPrefixFor(f, { category: "Combiner" }), "");
@@ -1494,14 +1509,59 @@ t("a Heat Detector file is judged against HD_", () => {
 });
 
 t("a category with no convention accepts any filename", () => {
+  // Combiner has none — Kevin's file is IQ_Combiner_5.pdf.
   const w = L.validateTable("SPEC_SHEETS",
-    [{ category: "EV", model: "Charger", file: "anything at all.pdf",
-       order: 80, always: "false" }]).warnings.join(" ");
+    [{ category: "Combiner", model: "IQ Combiner 5", file: "IQ_Combiner_5.pdf",
+       order: 25, always: "false" }]).warnings.join(" ");
   if (/does not start with/.test(w)) throw new Error("wrongly flagged: " + w);
 });
 
-t("Gateway is the only category that may appear more than once", () =>
-  eq(L.SPEC_MULTI, ["Gateway"]));
+t("an EV sheet is judged against EV_", () => {
+  const w = f => L.validateTable("SPEC_SHEETS",
+    [{ category: "EV", model: "Charger", file: f, order: 80, always: "false" }])
+    .warnings.join(" ");
+  if (/does not start with/.test(w("EV_Charger.pdf"))) throw new Error("correct name flagged");
+  if (!/does not start with 'EV_'/.test(w("Charger.pdf"))) throw new Error("accepted");
+});
+
+t("Bollard and SSS are judged against their own prefixes", () => {
+  const w = (cat, f) => L.validateTable("SPEC_SHEETS",
+    [{ category: cat, model: "x", file: f, order: 80, always: "false" }])
+    .warnings.join(" ");
+  if (/does not start with/.test(w("Bollard", "Bollard_Steel.pdf"))) throw new Error("Bollard_ flagged");
+  if (/does not start with/.test(w("System Shutdown Switch", "SSS_Rapid.pdf"))) throw new Error("SSS_ flagged");
+  if (!/'Bollard_'/.test(w("Bollard", "SSS_Steel.pdf"))) throw new Error("cross-prefix accepted");
+  if (!/'SSS_'/.test(w("System Shutdown Switch", "HD_Rapid.pdf"))) throw new Error("cross-prefix accepted");
+});
+
+t("only attachment, racking and gateway may repeat", () =>
+  eq(L.SPEC_MULTI, ["Attachment", "Racking", "Gateway"]));
+
+t("combiner and ESS are exactly one, by rule", () => {
+  ["Combiner", "ESS"].forEach(c => {
+    if (L.SPEC_MULTI.some(m => L.sameText(m, c)))
+      throw new Error(c + " must not be repeatable");
+  });
+  // Two of either blocks the build.
+  const c1 = L.offeringChecklist("Solar + Battery",
+    ["Module", "Combiner", "Combiner", "Inverter", "Racking", "Attachment", "ESS", "Gateway"]);
+  eq([c1.ok, c1.duplicated], [false, ["Combiner"]]);
+  const c2 = L.offeringChecklist("Battery Only", ["ESS", "ESS", "Gateway"]);
+  eq([c2.ok, c2.duplicated], [false, ["ESS"]]);
+});
+
+t("two attachments and two rackings are accepted", () => {
+  const c = L.offeringChecklist("Solar Only",
+    ["Module", "Combiner", "Inverter", "Racking", "Racking", "Attachment", "Attachment"]);
+  eq([c.ok, c.duplicated], [true, []]);
+  eq(c.rows.find(r => r.category === "Attachment").count, 2);
+  eq(c.rows.find(r => r.category === "Racking").count, 2);
+});
+
+t("they are still required — repeatable does not mean optional", () => {
+  const c = L.offeringChecklist("Solar Only", ["Module", "Combiner", "Inverter"]);
+  eq([c.ok, c.missing.sort()], [false, ["Attachment", "Racking"]]);
+});
 
 t("two gateways are accepted, two of anything else are not", () => {
   const two = L.offeringChecklist("Battery Only",
@@ -1528,13 +1588,42 @@ t("Gateway is still required — multi does not mean optional", () => {
 t("the multi flag reaches the checklist rows", () => {
   const c = L.offeringChecklist("Solar + Battery + EV", []);
   const multi = c.rows.filter(r => r.multi).map(r => r.category);
-  eq(multi, ["Gateway"]);
+  eq(multi, ["Racking", "Attachment", "Gateway"]);
+  // Everything else in that offering is exactly one.
+  const single = c.rows.filter(r => !r.multi).map(r => r.category);
+  eq(single, ["Module", "Combiner", "Inverter", "ESS", "Heat Detector",
+              "Bollard", "System Shutdown Switch", "EV"]);
+});
+
+t("category prefixes are read from the tables that define them", () => {
+  // One source each. Four hard-coded copies of "Attachment_" is how they drift.
+  eq(L.categoryPrefix("Attachment"), "Attachment_");
+  eq(L.categoryPrefix("Racking"), "Racking_");
+  eq(L.categoryPrefix("Gateway"), "Gateway_");
+  eq(L.categoryPrefix("Heat Detector"), "HD_");
+  eq(L.categoryPrefix("Inverter"), "Inverter_");
+  eq(L.categoryPrefix("Module"), "module_");
+  eq(L.categoryPrefix("attachment"), "Attachment_");   // case-insensitive
+  eq(L.categoryPrefix("Combiner"), "");                // no convention agreed
+  eq(L.categoryPrefix(""), "");
+});
+
+t("every repeatable category has a prefix to filter its picker by", () => {
+  // The add-another picker filters candidates by prefix. A repeatable category
+  // with no prefix would offer every PDF in the folder.
+  const bare = L.SPEC_MULTI.filter(c => !L.categoryPrefix(c));
+  eq(bare, []);
 });
 
 t("a battery offering asks for exactly the battery components", () =>
   eq(L.offeringComponents("Battery Only").map(c => [c.category, c.required, c.multi]),
      [["ESS", true, false], ["Gateway", true, true], ["Heat Detector", false, false],
       ["Bollard", false, false], ["System Shutdown Switch", false, false]]));
+
+t("a solar offering marks racking and attachment repeatable, the rest not", () =>
+  eq(L.offeringComponents("Solar Only").map(c => [c.category, c.multi]),
+     [["Module", false], ["Combiner", false], ["Inverter", false],
+      ["Racking", true], ["Attachment", true]]));
 
 /* specChecklist and specSelected read module-level DOM state, so they are
    extracted and exercised directly. offeringChecklist was always correct — the
@@ -1622,6 +1711,64 @@ console.log("\n=== the checklist is fed the ticked rows (2.17.2) ===");
     eq(p[0].name, "Module_Q.TRON BLK M-G2+.pdf");
   });
 })();
+
+console.log("\n=== catalogue rows are not build candidates (2.18.0) ===");
+(() => {
+  const whole = blocks[blocks.length - 1];
+  const from = whole.indexOf("function suggestSheets(project) {");
+  const to = whole.indexOf("/**\n * Build the package.");
+  if (from < 0 || to < 0) throw new Error("could not extract suggestSheets");
+  // Two combiners and three batteries in the table, as Kevin has.
+  const SPEC_SHEETS = [
+    { category: "Combiner", model: "IQ Combiner 5", file: "IQ_Combiner_5.pdf", order: 25, always: "false" },
+    { category: "Combiner", model: "IQ Combiner 6", file: "IQ_Combiner_6.pdf", order: 25, always: "false" },
+    { category: "ESS", model: "Powerwall 3", file: "ESS_PW3.pdf", order: 50, always: "false" },
+    { category: "ESS", model: "Enphase 5P",  file: "ESS_5P.pdf",  order: 50, always: "false" },
+    { category: "Gateway", model: "", file: "Gateway_IQ.pdf", order: 60, always: "true" },
+    { category: "EV", model: "", file: "EV_Charger.pdf", order: 80, always: "false" }
+  ];
+  const suggestSheets = new Function("SPEC_SHEETS", "sameText", "SPEC_CHOSEN_ON_PROJECT",
+    whole.slice(from, to) + " return suggestSheets;")(
+      SPEC_SHEETS, L.sameText, L.SPEC_CHOSEN_ON_PROJECT);
+
+  t("Combiner and ESS are chosen on Project Information", () =>
+    eq(L.SPEC_CHOSEN_ON_PROJECT, { "Combiner": "combiner_type", "ESS": "battery_type" }));
+
+  t("neither combiner appears as a tickable row", () => {
+    // The bug: both combiners were listed, so both could be ticked for one job.
+    const cats = suggestSheets({}).map(x => x.row.category);
+    eq(cats.includes("Combiner"), false);
+    eq(cats.includes("ESS"), false);
+  });
+
+  t("what remains is only equipment with no field of its own", () =>
+    eq(suggestSheets({}).map(x => x.row.category), ["Gateway", "EV"]));
+
+  t("a catalogue of five leaves two candidates", () => {
+    eq([SPEC_SHEETS.length, suggestSheets({}).length], [6, 2]);
+  });
+
+  t("Always still works on what is left", () => {
+    const g = suggestSheets({}).find(x => x.row.category === "Gateway");
+    eq([g.matched, g.why], [true, "always included"]);
+  });
+
+  t("the surviving rows keep their index into SPEC_SHEETS", () => {
+    // The filter must not renumber, or ticking a row would toggle a different one.
+    suggestSheets({}).forEach(x => {
+      if (SPEC_SHEETS[x.index] !== x.row)
+        throw new Error("index " + x.index + " does not point at its own row");
+    });
+  });
+})();
+
+t("exactly one combiner and one ESS can reach a package", () => {
+  // equipmentSheets contributes one of each, from the project's chosen type;
+  // suggestSheets contributes none. So the count can never exceed one.
+  const c = L.offeringChecklist("Solar + Battery",
+    ["Module", "Combiner", "Inverter", "Racking", "Attachment", "ESS", "Gateway"]);
+  eq([c.ok, c.duplicated], [true, []]);
+});
 
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {

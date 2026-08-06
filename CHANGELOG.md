@@ -3,6 +3,67 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.18.0 — 2026-08-06
+
+### Only one combiner and one ESS can reach a project
+
+Two Combiner rows in the reference table meant **two tickable Combiner rows** on
+the Spec Sheets tab, and both could be selected for one job. Same for the three
+batteries.
+
+A Combiner or ESS row is a **catalogue entry** — it populates the Combiner type
+and Battery dropdowns on Project Information. Only the one the project names
+belongs in the package. `suggestSheets` now excludes both categories entirely;
+`equipmentSheets` contributes exactly the one that was chosen.
+
+So the count can no longer exceed one, whatever is in the table. What is left on
+the Spec Sheets tab is only equipment with no field of its own — Gateway, Heat
+Detector, Bollard, System Shutdown Switch, EV.
+
+The filter keeps each surviving row's original index into `SPEC_SHEETS`. Renumbering
+would have made a tick toggle a different row; there is a test for that.
+
+### Attachment and racking may repeat, one at a time
+
+A project can genuinely use more than one fastener or rail across roof planes, so
+both accept extras. **One of each is still offered** — the one that comes across
+from the roof type — with an **"Add another"** button per category.
+
+The picker lists only unused files matching that category's prefix, and disables
+the button when none are left:
+
+```
+Add another:  [+ Racking — disabled: no unused Racking_* files left]
+              [+ Attachment — 3 unused files available]
+```
+
+An added sheet is placed immediately after the existing rows of its category, so
+merge order stays grouped, and is marked *"added by hand for this project"*. It
+lives for that build only — it is a property of the project, not of the roof type,
+so nothing is written back to the reference tables.
+
+**Combiner and ESS are deliberately not repeatable**, by rule.
+
+### Filename conventions completed
+
+| Category | Prefix |
+|---|---|
+| Gateway | `Gateway_` |
+| Heat Detector | `HD_` |
+| Bollard | `Bollard_` |
+| System Shutdown Switch | `SSS_` |
+| EV | `EV_` |
+| Combiner, ESS | none — every file listed |
+
+Prefixes are now read from whichever table defines the category rather than
+restated: `categoryPrefix()` reads `Attachment_` and `Racking_` off the Roof,
+attachment & railing schema, and the rest off `SPEC_PREFIX`. Four hard-coded
+copies of the same string is how they drift apart.
+
+### Tests
+
+342 passing, up from 325.
+
 ## 2.17.2 — 2026-08-06
 
 ### Fixes: every category reported "missing" while every sheet was ticked

@@ -988,6 +988,7 @@
               <button id="btnSpecAll" type="button">Select all</button>
               <button id="btnSpecNone" type="button">Select none</button>
             </div>
+            <div id="specAddRow" style="margin-top:10px"></div>
 
             <div style="overflow-x:auto; margin-top:10px; max-height:420px; overflow-y:auto">
               <table>
@@ -1153,7 +1154,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.17.2";
+const APP_VERSION = "2.18.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2204,8 +2205,11 @@ const SPEC_CATEGORIES = [
  * one would hide correctly named files from the dropdown.
  */
 const SPEC_PREFIX = {
-  "Gateway": "Gateway_",
-  "Heat Detector": "HD_"
+  "Gateway":                "Gateway_",
+  "Heat Detector":          "HD_",
+  "Bollard":                "Bollard_",
+  "System Shutdown Switch": "SSS_",
+  "EV":                     "EV_"
 };
 
 /**
@@ -2215,7 +2219,39 @@ const SPEC_PREFIX = {
  * different datasheets for one item cannot tell which is installed. A gateway is
  * different: a system can genuinely ship more than one.
  */
-const SPEC_MULTI = ["Gateway"];
+const SPEC_MULTI = ["Attachment", "Racking", "Gateway"];
+
+/**
+ * The filename prefix for a category, read from wherever that category is
+ * actually defined rather than restated here. Four copies of "Attachment_" in
+ * four files is how they drift apart.
+ */
+function categoryPrefix(category) {
+  const c = String(category || "").trim().toLowerCase();
+  const fromField = (table, field) => {
+    const f = ((TABLE_SCHEMAS[table] || {}).fields || []).find(x => x.name === field);
+    return (f && f.prefix) || "";
+  };
+  if (c === "module")     return fromField("MODULE_DB", "specSheet");
+  if (c === "inverter")   return fromField("RT_MI", "specSheet");
+  if (c === "attachment") return fromField("RT_ROOF", "attachmentSheet");
+  if (c === "racking")    return fromField("RT_ROOF", "railingSheet");
+  const hit = Object.keys(SPEC_PREFIX).find(k => k.toLowerCase() === c);
+  return hit ? SPEC_PREFIX[hit] : "";
+}
+
+/**
+ * Categories chosen by a field on Project Information rather than ticked here.
+ *
+ * A Spec sheets row for one of these is a CATALOGUE entry — it populates that
+ * field's dropdown. Only the one the project actually names belongs in the
+ * package, so the rest must not be offered: listing every combiner in the table
+ * let two be ticked for one project.
+ */
+const SPEC_CHOSEN_ON_PROJECT = {
+  "Combiner": "combiner_type",
+  "ESS": "battery_type"
+};
 
 /** Categories owned by an equipment table, so never valid in Spec sheets. */
 const SPEC_CATEGORIES_OWNED_ELSEWHERE = {
@@ -2245,10 +2281,13 @@ const PRODUCT_OFFERINGS = [
 const OFFERING_COMPONENTS = {
   solar: [
     { category: "Module",     required: true },
+    // Exactly one combiner per project, by rule.
     { category: "Combiner",   required: true },
     { category: "Inverter",   required: true },
-    { category: "Racking",    required: true },
-    { category: "Attachment", required: true }
+    // A project can use more than one rail or fastener across roof planes, so
+    // these accept extras — but only one is offered until you ask for another.
+    { category: "Racking",    required: true, multi: true },
+    { category: "Attachment", required: true, multi: true }
   ],
   battery: [
     { category: "ESS",                     required: true  },
@@ -2412,10 +2451,12 @@ const TABLE_SCHEMAS = {
           "are linked on PV modules, Microinverters, and Roof, attachment & " +
           "railing, and a second copy would let two sources disagree. " +
           "A Combiner row's 'Type / model' is what the Combiner type dropdown " +
-          "on Project Information offers. For equipment with no field of its " +
-          "own, set Always to true or tick it by hand. 'Merge order' fixes the " +
-          "sequence: module 10, inverter 20, combiner 25, attachment 30, " +
-          "racking 40.",
+          "on Project Information offers, and an ESS row's is what the Battery " +
+          "dropdown offers. For equipment with no field of its own, set Always " +
+          "to true or tick it by hand. Filename conventions: Gateway_, HD_, " +
+          "Bollard_, SSS_, EV_ — Combiner and ESS have none, so those list every " +
+          "file. 'Merge order' fixes the sequence: module 10, inverter 20, " +
+          "combiner 25, attachment 30, racking 40, ESS 50.",
     key: "file",
     fields: [
       { name: "category", type: "text", required: true, label: "Equipment",
@@ -2879,8 +2920,9 @@ if (typeof module !== "undefined" && module.exports) {
     SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
     offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
-    SPEC_CATEGORIES, SPEC_CATEGORIES_OWNED_ELSEWHERE, combinerTypes, combinerRow,
-    SPEC_PREFIX, SPEC_MULTI, batteryTypes, batteryRow,
+    SPEC_CATEGORIES, SPEC_CATEGORIES_OWNED_ELSEWHERE, SPEC_CHOSEN_ON_PROJECT,
+    combinerTypes, combinerRow,
+    SPEC_PREFIX, SPEC_MULTI, batteryTypes, batteryRow, categoryPrefix,
     rowKeyOf, rowKeyLabel,
     TABLE_SCHEMAS, validateTable, exportTable, coerceCell, blankRow,
     getTable, setTable,
@@ -4605,7 +4647,14 @@ function suggestSheets(project) {
   // so it relies on Always or a manual tick.
   const hay = [project.roof_type].filter(Boolean).map(s => String(s).toUpperCase());
 
-  return SPEC_SHEETS.map((row, i) => {
+  // Combiner and ESS rows are a catalogue for the Project Information dropdowns.
+  // equipmentSheets already contributes the one the project names, so offering
+  // the others here would let a second combiner be ticked for one project.
+  const catalogue = Object.keys(SPEC_CHOSEN_ON_PROJECT);
+
+  return SPEC_SHEETS.map((row, i) => ({ row, i }))
+    .filter(({ row }) => !catalogue.some(c => sameText(c, row.category)))
+    .map(({ row, i }) => {
     const model = String(row.model || "").trim().toUpperCase();
     let matched = false, why = "";
     if (!model) {
@@ -4913,6 +4962,118 @@ function specRenderChecklist(chk) {
   box.innerHTML = `<div class="kv">${cells}</div>` + notes.join("");
 }
 
+/**
+ * "Add another" controls for the categories that may repeat.
+ *
+ * One attachment and one racking come across from the roof type, which is right
+ * for almost every project. A second roof plane occasionally needs a different
+ * fastener, so rather than listing every candidate up front the extra is added
+ * on request — the common case stays one row per category.
+ *
+ * An added sheet lives for this build only. It is not written back to the
+ * reference tables, because it is a property of this project rather than of the
+ * roof type.
+ */
+function specRenderAddControls() {
+  const box = $("specAddRow");
+  if (!box) return;
+  box.textContent = "";
+  const off = offeringByName(specOfferingName());
+  if (!off) return;
+
+  const cats = offeringComponents(specOfferingName())
+    .filter(c => c.multi).map(c => c.category);
+  if (!cats.length) return;
+
+  const all = Array.isArray(SPEC_FOLDER_FILES) ? SPEC_FOLDER_FILES : [];
+  const taken = new Set(SPEC_ROWS.map(r => String(r.file || "").toLowerCase()));
+
+  const label = document.createElement("span");
+  label.className = "hint";
+  label.textContent = "Add another: ";
+  box.appendChild(label);
+
+  cats.forEach(cat => {
+    const pre = String(categoryPrefix(cat) || "").toLowerCase();
+    const spare = all.filter(f => {
+      const nm = f.name.toLowerCase();
+      return (!pre || nm.startsWith(pre)) && !taken.has(nm);
+    });
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.style.cssText = "margin-left:8px;padding:2px 9px";
+    btn.textContent = "+ " + cat;
+    if (!spare.length) {
+      btn.disabled = true;
+      btn.title = pre
+        ? `No unused ${pre}* files left in ${SPEC_FOLDER}`
+        : `No unused files left in ${SPEC_FOLDER}`;
+    } else {
+      btn.title = `${spare.length} unused ${pre || ""}* file(s) available`;
+      btn.addEventListener("click", () => specOpenAddPicker(cat, spare));
+    }
+    box.appendChild(btn);
+  });
+}
+
+/** Show the file picker for one extra sheet, then add it. */
+function specOpenAddPicker(category, candidates) {
+  const box = $("specAddRow");
+  if (!box) return;
+  box.textContent = "";
+
+  const label = document.createElement("span");
+  label.className = "hint";
+  label.textContent = "Extra " + category.toLowerCase() + ": ";
+
+  const sel = document.createElement("select");
+  sel.style.cssText = "max-width:420px;margin:0 8px";
+  sel.innerHTML = candidates
+    .map(f => `<option value="${f.name.replace(/"/g, "&quot;")}">${f.name}</option>`)
+    .join("");
+
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "primary";
+  add.style.cssText = "padding:2px 9px";
+  add.textContent = "Add";
+  add.addEventListener("click", () => {
+    specAddSheet(category, sel.value);
+  });
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.style.cssText = "margin-left:6px;padding:2px 9px";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", specRenderAddControls);
+
+  box.appendChild(label); box.appendChild(sel);
+  box.appendChild(add); box.appendChild(cancel);
+}
+
+/** Append an extra sheet for this build. */
+function specAddSheet(category, file) {
+  const name = String(file || "").trim();
+  if (!name) return;
+  if (SPEC_ROWS.some(r => sameText(r.file, name))) {
+    showMsg(`"${name}" is already in the list.`, "warn");
+    return;
+  }
+  // Sit immediately after the existing rows of the same category, so the merge
+  // order stays grouped rather than dropping the extra at the end.
+  const base = SPEC_ROWS.filter(r => sameText(r.category, category))
+    .reduce((mx, r) => Math.max(mx, Number(r.order) || 0), 0);
+  SPEC_ROWS.push({
+    category, model: "(added for this project)", file: name,
+    order: base ? base + 1 : 999, selected: true, source: "manual",
+    why: "added by hand for this project — not saved to the reference tables"
+  });
+  SPEC_ROWS.sort((a, b) => (Number(a.order) || 999) - (Number(b.order) || 999));
+  specRenderRows();
+  specRefreshBuildState();
+  showMsg(`Added ${category.toLowerCase()} sheet "${name}" to this package.`, "ok");
+}
+
 function specRenderRows() {
   if (!SPEC_ROWS.length) {
     $("specBody").innerHTML =
@@ -4978,6 +5139,7 @@ function specRefreshBuildState() {
   specRenderChecklist(chk);
   // The offering is part of the definition of done, so it gates the build the
   // same way a missing plot does.
+  specRenderAddControls();
   const ready = !!(SPEC_PROJECT && SPEC_PLOT && sel.length && chk.ok &&
                    offeringByName(specOfferingName()));
   $("btnSpecBuild").disabled = !ready;
