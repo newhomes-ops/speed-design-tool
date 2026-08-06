@@ -1153,7 +1153,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.17.1";
+const APP_VERSION = "2.17.2";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -4849,7 +4849,7 @@ function specOfferingName() {
 /** The checklist for the project's offering against the ticked sheets. */
 function specChecklist() {
   return offeringChecklist(specOfferingName(),
-                           specSelected().map(s => s.category));
+                           specSelectedRows().map(r => r.category));
 }
 
 /** Draw the checklist. */
@@ -4955,9 +4955,21 @@ function specRenderRows() {
     b.addEventListener("click", () => move(Number(b.dataset.i), 1)));
 }
 
+/**
+ * The ticked rows whose PDF is actually in the folder.
+ *
+ * Kept separate from specSelected() because that reshapes rows into the
+ * {name, handle} pairs buildPackage wants, dropping every other field. Feeding
+ * those to the checklist meant `category` was always undefined, so every tick
+ * was discarded as blank and every required category read as missing however
+ * many sheets were selected.
+ */
+function specSelectedRows() {
+  return SPEC_ROWS.filter(r => r.selected && specFileHandle(r.file));
+}
+
 function specSelected() {
-  return SPEC_ROWS.filter(r => r.selected && specFileHandle(r.file))
-    .map(r => ({ name: r.file, handle: specFileHandle(r.file) }));
+  return specSelectedRows().map(r => ({ name: r.file, handle: specFileHandle(r.file) }));
 }
 
 function specRefreshBuildState() {

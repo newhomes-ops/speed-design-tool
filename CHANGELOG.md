@@ -3,6 +3,44 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.17.2 — 2026-08-06
+
+### Fixes: every category reported "missing" while every sheet was ticked
+
+Module, Inverter, Combiner, Attachment and Racking all ticked, every PDF found —
+and the checklist still said all five were missing, so the build stayed blocked.
+
+`specSelected()` reshapes the ticked rows into the `{name, handle}` pairs
+`buildPackage` needs, dropping every other field. The checklist was reading
+`category` off *those*, so it was always `undefined`, every tick was discarded as
+blank, and each required category read as missing however many sheets were
+selected.
+
+Split into two functions with distinct jobs:
+
+- `specSelectedRows()` — the ticked rows, intact. What the checklist reads.
+- `specSelected()` — those rows reshaped for the merge. Unchanged for
+  `buildPackage`.
+
+### Why the tests missed it
+
+`offeringChecklist` was never wrong, and it has 19 tests. The fault was in what
+*fed* it — glue between the DOM and the pure logic, which no pure test can see.
+
+Four new tests cover the shapes, and a fifth pins the **wiring**: it extracts
+`specChecklist` and injects only `specSelectedRows`, deliberately **not**
+`specSelected`. If the wiring ever reverts, that test throws
+`specSelected is not defined` rather than quietly passing.
+
+That distinction mattered here. The first four tests passed against the *broken*
+code — they proved both shapes behaved as documented without proving which one
+was actually used. Verified by reverting the fix: 324 pass, 1 fails, and it is the
+wiring test.
+
+### Tests
+
+325 passing, up from 318.
+
 ## 2.17.1 — 2026-08-06
 
 ### Fixes a startup crash I shipped

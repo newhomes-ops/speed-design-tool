@@ -1536,6 +1536,93 @@ t("a battery offering asks for exactly the battery components", () =>
      [["ESS", true, false], ["Gateway", true, true], ["Heat Detector", false, false],
       ["Bollard", false, false], ["System Shutdown Switch", false, false]]));
 
+/* specChecklist and specSelected read module-level DOM state, so they are
+   extracted and exercised directly. offeringChecklist was always correct — the
+   2.17.1 bug was in what fed it, which no pure test could see. */
+console.log("\n=== the checklist is fed the ticked rows (2.17.2) ===");
+(() => {
+  const whole = blocks[blocks.length - 1];
+  const from = whole.indexOf("function specSelectedRows() {");
+  const to = whole.indexOf("function specRefreshBuildState() {");
+  if (from < 0 || to < 0) throw new Error("could not extract specSelectedRows");
+  // Kevin's actual project: five categories ticked, every PDF present.
+  const SPEC_ROWS = [
+    { category: "Module",     file: "Module_Q.TRON BLK M-G2+.pdf",   selected: true },
+    { category: "Inverter",   file: "Inverter_IQ8MC.pdf",            selected: true },
+    { category: "Combiner",   file: "IQ_Combiner_5.pdf",             selected: true },
+    { category: "Combiner",   file: "Inverter_IQ8HC.pdf",            selected: false },
+    { category: "Attachment", file: "Attachment_Instaflash_2.pdf",   selected: true },
+    { category: "Racking",    file: "Racking_Pegasus_Rail_System.pdf", selected: true },
+    { category: "ESS",        file: "",                              selected: false }
+  ];
+  const F = new Function("SPEC_ROWS", "specFileHandle",
+    whole.slice(from, to) + " return { specSelectedRows, specSelected };")(
+      SPEC_ROWS, f => (f ? { name: f } : null));
+
+  t("every ticked row keeps its category", () => {
+    const cats = F.specSelectedRows().map(r => r.category);
+    eq(cats, ["Module", "Inverter", "Combiner", "Attachment", "Racking"]);
+    // The regression: this is what used to be passed to offeringChecklist.
+    const viaMergePayload = F.specSelected().map(x => x.category);
+    eq(viaMergePayload, [undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  t("Solar Only is satisfied by those five ticks", () => {
+    const c = L.offeringChecklist("Solar Only", F.specSelectedRows().map(r => r.category));
+    eq([c.ok, c.missing, c.duplicated], [true, [], []]);
+  });
+
+  t("the merge payload would have reported all five missing", () => {
+    // Exactly the screenshot: everything ticked, everything "missing".
+    const c = L.offeringChecklist("Solar Only", F.specSelected().map(x => x.category));
+    eq(c.ok, false);
+    eq(c.missing, ["Module", "Combiner", "Inverter", "Racking", "Attachment"]);
+  });
+
+  t("an unticked row does not satisfy its category", () => {
+    // Only one of the two Combiner rows is ticked, so Combiner counts once.
+    const c = L.offeringChecklist("Solar Only", F.specSelectedRows().map(r => r.category));
+    eq(c.rows.find(r => r.category === "Combiner").count, 1);
+  });
+
+  t("a ticked row whose PDF is absent does not count", () => {
+    // specFileHandle returns null for a file not in the folder; such a row can
+    // never merge, so it must not satisfy its category either.
+    const G = new Function("SPEC_ROWS", "specFileHandle",
+      whole.slice(from, to) + " return { specSelectedRows };")(
+        [{ category: "Module", file: "gone.pdf", selected: true }],
+        () => null);
+    eq(G.specSelectedRows(), []);
+  });
+
+  t("specChecklist itself reads the rows, not the merge payload", () => {
+    // The previous tests pin the two shapes. This one pins the wiring between
+    // them, which is where the bug actually lived: reverting that one line must
+    // fail here, not pass quietly.
+    const cFrom = whole.indexOf("function specChecklist() {");
+    const cTo = whole.indexOf("/** Draw the checklist. */");
+    if (cFrom < 0 || cTo < 0) throw new Error("could not extract specChecklist");
+    const specChecklist = new Function(
+      "offeringChecklist", "specOfferingName", "specSelectedRows",
+      whole.slice(cFrom, cTo) + " return specChecklist;")(
+        L.offeringChecklist, () => "Solar Only", F.specSelectedRows);
+    // specSelected is deliberately NOT injected: if the wiring reverts to it,
+    // this throws ReferenceError instead of silently reporting everything missing.
+    const c = specChecklist();
+    eq([c.ok, c.missing], [true, []]);
+  });
+
+  t("the merge payload still has what buildPackage needs", () => {
+    // The split must not break the other consumer.
+    const p = F.specSelected();
+    eq(p.length, 5);
+    p.forEach(x => {
+      if (!x.name || !x.handle) throw new Error("merge payload lost name/handle");
+    });
+    eq(p[0].name, "Module_Q.TRON BLK M-G2+.pdf");
+  });
+})();
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });
