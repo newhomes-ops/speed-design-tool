@@ -3,6 +3,143 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.25.0 — 2026-08-07
+
+### The workbook owns the part numbers it has
+
+2.24.0 put `Part number` and `Domestic part number` on PV modules, Microinverters
+and Spec sheets, with a tick to choose between them. That was wrong: the
+supplier's workbook already carries the correct part number for everything it
+contains, domestic or not, so the reference tables were a second source for a
+fact that already had one.
+
+Removed:
+
+- `pn` and `pnDom` from **PV modules** and **Microinverters**
+- `pnDom` from **Spec sheets**
+- the **Domestic content** field, and `domestic_content` from `project.json`
+
+**Spec sheets keeps a single `Part number`** — it is the only table holding
+equipment the workbook never contains.
+
+Module, inverter and racking lines are now taken from the workbook **verbatim**.
+Nothing is superseded, so the supersession notice is gone too.
+
+### For a domestic variant of a non-workbook item, add a row
+
+Two rows rather than a flag:
+
+| Type / model | Part number |
+|---|---|
+| IQ Combiner 5 | `X-IQ-AM1-240-5` |
+| IQ Combiner 5 (domestic) | `X-IQ-AM1-240-5C` |
+
+Both appear in the **Combiner type** dropdown, and picking one picks its part
+number. Simpler than a toggle, and it extends to ESS, gateways and the rest
+without further code.
+
+### Unchanged
+
+The line order you asked for stands:
+
+```
+1  MODULE          Qcells               Q.TRON BLK M-G2.C+          29
+2  MICRO INVERTER  Enphase Energy Inc.  IQ8HC-72-M-DOM-US [240V]     1
+3  COMBINER        Enphase              X-IQ-AM1-240-5C              1
+4  RACKING         Pegasus              PSR-M84-US                  49
+```
+
+A combiner with no part number still produces a line and reports the gap, rather
+than printing a blank cell and saying nothing.
+
+### Tests
+
+393 passing. The domestic-content tests were replaced by ones asserting the
+opposite: that `pnDom` exists nowhere, that only Spec sheets has `pn`, and that
+`bomExtraLines` adds a combiner but never a module or inverter.
+
+## 2.24.0 — 2026-08-07
+
+### The order leads with module, inverter, combiner
+
+```
+1  MODULE          QCELLS   QT-430-BLK-DOM      Q.TRON BLK M-G2.C+ 430      29
+2  MICRO INVERTER  Enphase  IQ8HC-72-M-DOM-US   IQ8HC-72-M-DOM-US (240 V)   29
+3  COMBINER        Enphase  X-IQ-AM1-240-5C     IQ Combiner 5                1
+4  RACKING         …
+```
+
+Everything after those three **keeps the order it arrived in**, so the supplier's
+racking sequence survives and a hand-added line stays where it was put. Sorting is
+stable, with a test for it.
+
+### Part numbers in the reference data
+
+`Part number` and `Domestic part number` on **PV modules**, **Microinverters** and
+**Spec sheets**.
+
+The workbook only has model names — `Q.TRON BLK M-G2.C+` is not something anyone
+can order against. So the first three lines are now built from the reference
+tables, and the workbook's own module and inverter lines are **superseded**. That
+is said out loud on the tab rather than done quietly:
+
+> 2 workbook line(s) for module/inverter were replaced by the reference tables,
+> which hold the part numbers: Q.TRON BLK M-G2.C+, IQ8HC-72-M-DOM-US [240V].
+
+Racking still comes from the workbook, which is the only place it exists.
+
+### Domestic content tick
+
+On Project Information, saved to `project.json`. It swaps all three part numbers at
+once.
+
+**With no domestic number on file it uses the standard one and says so.** A blank
+part number on a purchase order cannot even be queried, so the wrong flavour of a
+real number is the lesser harm — but never silently:
+
+> Combiner IQ Combiner 5: no domestic part number on file — used the standard one.
+
+A missing part number in *both* columns is reported too, rather than printing an
+empty cell.
+
+### Quantity
+
+The module and inverter lines take their quantity from the workbook's **Total
+Modules**, falling back to the project's module count. The workbook was produced
+from the final layout; the project field can lag behind it.
+
+### Worth knowing
+
+The part-number columns are **empty everywhere** — nothing could be invented for
+them. Until they are filled in, the three headline lines appear with blank part
+numbers and the tab says which ones are missing. Enter them on the three tabs and
+press **Save to folder**.
+
+### Tests
+
+397 passing, up from 381. Sixteen new, covering the fallback and its note, the
+flag reading `yes`/`true`/`1` but not `no`/`0`, stable sorting within a category,
+an unknown category never jumping the queue, and quantity preferring the workbook
+over the project.
+
+## 2.23.1 — 2026-08-07
+
+### The purchase order carries the SunPower mark
+
+The letterhead is the logo rather than the word "Sunpower".
+
+It is **read from the header `<img>` already in the page**, not embedded again.
+The PNG is 29 KB, so a second copy as JavaScript would be 39 KB of base64 that has
+to be kept in step with the first by hand — the sort of duplication that drifts.
+The header logo now carries `id="spwrLogo"` and the PDF reuses those exact bytes.
+
+Scaled to 26 pt tall from its native 943 × 128, so it keeps its proportions.
+
+**It falls back to the word if the logo will not embed.** A purchase order that
+fails to build because of a letterhead is a bad trade. Verified both paths: with
+the logo, a 943 × 128 image is embedded and the word is gone; with the logo
+unavailable, the text returns and the PDF still builds.
+
 ## 2.23.0 — 2026-08-07
 
 ### Phase 4 — Bill of Materials

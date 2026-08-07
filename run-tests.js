@@ -2317,6 +2317,112 @@ t("something that is not a workbook is refused clearly", async () => {
   if (!/not an \.xlsx/i.test(msg)) throw new Error("unhelpful error: " + msg);
 });
 
+console.log("\n=== Phase 4: part numbers, and line priority (2.25.0) ===");
+t("only Spec sheets carries a part number", () => {
+  // The workbook already holds the right part number for everything it contains,
+  // domestic or not. A second copy on the module and inverter tables was two
+  // sources for one fact.
+  const has = nm => L.TABLE_SCHEMAS[nm].fields.some(f => f.name === "pn");
+  eq([has("SPEC_SHEETS"), has("MODULE_DB"), has("RT_MI")], [true, false, false]);
+  const anyDom = Object.values(L.TABLE_SCHEMAS)
+    .flatMap(sc => (sc.fields || []).map(f => f.name)).filter(x => x === "pnDom");
+  eq(anyDom, []);
+});
+
+t("there is no domestic-content project field any more", () => {
+  if (L.FORM_FIELDS.includes("domestic_content"))
+    throw new Error("the toggle survived the change of mind");
+});
+
+t("module, inverter then combiner lead the order", () =>
+  eq(L.BOM_PRIORITY, ["MODULE", "MICRO INVERTER", "INVERTER", "COMBINER"]));
+
+t("everything else keeps the order it arrived in", () => {
+  const lines = [
+    { category: "RACKING", pn: "r1" }, { category: "COMBINER", pn: "c" },
+    { category: "MODULE", pn: "m" }, { category: "RACKING", pn: "r2" },
+    { category: "MICRO INVERTER", pn: "i" }, { category: "BREAKER", pn: "b" }
+  ];
+  eq(L.bomSortLines(lines).map(x => x.pn), ["m", "i", "c", "r1", "r2", "b"]);
+});
+
+t("sorting is stable for two lines of the same category", () => {
+  const lines = [{ category: "RACKING", pn: "a" }, { category: "RACKING", pn: "b" },
+                 { category: "RACKING", pn: "c" }];
+  eq(L.bomSortLines(lines).map(x => x.pn), ["a", "b", "c"]);
+});
+
+t("an unknown category sorts after the prioritised ones", () => {
+  eq([L.bomPriorityOf("MODULE"), L.bomPriorityOf("COMBINER")], [0, 3]);
+  if (!(L.bomPriorityOf("SOMETHING NEW") > L.bomPriorityOf("COMBINER")))
+    throw new Error("an unknown category jumped the queue");
+  eq(L.bomPriorityOf("module"), 0);
+});
+
+console.log("\n=== Phase 4: lines the workbook does not contain ===");
+(() => {
+  const withCombiner = (pn, fn) => {
+    const saved = L.getTable("SPEC_SHEETS");
+    try {
+      L.setTable("SPEC_SHEETS", [{ category: "Combiner", model: "IQ Combiner 5",
+        mfg: "Enphase", pn: pn, file: "", order: 25, always: "false" }]);
+      fn();
+    } finally { L.setTable("SPEC_SHEETS", saved); }
+  };
+
+  t("the combiner the project names is added, with its part number", () =>
+    withCombiner("X-IQ-AM1-240-5C", () => {
+      const r = L.bomExtraLines({ combiner_type: "IQ Combiner 5" });
+      eq(r.lines.map(l => [l.category, l.pn, l.qty]),
+         [["COMBINER", "X-IQ-AM1-240-5C", 1]]);
+      eq(r.notes, []);
+    }));
+
+  t("no module or inverter line is added — the workbook owns those", () =>
+    withCombiner("X", () => {
+      const r = L.bomExtraLines({ combiner_type: "IQ Combiner 5",
+        module_type: "Q.TRON BLK M-G2.C+ 430", mi_model: "IQ8HC-72-M-DOM-US @ 240V",
+        module_quantity: 29 });
+      eq(r.lines.map(l => l.category), ["COMBINER"]);
+    }));
+
+  t("a combiner with no part number is reported, not left blank in silence", () =>
+    withCombiner("", () => {
+      const r = L.bomExtraLines({ combiner_type: "IQ Combiner 5" });
+      eq(r.lines[0].pn, "");
+      if (!/has no part number/.test(r.notes.join(" "))) throw new Error(r.notes.join(" "));
+    }));
+
+  t("a combiner that is not in the table is reported", () =>
+    withCombiner("X", () => {
+      const r = L.bomExtraLines({ combiner_type: "IQ Combiner 9" });
+      eq(r.lines, []);
+      if (!/no Combiner row/.test(r.notes.join(" "))) throw new Error(r.notes.join(" "));
+    }));
+
+  t("no combiner chosen adds nothing and says nothing", () => {
+    const r = L.bomExtraLines({});
+    eq([r.lines, r.notes], [[], []]);
+  });
+
+  t("a domestic variant is just another row", () => {
+    // With the workbook owning domestic for its own items, the only place it
+    // matters is here — and two rows is simpler than a flag.
+    const saved = L.getTable("SPEC_SHEETS");
+    try {
+      L.setTable("SPEC_SHEETS", [
+        { category: "Combiner", model: "IQ Combiner 5", pn: "X-IQ-AM1-240-5",
+          file: "", order: 25, always: "false" },
+        { category: "Combiner", model: "IQ Combiner 5 (domestic)", pn: "X-IQ-AM1-240-5C",
+          file: "", order: 25, always: "false" }
+      ]);
+      eq(L.combinerTypes(), ["IQ Combiner 5", "IQ Combiner 5 (domestic)"]);
+      eq(L.bomExtraLines({ combiner_type: "IQ Combiner 5 (domestic)" }).lines[0].pn,
+         "X-IQ-AM1-240-5C");
+    } finally { L.setTable("SPEC_SHEETS", saved); }
+  });
+})();
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });
