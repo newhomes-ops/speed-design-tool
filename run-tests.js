@@ -1921,6 +1921,81 @@ console.log("\n=== the form is remembered across a reload (2.20.0) ===");
   });
 })();
 
+console.log("\n=== reference table column widths (2.20.1) ===");
+(() => {
+  const whole = blocks[blocks.length - 1];
+  const from = whole.indexOf("function rdColumnWidth(field, schema) {");
+  const to = whole.indexOf("function rdRender() {");
+  if (from < 0 || to < 0) throw new Error("could not extract rdColumnWidth");
+  const w = new Function(whole.slice(from, to) + " return rdColumnWidth;")();
+  const pct = (f, sc) => parseFloat(w(f, sc));
+
+  t("numbers are narrow, names and filenames are wide", () => {
+    const sc = L.TABLE_SCHEMAS.MODULE_DB;
+    const by = nm => sc.fields.find(f => f.name === nm);
+    const isc = pct(by("Isc"), sc), name = pct(by("name"), sc), sheet = pct(by("specSheet"), sc);
+    if (!(isc < name && name < sheet))
+      throw new Error(`expected Isc < name < specSheet, got ${isc} ${name} ${sheet}`);
+  });
+
+  t("no table's columns overflow the row", () => {
+    // The # and Delete columns take fixed pixels; the rest must leave room.
+    const over = [];
+    Object.entries(L.TABLE_SCHEMAS).forEach(([nm, sc]) => {
+      if (sc.scalar) return;
+      const total = sc.fields.reduce((a, f) => a + pct(f, sc), 0);
+      if (total > 100) over.push(nm + " " + total.toFixed(1) + "%");
+    });
+    eq(over, []);
+  });
+
+  t("every column gets a width, whatever its type", () => {
+    const bad = [];
+    Object.entries(L.TABLE_SCHEMAS).forEach(([nm, sc]) => {
+      if (sc.scalar) return;
+      sc.fields.forEach(f => {
+        const v = w(f, sc);
+        if (!/^[\d.]+%$/.test(v)) bad.push(nm + "." + f.name + " -> " + v);
+      });
+    });
+    eq(bad, []);
+  });
+
+  t("the widest table still fits", () => {
+    // MODULE_DB has eleven columns and is the tightest case.
+    const sc = L.TABLE_SCHEMAS.MODULE_DB;
+    const total = sc.fields.reduce((a, f) => a + pct(f, sc), 0);
+    if (total > 100) throw new Error("MODULE_DB totals " + total + "%");
+    if (sc.fields.length < 11) throw new Error("expected MODULE_DB to still be the wide one");
+  });
+})();
+
+console.log("\n=== the package follows project.json, and says so (2.20.1) ===");
+t("the fields that change a package are the ones watched", () => {
+  const whole = blocks[blocks.length - 1];
+  const m = whole.match(/const SPEC_RELEVANT_FIELDS = \[([^\]]*)\]/);
+  if (!m) throw new Error("SPEC_RELEVANT_FIELDS not found");
+  const watched = m[1].match(/"([a-z_]+)"/g).map(x => x.replace(/"/g, ""));
+  eq(watched, ["product_offering", "module_type", "inverter_model", "combiner_type",
+               "battery_type", "roof_type", "state"]);
+  // Every one must be a real project field, or the notice can never fire.
+  const notAField = watched.filter(f => !L.FORM_FIELDS.includes(f));
+  eq(notAField, []);
+});
+
+t("each watched field really does change what equipmentSheets returns", () => {
+  // If a field were watched but had no effect, the notice would nag for nothing;
+  // if one had an effect but were unwatched, a stale package would ship silently.
+  const whole = blocks[blocks.length - 1];
+  const from = whole.indexOf("function equipmentSheets(project) {");
+  const to = whole.indexOf("/** Which spec sheets does this project's equipment call for? */");
+  const src = whole.slice(from, to);
+  const used = ["module_type", "mi_model", "inverter_model", "combiner_type",
+                "battery_type", "roof_type", "state"];
+  const missing = used.filter(f => !src.includes("project." + f));
+  eq(missing, []);
+});
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });

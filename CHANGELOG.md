@@ -3,6 +3,49 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.20.1 — 2026-08-06
+
+### Fixes: the Roof type dropdown was empty even with the table loaded
+
+`roofSelectPopulate()` was never called from `pvPopulateSelectors()`, so the
+dropdown was built **once at startup** — when `RT_ROOF` is still empty — and never
+rebuilt. Loading the folder's reference data refreshed every other dropdown and
+left this one blank however many roof types the table held.
+
+It is now rebuilt alongside the module, inverter, combiner and battery dropdowns.
+
+### Changing the roof type after generating now says what to do
+
+The package is built from **`project.json`**, not from the form — deliberately, so
+a package reflects the project as recorded rather than whatever happens to be on
+screen. The cost was that editing the roof type and going straight to Spec Sheets
+looked like the attachment and racking had simply gone missing.
+
+The tab now says so, and offers the fix in place:
+
+> This package is built from **project.json**, which does not yet have your change
+> to **Roof type**. Save it, then Reload here.  `[Update project.json]`
+
+The button saves and reloads the package in one step. Seven fields are watched —
+product offering, module, inverter, combiner, battery, roof type and state — and
+there is a test asserting each of them is both a real project field and one that
+`equipmentSheets` actually reads. A watched field with no effect would nag for
+nothing; an unwatched field with an effect would ship a stale package silently.
+
+### Reference table column widths
+
+Widths now follow what a column holds rather than being equal. Numbers get 6%,
+key columns 16%, spec-sheet pickers 22%.
+
+Before, `Isc (A)` was as wide as `Model name`, so model names and PDF filenames
+were clipped while four-character numbers had room to spare. Percentages rather
+than pixels, so the table still fills the full-width Reference Data view, and a
+test asserts no table's columns total more than 100%.
+
+### Tests
+
+358 passing, up from 352.
+
 ## 2.20.0 — 2026-08-06
 
 ### Folders collapse to one line

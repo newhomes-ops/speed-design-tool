@@ -1005,6 +1005,7 @@
             </div>
           </div>
           <div class="hint" id="specOfferingNote" style="margin-top:8px"></div>
+          <div id="specUnsaved" style="display:none; margin-top:10px"></div>
 
           <div id="specDetail" style="display:none; margin-top:16px">
             <div id="specPlot"></div>
@@ -1179,7 +1180,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.20.0";
+const APP_VERSION = "2.20.1";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -4996,10 +4997,61 @@ function specChecklist() {
                            specSelectedRows().map(r => r.category));
 }
 
+/** Fields that change what goes into the package. */
+const SPEC_RELEVANT_FIELDS = [
+  "product_offering", "module_type", "inverter_model", "combiner_type",
+  "battery_type", "roof_type", "state"
+];
+
+/**
+ * Warn when the form has changes this package will not see.
+ *
+ * equipmentSheets reads the saved manifest, because a package must reflect the
+ * project as recorded rather than whatever is on screen. The cost is that an
+ * edit made after generating looks like it did nothing — so name the fields and
+ * point at the button that commits them.
+ */
+function specRenderUnsaved() {
+  const box = $("specUnsaved");
+  if (!box) return;
+  box.style.display = "none";
+  box.textContent = "";
+  if (!SPEC_PROJECT || !state.loaded || state.loaded.id !== SPEC_PROJECT.id) return;
+
+  const saved = SPEC_PROJECT.entry.manifest || {};
+  const diffs = SPEC_RELEVANT_FIELDS.filter(f => {
+    const el = $(f);
+    if (!el) return false;
+    return String(el.value || "").trim() !== String(saved[f] || "").trim();
+  });
+  if (!diffs.length) return;
+
+  box.style.display = "";
+  box.className = "msg show warn";
+  const span = document.createElement("span");
+  span.innerHTML = "This package is built from <b>project.json</b>, which does not " +
+    "yet have your change to <b>" + diffs.map(f => modEscHtml(label(f))).join("</b>, <b>") +
+    "</b>. Save it, then Reload here.";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Update project.json";
+  btn.style.cssText = "margin-left:10px;padding:2px 9px";
+  btn.addEventListener("click", async () => {
+    await saveProjectJson();
+    await specChooseProject(SPEC_PROJECT.id);
+  });
+  box.appendChild(span); box.appendChild(btn);
+}
+
 /** Draw the checklist. */
 function specRenderChecklist(chk) {
   const box = $("specChecklist");
   if (!box) return;
+
+  // The package is built from project.json, not from the form. Changing the roof
+  // type and coming straight here would silently use the old attachment, so say
+  // so rather than letting it look like the table is at fault.
+  specRenderUnsaved();
 
   // No offering on the project: say so here rather than showing an empty
   // checklist that looks like everything passed.
@@ -5362,6 +5414,24 @@ function rdPopulateSelector() {
   });
 }
 
+/**
+ * How wide a reference-table column should be.
+ *
+ * Percentages rather than pixels so the table still fills the width on the
+ * full-screen Reference Data view. Numbers are capped tightly because Isc and
+ * Voc are four characters, while a model name or a filename is the whole point
+ * of the row and must not be clipped.
+ */
+function rdColumnWidth(field, schema) {
+  if (field.type === "specfile") return "22%";
+  if (field.type === "number" || field.type === "int") return "6%";
+  if (Array.isArray(field.choices)) return "9%";
+  // The key columns identify the row, so they get the space.
+  const keys = schema.keyFields || (schema.key ? [schema.key] : []);
+  if (keys.some(k => k === field.name)) return "16%";
+  return "11%";
+}
+
 function rdRender() {
   const name = rdCurrent;
   const schema = TABLE_SCHEMAS[name];
@@ -5377,10 +5447,14 @@ function rdRender() {
   $("rd_note").innerHTML = schema.note || "";
 
   // Header
+  // Width by what the column actually holds. Numbers need very little; a model
+  // name or a PDF filename needs most of the row, and truncating those is what
+  // makes the table unreadable.
   $("rd_head").innerHTML =
-    '<th style="width:44px">#</th>' +
-    schema.fields.map(f => `<th>${f.label || f.name}</th>`).join("") +
-    '<th style="width:70px"></th>';
+    '<th style="width:40px">#</th>' +
+    schema.fields.map(f =>
+      `<th style="width:${rdColumnWidth(f, schema)}">${f.label || f.name}</th>`).join("") +
+    '<th style="width:74px"></th>';
 
   // Filter, remembering each row's true index.
   const indexed = rows.map((r, i) => ({ r, i }));
@@ -6545,6 +6619,10 @@ function pvPopulateSelectors() {
   miSelectPopulate();
   combinerSelectPopulate();
   batterySelectPopulate();
+  // Was missing: the roof dropdown was built once at startup, when RT_ROOF is
+  // still empty, and never again — so loading the folder's reference data left
+  // it blank however many roof types the table held.
+  if (typeof roofSelectPopulate === "function") roofSelectPopulate();
   specPopulateOfferings();
 
   // Built from SERVICE_VOLTAGES, the same list the Vac column is constrained
