@@ -442,6 +442,17 @@
     main { grid-template-columns: 1fr; max-width: none; }
     .panel { break-inside: avoid; box-shadow: none; }
   }
+
+    /* Reference Data: one block per kind of table. Twenty-two in a flat strip is
+       unmanageable, and electrical values and document links are edited for
+       different reasons. */
+    .rd-group { margin-bottom: 14px; }
+    .rd-group-h {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; color: var(--muted);
+      padding: 0 2px 5px; border-bottom: 1px solid var(--line); margin-bottom: 7px;
+    }
+    .rd-group-b { display: flex; flex-wrap: wrap; gap: 6px; }
 </style>
 </head>
 <body>
@@ -865,6 +876,11 @@
                 temperature adder. The cold case takes none.</div>
             </div>
             <div>
+              <label for="pv_dc_mci">Mid-circuit interrupter</label>
+              <select id="pv_dc_mci"></select>
+              <div id="pv_dc_mci_note" class="hint" style="margin-top:5px"></div>
+            </div>
+            <div>
               <label for="pv_dc_jumper">MPPT jumper fitted</label>
               <select id="pv_dc_jumper">
                 <option value="">No</option><option value="1">Yes</option>
@@ -995,7 +1011,7 @@
           <div style="overflow-x:auto; margin-top:10px"><table id="pv_dc_res">
             <thead><tr><th>#</th><th>Modules</th><th>MPPT</th>
               <th>Voc cold (V)</th><th>Vmp hot (V)</th>
-              <th>Max current (A)</th><th>Run ft</th><th>Status</th></tr></thead>
+              <th>Max current (A)</th><th>MCIs</th><th>Run ft</th><th>Status</th></tr></thead>
             <tbody></tbody></table></div>
         </div>
 
@@ -1007,6 +1023,10 @@
         <div class="hint" style="margin-bottom:6px">Romex NM-B in free air, SER-AL on the service feeder.</div>
         <div style="overflow-x:auto"><table id="pv_sched_wire" class="sched"><thead></thead><tbody></tbody></table></div>
 
+        <div class="actions" style="margin-top:14px">
+          <button id="pv_btn_ecalc" class="primary" type="button">Export Electrical Calculations PDF</button>
+          <span id="pv_ecalc_note" class="hint"></span>
+        </div>
         <div id="pv_sched_note" class="msg show" style="margin-top:10px"></div>
         <div id="pv_sched_diverge" style="margin-top:10px"></div>
         <div id="pv_conduit_options" style="margin-top:14px"></div>
@@ -1351,7 +1371,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.31.0";
+const APP_VERSION = "2.35.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2428,6 +2448,19 @@ const COUPLINGS = ["AC-coupled", "DC-coupled"];
  */
 const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"];
 
+/**
+ * The destinations on offer for a project.
+ *
+ * A DC-coupled job adds its string inverter, because that is where the modules
+ * actually land — and on a Powerwall 3 that inverter is the ESS unit. An AC-coupled
+ * job does not, because there is no string inverter to land at.
+ */
+function poiPointsFor(project) {
+  const dc = sameText(projectCoupling(project), "DC-coupled");
+  const inv = projectStringInv(project);
+  return (dc && inv && inv.model) ? [inv.model].concat(POI_POINTS) : POI_POINTS.slice();
+}
+
 /*
  * Battery / ESS electrical characteristics.
  *
@@ -2466,8 +2499,41 @@ let RT_BATTERY = [
  * 15 A IMP may be edited up, and the jumpered pair doubles whichever is set.
  */
 let RT_STRING_INV = [
-  {"model":"Powerwall 3","brand":"Tesla","mpptCount":6,"vMax":550,"vMin":60,"vMciMax":165,"impPerMppt":13,"iscPerMppt":15,"maxDcKw":20,"acAmps":48,"maxCircuitFt":525,"jumpPairs":"1-2, 5-6","noJumpMppt":"3, 4"}
+  {"model":"Powerwall 3","brand":"Tesla","mpptCount":6,"vMax":550,"vMin":60,"impPerMppt":13,"iscPerMppt":15,"maxDcKw":20,"acAmps":48,"maxCircuitFt":525,"jumpPairs":"1-2, 5-6","noJumpMppt":"3, 4","mciRequired":true}
 ];
+
+/*
+ * Mid-circuit interrupters — the rapid-shutdown devices placed along a string.
+ *
+ * The important thing, and what an earlier version of this got wrong: the voltage
+ * rating is PER INTERRUPTER and additive along the string. Tesla's MCI-2 sheet says
+ * so outright — "an individual MCI-2 has a voltage rating of 165 V but in
+ * combination (connected in the same string) their voltage ratings are additive".
+ *
+ * So it does not cap string length. It caps how many modules each interrupter
+ * covers, which is what puts an MCI every two or three panels depending on the
+ * module's cold Voc. String length is governed by the inverter, with a secondary
+ * ceiling of maxPerString interrupters × the modules each one covers.
+ *
+ * MCI-2 and MCI-2 High Current are filled from Tesla's specification page. MCI-1 is
+ * left blank: its own page was not read, and guessing an interrupter's ratings would
+ * put a wrong device count on a drawing.
+ */
+let RT_MCI = [
+  {"model":"MCI-1","brand":"Tesla","impA":null,"iscA":null,"vDisconnect":null,"maxPerString":null},
+  {"model":"MCI-2","brand":"Tesla","impA":13,"iscA":17,"vDisconnect":165,"maxPerString":5},
+  {"model":"MCI-2 High Current","brand":"Tesla","impA":15,"iscA":19,"vDisconnect":165,"maxPerString":5}
+];
+
+/** The RT_MCI row for a model, or null. */
+function mciRow(model) {
+  const m = String(model || "").trim();
+  if (!m) return null;
+  return RT_MCI.find(r => sameText(r.model, m)) || null;
+}
+
+/** Every interrupter name, for a dropdown. */
+function mciNames() { return RT_MCI.map(r => r.model).filter(Boolean); }
 
 /** The RT_BATTERY row for a battery model, or null. */
 function battElecRow(model) {
@@ -3270,18 +3336,44 @@ function dcStringSize(o) {
 
   const minPerString = vmpMin > 0 ? Math.ceil(Number(inv.vMin) / vmpMin) : 0;
   const maxByInverter = vocMax > 0 ? Math.floor(Number(inv.vMax) / vocMax) : 0;
-  const maxByMci = (!blank(inv.vMciMax) && vocMax > 0)
-    ? Math.floor(Number(inv.vMciMax) / vocMax) : null;
 
-  // The rapid-shutdown device caps modules per interrupter, and on these modules it
-  // usually binds well before the inverter does. It is not on the datasheet — it
-  // comes only from Tesla's tool — so it is worth saying which limit governs.
-  const maxPerString = maxByMci !== null ? Math.min(maxByInverter, maxByMci) : maxByInverter;
-  const governedBy = maxByMci !== null && maxByMci < maxByInverter ? "MCI" : "inverter";
-  if (governedBy === "MCI") {
-    notes.push(`Maximum modules per string is set by the ${inv.vMciMax} V limit per ` +
-      `mid-circuit interrupter (${maxByMci}), not by the inverter's ${inv.vMax} V ` +
-      `(${maxByInverter}).`);
+  /*
+   * The interrupter. Its 165 V rating is per device and additive along the string,
+   * so it sets how many modules each one covers — not how long the string may be.
+   * An earlier version capped string length with it and reported 2 where Tesla
+   * allows 7.
+   */
+  const mci = mciRow(o.mciModel);
+  const mciNeeded = !!inv.mciRequired;
+  if (mciNeeded && !mci) {
+    notes.push(`${inv.model} needs mid-circuit interrupters for rapid shutdown, and ` +
+      `none is chosen — so no interrupter count was worked out.`);
+  }
+  const modsPerMci = (mci && !blank(mci.vDisconnect) && vocMax > 0)
+    ? Math.floor(Number(mci.vDisconnect) / vocMax) : null;
+  const maxMciPerString = mci && !blank(mci.maxPerString) ? Number(mci.maxPerString) : null;
+
+  // A secondary ceiling: however many interrupters a string may hold, times the
+  // modules each covers. On a Powerwall 3 the inverter almost always governs first.
+  const maxByMciChain = (modsPerMci && maxMciPerString) ? modsPerMci * maxMciPerString : null;
+  const maxPerString = maxByMciChain !== null
+    ? Math.min(maxByInverter, maxByMciChain) : maxByInverter;
+  const governedBy = maxByMciChain !== null && maxByMciChain < maxByInverter
+    ? "MCI chain" : "inverter";
+  if (modsPerMci !== null) {
+    notes.push(`${mci.model}: ${mci.vDisconnect} V per interrupter and ${vocMax.toFixed(1)} V ` +
+      `per module cold, so one interrupter covers ${modsPerMci} module(s) — fit one ` +
+      `every ${modsPerMci} panel(s). Up to ${maxMciPerString} per string.`);
+  }
+  if (governedBy === "MCI chain") {
+    notes.push(`String length is capped at ${maxByMciChain} by ${maxMciPerString} ` +
+      `interrupters covering ${modsPerMci} module(s) each, below the inverter's ` +
+      `${maxByInverter}.`);
+  }
+  if (modsPerMci === 0) {
+    errors.push(`One module's cold Voc (${vocMax.toFixed(1)} V) already exceeds the ` +
+      `${mci.vDisconnect} V rating of an ${mci.model}, so it cannot be used with this ` +
+      `module.`);
   }
 
   if (minPerString > maxPerString) {
@@ -3309,6 +3401,7 @@ function dcStringSize(o) {
       // NEC 690.8(A)(1): the maximum circuit current of a PV source circuit is
       // 125% of Isc.
       maxCurrent: isc * 1.25,
+      mciCount: modsPerMci ? Math.ceil(nMod / modsPerMci) : null,
       tooShort: nMod > 0 && nMod < minPerString,
       tooLong: nMod > maxPerString,
       overVoltage: vocCold > Number(inv.vMax),
@@ -3321,6 +3414,14 @@ function dcStringSize(o) {
     if (out.tooLong) {
       errors.push(`String ${out.index} has ${nMod} modules; at most ${maxPerString} ` +
         `may be used, or cold Voc exceeds the limit.`);
+    }
+    if (out.mciCount !== null && maxMciPerString && out.mciCount > maxMciPerString) {
+      errors.push(`String ${out.index} needs ${out.mciCount} ${mci.model}(s) at ` +
+        `${modsPerMci} module(s) each, above the ${maxMciPerString} per string allowed.`);
+    }
+    if (mci && !blank(mci.iscA) && isc > Number(mci.iscA)) {
+      errors.push(`The module's ${isc} A Isc is above the ${mci.iscA} A rating of an ` +
+        `${mci.model}.`);
     }
     if (out.overVoltage) {
       errors.push(`String ${out.index} reaches ${vocCold.toFixed(1)} V at ${tMin} °C, ` +
@@ -3389,10 +3490,63 @@ function dcStringSize(o) {
     module: mod, battery: batt, inverter: inv,
     tMax, tMin, adder, tHot: tMax + adder,
     tkVoc: Number(tkVoc), tkVmp: Number(tkVmp),
-    vmpMin, vocMax, minPerString, maxPerString, maxByInverter, maxByMci, governedBy,
+    vmpMin, vocMax, minPerString, maxPerString, maxByInverter, governedBy,
+    mci, modsPerMci, maxMciPerString, maxByMciChain,
+    mciTotal: strings.reduce((a, x) => a + (x.mciCount || 0), 0),
     strings, totalMods, dcKw,
     maxCurrentPerString: isc * 1.25
   };
+}
+
+/**
+ * Which runs a project actually has, with their real endpoints.
+ *
+ * Shared by the schedule itself and by the Schedule runs input table, so the two
+ * cannot disagree about what the job looks like. Before this the input table showed
+ * the raw reference rows — "ARRAY to IQ COMBINER" on a DC-coupled job that has no
+ * combiner, and an ESS row on a project with no battery.
+ *
+ * Three transformations, in order:
+ *   1. Drop the ESS runs when there is no battery.
+ *   2. On a DC-coupled job, send the array to the string inverter and start the
+ *      output run from it — there is no combiner, because there is no AC on the roof.
+ *   3. Substitute the designer's chosen destination on any run tagged pv or ess.
+ */
+function resolveScheduleRuns(o) {
+  const notes = [];
+  const hasBattery = !!String(o.batteryModel || "").trim() || Number(o.essCurrent) > 0;
+
+  const kept = RT_SCHEDULE.filter(run => {
+    const touchesEss = String(run.current) === "ess" ||
+      /\bESS\b|BATTERY|POWERWALL/i.test(String(run.from) + " " + String(run.to));
+    return hasBattery || !touchesEss;
+  });
+  if (!hasBattery && kept.length < RT_SCHEDULE.length) {
+    notes.push(`No battery is selected, so the ${RT_SCHEDULE.length - kept.length} ` +
+      `ESS run(s) were left off the schedule. Choose a Battery on Project ` +
+      `Information to include them.`);
+  }
+
+  const invName = String(o.stringInvName || "").trim();
+  const dcMode = !!o.dcMode && !!invName;
+  const INV = invName.toUpperCase();
+
+  const runs = kept.map(run => {
+    const role = String(run.poiRole || "");
+    const pick = role === "pv" ? o.pvPoi : role === "ess" ? o.essPoi : "";
+    let from = run.from;
+    let to = String(pick || "").trim() || run.to;
+    if (dcMode) {
+      if (run.id === 1) to = INV;              // the array lands at the inverter
+      if (role === "pv") from = INV;            // and its output leaves from there
+      // On a Powerwall 3 the ESS and the inverter are one unit, so an ESS run that
+      // starts at "ESS" starts at the same box.
+      if (role === "ess" && /^ESS$/i.test(String(run.from).trim())) from = INV;
+    }
+    return Object.assign({}, run, { from, to });
+  });
+
+  return { runs, notes, dcMode, invName };
 }
 
 /**
@@ -3433,37 +3587,13 @@ function buildSchedule(o) {
    * has no ESS current to supply. Dropping the runs is the answer, not warning
    * about them.
    */
-  const hasBattery = !!String(o.batteryModel || "").trim() || Number(o.essCurrent) > 0;
-  const runs = RT_SCHEDULE.filter(run => {
-    const touchesEss = String(run.current) === "ess" ||
-      /\bESS\b|BATTERY|POWERWALL/i.test(String(run.from) + " " + String(run.to));
-    return hasBattery || !touchesEss;
-  });
-  if (!hasBattery && runs.length < RT_SCHEDULE.length) {
-    notes.push(`No battery is selected, so the ${RT_SCHEDULE.length - runs.length} ` +
-      `ESS run(s) were left off the schedule. Choose a Battery on Project ` +
-      `Information to include them.`);
-  }
+  const resolved = resolveScheduleRuns(o);
+  const runs = resolved.runs;
+  resolved.notes.forEach(n => notes.push(n));
 
-  // Where each circuit lands. A run tagged "pv" or "ess" takes its destination from
-  // the designer's choice rather than the table, so the topology follows two
-  // dropdowns instead of needing the reference table edited per job.
-  const poiFor = run => {
-    const role = String(run.poiRole || "");
-    const pick = role === "pv" ? o.pvPoi : role === "ess" ? o.essPoi : "";
-    return String(pick || "").trim() || run.to;
-  };
-
-  /*
-   * On a DC-coupled job the modules land at the string inverter, not a combiner —
-   * there is no combiner, because there is no AC on the roof. The inverter's own
-   * output then runs to the PV point of interconnection.
-   */
-  const invName = String(o.stringInvName || "").trim();
-  const dcMode = !!o.dcMode && !!invName;
-  const fromFor = run => (dcMode && String(run.poiRole || "") === "pv")
-    ? invName.toUpperCase() : run.from;
-  const toFor = run => (dcMode && run.id === 1) ? invName.toUpperCase() : poiFor(run);
+  const dcMode = !!o.dcMode && !!String(o.stringInvName || "").trim();
+  const fromFor = run => run.from;   // already resolved
+  const toFor = run => run.to;       // already resolved
 
   const build = variant => runs.map(run => {
     const m = manual[run.id] || {};
@@ -3917,6 +4047,7 @@ function pvCalculate(input) {
       moduleName: input.moduleName, batteryModel: input.batteryModel,
       tMax: tAmb, tMin: tMin, mounting: input.dcMounting,
       stringInverter: input.stringInverter || "",
+      mciModel: input.mciModel || "",
       strings: input.dcStrings || [], jumpered: !!input.dcJumpered
     });
     dc.errors.forEach(e => errors.push(e));
@@ -4969,6 +5100,45 @@ function rdDiffRows(name, incoming) {
   return { added, removed, changed };
 }
 
+/*
+ * Reference tables, grouped for the Reference Data tab.
+ *
+ * Twenty-two tables in one flat strip is unmanageable, and the two kinds are edited
+ * for entirely different reasons: an electrical value gets corrected against the
+ * Code, a document link gets corrected against the folder. Grouping them keeps a
+ * hunt for one from scrolling past the other.
+ */
+const RD_GROUPS = [
+  { key: "equipment",    label: "Equipment" },
+  { key: "calculations", label: "Calculations" },
+  { key: "specsheets",   label: "Spec sheets & documents" },
+  { key: "site",         label: "Site & jurisdiction" }
+];
+
+/** Which group each table belongs to. A table not listed falls under Calculations. */
+const RD_GROUP_OF = {
+  MODULE_DB: "equipment", RT_MI: "equipment", RT_BATTERY: "equipment",
+  RT_STRING_INV: "equipment", RT_MCI: "equipment", RT_ENPHASE_AC: "equipment",
+
+  RT_AMPACITY: "calculations", RT_TEMP_CORR: "calculations",
+  RT_HEIGHT_ADDER: "calculations", RT_FILL_DERATING: "calculations",
+  RT_EGC: "calculations", RT_BREAKERS: "calculations", RT_CONDUIT: "calculations",
+  RT_COND_AREA: "calculations", RT_COND_TYPE: "calculations",
+  RT_SCHEDULE: "calculations", RT_ESS: "calculations",
+
+  SPEC_SHEETS: "specsheets", RT_PREFIX: "specsheets",
+
+  RT_LOCATION: "site", RT_JURISDICTION: "site", RT_ROOF: "site"
+};
+
+/** The group a table belongs to, defaulting to Calculations. */
+function rdGroupOf(name) { return RD_GROUP_OF[name] || "calculations"; }
+
+/** Table names in a group, in schema order. */
+function rdTablesIn(key) {
+  return Object.keys(TABLE_SCHEMAS).filter(n => rdGroupOf(n) === key);
+}
+
 const TABLE_SCHEMAS = {
   SPEC_SHEETS: {
     label: "Spec sheets",
@@ -5202,14 +5372,34 @@ const TABLE_SCHEMAS = {
       { name: "mpptCount",    type: "int", nullable: true, label: "MPPTs" },
       { name: "vMax",         type: "number", nullable: true, label: "Max DC (V)" },
       { name: "vMin",         type: "number", nullable: true, label: "Min MPPT (V)" },
-      { name: "vMciMax",      type: "number", nullable: true, label: "Max V per MCI" },
       { name: "impPerMppt",   type: "number", nullable: true, label: "Imp/MPPT (A)" },
       { name: "iscPerMppt",   type: "number", nullable: true, label: "Isc/MPPT (A)" },
       { name: "maxDcKw",      type: "number", nullable: true, label: "Max DC (kW)" },
       { name: "acAmps",       type: "number", nullable: true, label: "AC output (A)" },
       { name: "maxCircuitFt", type: "number", nullable: true, label: "Max circuit ft" },
       { name: "jumpPairs",    type: "text", label: "Jumperable MPPT pairs" },
-      { name: "noJumpMppt",   type: "text", label: "MPPTs that cannot jumper" }
+      { name: "noJumpMppt",   type: "text", label: "MPPTs that cannot jumper" },
+      { name: "mciRequired", type: "bool", label: "Needs interrupters" }
+    ]
+  },
+
+  RT_MCI: {
+    label: "Mid-circuit interrupters",
+    note: "Rapid-shutdown devices fitted along a string. The voltage rating is PER " +
+          "INTERRUPTER and additive along the string, so it decides how many modules " +
+          "each device covers — typically two or three, depending on the module's " +
+          "cold Voc — and NOT how long the string may be. String length is governed " +
+          "by the inverter. MCI-2 and MCI-2 High Current are from Tesla's " +
+          "specification page; the two differ only in current rating. MCI-1 is blank " +
+          "because its page was not read — fill it before using it.",
+    key: "model",
+    fields: [
+      { name: "model",        type: "text", required: true, label: "Model" },
+      { name: "brand",        type: "text", label: "Brand" },
+      { name: "impA",         type: "number", nullable: true, label: "Imp (A)" },
+      { name: "iscA",         type: "number", nullable: true, label: "Isc (A)" },
+      { name: "vDisconnect",  type: "number", nullable: true, label: "Disconnect V" },
+      { name: "maxPerString", type: "int", nullable: true, label: "Max per string" }
     ]
   },
 
@@ -5599,6 +5789,7 @@ function getTable(name) {
     case "RT_ENPHASE_AC": return RT_ENPHASE_AC;
     case "RT_BATTERY": return RT_BATTERY;
     case "RT_STRING_INV": return RT_STRING_INV;
+    case "RT_MCI": return RT_MCI;
     case "RT_CONDUIT": return RT_CONDUIT;
     case "RT_COND_AREA": return RT_COND_AREA;
     case "RT_COND_TYPE": return RT_COND_TYPE;
@@ -5626,6 +5817,7 @@ function setTable(name, rows) {
     case "RT_ENPHASE_AC": RT_ENPHASE_AC = rows; break;
     case "RT_BATTERY": RT_BATTERY = rows; break;
     case "RT_STRING_INV": RT_STRING_INV = rows; break;
+    case "RT_MCI": RT_MCI = rows; break;
     case "RT_CONDUIT": RT_CONDUIT = rows; break;
     case "RT_COND_AREA": RT_COND_AREA = rows; break;
     case "RT_COND_TYPE": RT_COND_TYPE = rows; break;
@@ -5675,6 +5867,10 @@ if (typeof module !== "undefined" && module.exports) {
     battElecRow, projectCoupling, COUPLINGS, POI_POINTS,
     get RT_STRING_INV() { return RT_STRING_INV; },
     stringInvRow, projectStringInv, stringInvNames,
+    poiPointsFor, resolveScheduleRuns,
+    RD_GROUPS, RD_GROUP_OF, rdGroupOf, rdTablesIn,
+    get RT_MCI() { return RT_MCI; },
+    mciRow, mciNames,
     dcStringSize, dcMountAdder, DC_MOUNTINGS, DC_MOUNTING_DEFAULT, DC_TEMP_STC,
     get SCHEDULE_NOTE() { return SCHEDULE_NOTE; },
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
@@ -6869,18 +7065,28 @@ function wireControls() {
   // both notes have to follow it rather than wait for the next Calculate.
   const btSel = $("battery_type");
   if (btSel) btSel.addEventListener("change", () => {
-    stringInvPopulate(); couplingPopulate(); pvEssPoiNote(); pvModeApply();
+    stringInvPopulate(); couplingPopulate(); poiPopulate(); pvModeApply();
+    pvSchedInputsRender();
   });
   const cpSel = $("coupling");
-  if (cpSel) cpSel.addEventListener("change", () => { couplingPopulate(); pvModeApply(); });
+  if (cpSel) cpSel.addEventListener("change", () => {
+    couplingPopulate(); poiPopulate(); pvModeApply(); pvSchedInputsRender();
+  });
   const siSel = $("string_inverter");
   if (siSel) siSel.addEventListener("change", () => {
-    stringInvPopulate(); couplingPopulate(); pvModeApply();
+    stringInvPopulate(); couplingPopulate(); poiPopulate(); pvModeApply();
+    pvSchedInputsRender();
   });
   const dcAdd = $("pv_dc_add");
   if (dcAdd) dcAdd.addEventListener("click", () => pvDcAddRow());
+  const ecBtn = $("pv_btn_ecalc");
+  if (ecBtn) ecBtn.addEventListener("click", pvExportECalcs);
   const epSel = $("pv_ess_poi");
-  if (epSel) epSel.addEventListener("change", pvEssPoiNote);
+  if (epSel) epSel.addEventListener("change", () => {
+    pvEssPoiNote(); pvSchedInputsRender();
+  });
+  const ppSel = $("pv_poi");
+  if (ppSel) ppSel.addEventListener("change", pvSchedInputsRender);
 
   // The trunk cable part number and quantity both hang off this, so a change
   // has to rebuild the purchase order rather than wait for the next upload.
@@ -8141,6 +8347,292 @@ function bomRefreshBuildState() {
  * Continuation pages repeat the column headings, because a purchase order whose
  * second page is a wall of unlabelled numbers gets misread.
  */
+/*
+ * The Electrical Calculations sheet, stamped onto Kevin's E-2 template.
+ *
+ * The template is 1224 x 792 pt — 17 x 11 in landscape — with a drawable box from
+ * (14.8, 11.1) to (993.4, 780.8) and the title block to the right of it. Everything
+ * is drawn inside that box: "only use the space provided".
+ *
+ * The template lives in the SPEED folder rather than being embedded, so the title
+ * block, licence numbers and expiry date can be corrected without a release. It is
+ * 103 KB, which as base64 would have added about 140 KB to every copy of this file.
+ *
+ * Arial is asked for and Helvetica is used: it is one of the fourteen fonts every PDF
+ * reader has built in, and it is metrically identical to Arial — same widths, same
+ * line breaks. Embedding a real Arial would add roughly 200 KB for a difference
+ * nobody can see in print.
+ */
+const ECALC_TEMPLATE_PATH = ["Templates", "E CALCS TEMPLATE.pdf"];
+const ECALC_BOX = { x0: 14.8, y0: 11.1, x1: 993.4, y1: 780.8 };
+const ECALC_PAD = 9;
+
+/** The template's bytes from the SPEED folder, or null if it is not there. */
+async function ecalcTemplateBytes(rootDir) {
+  if (!rootDir) return null;
+  try {
+    let cursor = rootDir;
+    const parts = ECALC_TEMPLATE_PATH.slice();
+    const file = parts.pop();
+    for (const p of parts) cursor = await cursor.getDirectoryHandle(p);
+    const fh = await cursor.getFileHandle(file);
+    return new Uint8Array(await (await fh.getFile()).arrayBuffer());
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Draw the calculation sheet.
+ *
+ * Returns the PDF bytes plus any notes worth surfacing — a missing template is a
+ * note, not a failure: the sheet is still produced on a blank page of the same size
+ * so the deliverable exists and the numbers can be checked.
+ */
+async function buildECalcsPdf(o) {
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const notes = [];
+  const r = o.result || {};
+  const p = o.project || {};
+
+  let doc, page;
+  if (o.templateBytes) {
+    doc = await PDFDocument.load(o.templateBytes);
+    page = doc.getPages()[0];
+  } else {
+    doc = await PDFDocument.create();
+    page = doc.addPage([1224, 792]);
+    notes.push(`Templates/E CALCS TEMPLATE.pdf was not found in the SPEED folder, so ` +
+      `the sheet was drawn on a blank page of the same size — no title block.`);
+  }
+
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const ink = rgb(0.06, 0.09, 0.16);
+  const muted = rgb(0.42, 0.45, 0.52);
+  const rule = rgb(0.72, 0.75, 0.80);
+  const bad = rgb(0.70, 0.12, 0.12);
+  const head = rgb(0.90, 0.92, 0.95);
+
+  const L = ECALC_BOX.x0 + ECALC_PAD;
+  const R = ECALC_BOX.x1 - ECALC_PAD;
+  const W = R - L;
+  let y = ECALC_BOX.y1 - ECALC_PAD - 12;
+
+  const clip = (s, max, f, size) => {
+    let t = String(s === undefined || s === null ? "" : s);
+    while (t.length > 1 && f.widthOfTextAtSize(t, size) > max) t = t.slice(0, -1);
+    return t;
+  };
+  const text = (s, x, size, f, col, maxW) => {
+    const str = maxW ? clip(s, maxW, f, size) : String(s === undefined ? "" : s);
+    page.drawText(str, { x, y, size, font: f || font, color: col || ink });
+  };
+  const hline = (yy, col) => page.drawLine({
+    start: { x: L, y: yy }, end: { x: R, y: yy },
+    thickness: 0.5, color: col || rule });
+
+  /** A section heading with a rule under it. */
+  const section = title => {
+    y -= 6;
+    text(title.toUpperCase(), L, 10, bold);
+    y -= 3; hline(y, ink); y -= 11;
+  };
+
+  /** Key/value pairs laid out in n columns across the full width. */
+  const kvBlock = (pairs, ncol) => {
+    const colW = W / ncol;
+    for (let i = 0; i < pairs.length; i += ncol) {
+      const row = pairs.slice(i, i + ncol);
+      row.forEach((kv, j) => {
+        const x = L + j * colW;
+        page.drawText(clip(kv[0] + ":", colW * 0.44 - 4, bold, 9),
+          { x, y, size: 9, font: bold, color: muted });
+        page.drawText(clip(kv[1], colW * 0.56 - 6, font, 9),
+          { x: x + colW * 0.44, y, size: 9, font, color: ink });
+      });
+      y -= 12;
+    }
+  };
+
+  /**
+   * A table. `weights` are relative column widths; `align` is "l" or "r" per column.
+   * Rows whose `bad` flag is set print in red — a reviewer should see a failure
+   * without cross-checking the numbers themselves.
+   */
+  const table = (heads, rows, weights, align) => {
+    const total = weights.reduce((a, b) => a + b, 0);
+    const xs = []; let acc = L;
+    weights.forEach(w => { xs.push(acc); acc += (w / total) * W; });
+    const widths = weights.map(w => (w / total) * W);
+
+    page.drawRectangle({ x: L, y: y - 3, width: W, height: 13, color: head });
+    heads.forEach((h, i) => {
+      const t = clip(h, widths[i] - 4, bold, 7.5);
+      const x = (align && align[i] === "r")
+        ? xs[i] + widths[i] - 2 - bold.widthOfTextAtSize(t, 7.5) : xs[i] + 2;
+      page.drawText(t, { x, y, size: 7.5, font: bold, color: ink });
+    });
+    y -= 13;
+
+    rows.forEach(row => {
+      const col = row.__bad ? bad : ink;
+      row.cells.forEach((c, i) => {
+        const t = clip(c, widths[i] - 4, font, 9);
+        const x = (align && align[i] === "r")
+          ? xs[i] + widths[i] - 2 - font.widthOfTextAtSize(t, 9) : xs[i] + 2;
+        page.drawText(t, { x, y, size: 9, font, color: col });
+      });
+      y -= 11;
+      hline(y + 8, rgb(0.90, 0.91, 0.94));
+    });
+    y -= 2;
+  };
+
+  const n = (v, d) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)))
+    ? "—" : Number(v).toFixed(d === undefined ? 2 : d);
+
+  /* ---- header ------------------------------------------------------------- */
+  text("ELECTRICAL CALCULATIONS", L, 13, bold);
+  const stamp = `${p.project_number || ""}  ·  ${necCodeYear(r.codeYear) ? "NEC " + necCodeYear(r.codeYear) : ""}` +
+                `  ·  ${r.coupling || "AC-coupled"}`;
+  page.drawText(clip(stamp, W * 0.5, font, 9),
+    { x: R - Math.min(font.widthOfTextAtSize(stamp, 9), W * 0.5), y, size: 9, font, color: muted });
+  y -= 5; hline(y, ink); y -= 12;
+
+  kvBlock([
+    ["Customer", p.account_name || ""],
+    ["Address", [p.street_address, p.city, p.state, p.zip_code].filter(Boolean).join(", ")],
+    ["AHJ", p.ahj_name || ""],
+    ["Utility", p.utility_name || ""],
+    ["Module", (r.module && r.module.name) || p.module_type || ""],
+    ["Module qty", String(r.totalMods || p.module_quantity || "")],
+    ["Inverter", r.isDc
+      ? ((r.dc && r.dc.inverter && r.dc.inverter.model) || "")
+      : ((r.mi && r.mi.miModel) || p.inverter_model || "")],
+    ["Service", `${r.vac || 240} V, ${r.phase === 3 ? "3-phase" : "1-phase"}`],
+    ["Battery (ESS)", p.battery_type || "none"],
+    ["Designer", p.designer || ""],
+    ["Checked by", p.checked_by || ""],
+    ["Date", p.date_drawn || ""]
+  ], 4);
+
+  /* ---- basis -------------------------------------------------------------- */
+  section("Design basis");
+  kvBlock([
+    ["Location", (r.location && r.location.display) || ""],
+    ["Design high", `${n(r.tAmb, 1)} °C`],
+    ["Record low", `${n(r.tMin, 1)} °C`],
+    ["Rooftop adder", `${n(r.tAdder, 0)} °C (${r.rooftopRegime === "flat"
+      ? "310.15(B)(2)" : "Table 310.15(B)(3)(c)"})`],
+    ["Ambient used", `${n(r.tUsed, 1)} °C`],
+    ["Temp factor", n(r.tempFactor, 3)],
+    ["Ampacity column", `${r.wireTempSel || 75} °C`],
+    ["Max voltage drop", `${n(r.vdropMax, 1)} %`]
+  ], 4);
+
+  /* ---- the array ---------------------------------------------------------- */
+  if (r.isDc && r.dc && r.dc.strings) {
+    const d = r.dc;
+    section("DC string sizing");
+    kvBlock([
+      ["Voc at low temp", `${n(d.vocMax, 3)} V / module`],
+      ["Vmp at cell temp", `${n(d.vmpMin, 3)} V / module`],
+      ["Cell temp (hot)", `${n(d.tHot, 1)} °C (+${n(d.adder, 0)} mounting)`],
+      ["βVoc / γPmax", `${n(d.tkVoc, 3)} / ${n(d.tkVmp, 3)} %/°C`],
+      ["Modules per string", `${d.minPerString} to ${d.maxPerString}`],
+      ["Governed by", d.governedBy === "MCI chain"
+        ? `${d.maxMciPerString} interrupters × ${d.modsPerMci}` : "inverter input"],
+      ["Interrupter", d.mci ? `${d.mci.model}, ${d.modsPerMci} module(s) each, ` +
+        `${d.mciTotal} total` : "none"],
+      ["Array DC", `${n(d.dcKw, 2)} kW`]
+    ], 4);
+    table(
+      ["STRING", "MODULES", "MPPT", "Voc COLD (V)", "Vmp HOT (V)",
+       "MAX CURRENT (A)", "MCIs", "RUN FT", "STATUS"],
+      d.strings.map(s => ({
+        __bad: s.tooShort || s.tooLong || s.overVoltage || s.belowMppt,
+        cells: [String(s.index), String(s.nMod), String(s.mppt),
+          n(s.vocCold, 1), n(s.vmpHot, 1), n(s.maxCurrent, 2),
+          s.mciCount === null ? "—" : String(s.mciCount), String(s.runFt),
+          s.tooLong ? "TOO LONG" : s.tooShort ? "TOO SHORT"
+            : s.overVoltage ? "OVER VOLTAGE" : s.belowMppt ? "BELOW MPPT" : "OK"]
+      })),
+      [7, 8, 6, 10, 10, 12, 6, 7, 10],
+      ["l", "r", "r", "r", "r", "r", "r", "r", "l"]);
+  } else if (r.branches && r.branches.length) {
+    section("Microinverter branch circuits");
+    table(
+      ["BRANCH", "MODULES", "Ib (A)", "125% (A)", "DERATED MIN (A)", "GOVERNING (A)",
+       "CONDUCTOR", "OCPD (A)", "EGC", "CONDUIT", "RUN FT", "VD %"],
+      r.branches.map(b => ({
+        __bad: b.vdBranch > r.vdropMax,
+        cells: [String(b.index), String(b.nMod), n(b.iBranch), n(b.iMinAmp),
+          n(b.iWireMin), n(b.reqAmps), b.wire, String(b.ocpd), b.egc,
+          b.conduit || "—", String(b.runFt), n(b.vdBranch, 3)]
+      })),
+      [7, 8, 8, 8, 12, 11, 10, 8, 7, 16, 7, 7],
+      ["l", "r", "r", "r", "r", "r", "l", "r", "l", "l", "r", "r"]);
+  }
+
+  /* ---- the two conductor schedules --------------------------------------- */
+  const schedHeads = ["ID", "TYP", "FROM", "TO", "CONDUCTOR", "CONDUIT", "PAR",
+    "CCC", "FILL %", "OCPD", "EGC", "TCF", "FF", "CONT (A)", "MAX (A)",
+    "BASE (A)", "DER (A)", "TERM", "LEN", "VD %"];
+  const schedW = [3, 3, 11, 12, 12, 13, 3.5, 3.5, 6, 5, 5, 6, 4, 6.5, 6.5, 6, 6, 5, 5, 5.5];
+  const schedA = ["l", "r", "l", "l", "l", "l", "r", "r", "r", "r", "l", "r", "r",
+    "r", "r", "r", "r", "r", "r", "r"];
+  const schedRows = rows => rows.map(x => ({
+    __bad: !!(x.errors && x.errors.length),
+    cells: [String(x.id), String(x.typical), String(x.from), String(x.to),
+      `${x.wire || "—"} ${x.condLabel || ""}`.trim(),
+      x.conduitText || "—", String(x.parallel), String(x.ccc),
+      (x.openAir || !x.conduit || x.conduit.fillPct == null)
+        ? "N/A" : n(x.conduit.fillPct, 2) + "%",
+      x.ocpd ? String(x.ocpd) : "N/A", x.egc || "—",
+      n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
+      n(x.contCurrent), n(x.maxCurrent), n(x.baseAmp, 0), n(x.deratedAmp, 1),
+      (x.termTemp || "") + "°C", (x.lengthFt || 0) + "FT", n(x.vd, 2) + "%"]
+  }));
+
+  const sch = r.schedule || { prePlumb: [], preWire: [], note: "", diverged: [] };
+  section("Conductor schedule — pre-plumb (THWN-2 copper in conduit)");
+  table(schedHeads, schedRows(sch.prePlumb), schedW, schedA);
+
+  section("Conductor schedule — pre-wire (Romex NM-B free air, SER-AL feeder)");
+  table(schedHeads, schedRows(sch.preWire), schedW, schedA);
+
+  /* ---- notes -------------------------------------------------------------- */
+  y -= 4;
+  text("NOTE:", L, 9, bold);
+  y -= 11;
+  // Wrapped by hand: pdf-lib has no line breaking, and the note is a
+  // Code-permission statement that must appear verbatim.
+  const words = String(sch.note || "").split(/\s+/);
+  let lineBuf = "";
+  words.forEach(w => {
+    const trial = lineBuf ? lineBuf + " " + w : w;
+    if (font.widthOfTextAtSize(trial, 9) > W) { text(lineBuf, L, 9, font); y -= 11; lineBuf = w; }
+    else lineBuf = trial;
+  });
+  if (lineBuf) { text(lineBuf, L, 9, font); y -= 11; }
+
+  if (sch.diverged && sch.diverged.length) {
+    y -= 2;
+    text(`Sized one step above the 90 °C method on ${sch.diverged.length} run(s) — ` +
+      `house rule, not an error.`, L, 9, font, muted, W);
+    y -= 11;
+  }
+
+  if (y < ECALC_BOX.y0) {
+    notes.push(`The content ran ${Math.ceil(ECALC_BOX.y0 - y)} pt past the bottom of ` +
+      `the template's box. Reduce the number of runs or strings, or the sheet needs a ` +
+      `second page.`);
+  }
+
+  return { bytes: await doc.save(), notes, overflow: y < ECALC_BOX.y0 };
+}
+
 async function bomBuildPdf(header, lines) {
   const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
   const doc = await PDFDocument.create();
@@ -8653,7 +9145,9 @@ function rdSnapshotShipped() {
 
 function rdPopulateSelector() {
   const strip = $("rd_tabs");
-  strip.innerHTML = Object.entries(TABLE_SCHEMAS).map(([name, s]) => {
+
+  const buttonFor = name => {
+    const sc = TABLE_SCHEMAS[name];
     const rows = getTable(name);
     const bad = validateTable(name, rows).errors.length > 0;
     const cls = [
@@ -8668,7 +9162,25 @@ function rdPopulateSelector() {
     ].filter(Boolean).join(" — ");
     return `<button type="button" role="tab" data-t="${name}" class="${cls}" ` +
            `aria-selected="${name === rdCurrent}" title="${title}">` +
-           `${s.label}<span class="n">${rows.length}</span></button>`;
+           `${sc.label}<span class="n">${rows.length}</span></button>`;
+  };
+
+  // One block per group, each with a heading and a count of tables needing
+  // attention, so a validation error cannot hide inside a collapsed-looking group.
+  strip.innerHTML = RD_GROUPS.map(g => {
+    const names = rdTablesIn(g.key);
+    if (!names.length) return "";
+    const bad = names.filter(n => validateTable(n, getTable(n)).errors.length).length;
+    const dirty = names.filter(n => RD_DIRTY.has(n)).length;
+    const flags = [
+      dirty ? `${dirty} changed` : "",
+      bad ? `${bad} with errors` : ""
+    ].filter(Boolean).join(", ");
+    return `<div class="rd-group">` +
+      `<div class="rd-group-h">${g.label}` +
+      `<span class="hint" style="font-weight:400; margin-left:8px">` +
+      `${names.length} table(s)${flags ? " — " + flags : ""}</span></div>` +
+      `<div class="rd-group-b">${names.map(buttonFor).join("")}</div></div>`;
   }).join("");
 
   strip.querySelectorAll("button[data-t]").forEach(btn => {
@@ -9942,7 +10454,25 @@ function pvSchedInputsRender() {
   const body = $("pv_sched_inputs_body");
   if (!body) return;
   const prev = pvReadSchedManual();
-  body.innerHTML = RT_SCHEDULE.map(r => {
+  // The same resolver the schedule uses, so this table shows the job as it will be
+  // calculated rather than the raw reference rows.
+  const inv = projectStringInv({
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  const coupling = projectCoupling({
+    coupling: ($("coupling") || {}).value || "",
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  const runsNow = resolveScheduleRuns({
+    batteryModel: ($("battery_type") || {}).value || "",
+    dcMode: sameText(coupling, "DC-coupled"),
+    stringInvName: inv ? inv.model : "",
+    pvPoi: ($("pv_poi") || {}).value || "",
+    essPoi: ($("pv_ess_poi") || {}).value || ""
+  }).runs;
+  body.innerHTML = runsNow.map(r => {
     const m = prev[r.id] || {};
     const src = String(r.current || "");
     const ph = src === "manual" ? "type it" : `from ${src}`;
@@ -10095,6 +10625,53 @@ function stringInvPopulate() {
       (sel.value ? "" : " From the battery.");
 }
 
+/**
+ * The two "lands at" dropdowns, rebuilt for the coupling in force.
+ *
+ * On a DC-coupled job the string inverter is a real point of interconnection — the
+ * modules land there, and on a Powerwall 3 the ESS unit *is* that inverter. So it is
+ * offered as a destination, which it was not before: the list was fixed at combiner,
+ * gateway, sub panel and main service panel, none of which is where a DC array
+ * actually lands.
+ *
+ * On an AC-coupled job it is not offered, because nothing lands at an inverter that
+ * does not exist.
+ */
+function poiPopulate() {
+  const coupling = projectCoupling({
+    coupling: ($("coupling") || {}).value || "",
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  const dc = sameText(coupling, "DC-coupled");
+  const inv = projectStringInv({
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+
+  // The inverter's own name, so the schedule reads "POWERWALL 3" rather than a
+  // generic label the drawing would have to translate.
+  const invName = inv ? inv.model : "";
+  const points = dc && invName ? [invName].concat(POI_POINTS) : POI_POINTS.slice();
+
+  [["pv_poi", dc && invName ? invName : "IQ Combiner"],
+   ["pv_ess_poi", "Main Service Panel"]].forEach(([id, dflt]) => {
+    const sel = $(id);
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = points.map(p => {
+      const label = (p === invName && invName)
+        ? `${p} — ESS / string inverter` : p;
+      return `<option value="${p}"${p === dflt ? " selected" : ""}>${label}</option>`;
+    }).join("");
+    // Keep the designer's choice only if it is still on offer; a stale AC-only
+    // choice must not survive a switch to DC.
+    if (keep && points.includes(keep)) sel.value = keep;
+    else sel.value = dflt;
+  });
+  pvEssPoiNote();
+}
+
 /** Say plainly whether the ESS runs are on the schedule at all. */
 function pvEssPoiNote() {
   const note = $("pv_ess_poi_note");
@@ -10186,6 +10763,25 @@ function pvPopulateSelectors() {
   couplingPopulate();
   pvSchedInputsRender();
 
+  const mciSel = $("pv_dc_mci");
+  if (mciSel) {
+    const keep = mciSel.value;
+    mciSel.innerHTML = `<option value="">(none)</option>` +
+      mciNames().map(n => `<option value="${n}"${n === "MCI-2" ? " selected" : ""}>${n}</option>`).join("");
+    if (keep) mciSel.value = keep;
+    const note = $("pv_dc_mci_note");
+    const r = mciRow(mciSel.value);
+    if (note) {
+      note.textContent = !r
+        ? "No interrupter — no device count will be worked out."
+        : (r.vDisconnect
+            ? `${r.vDisconnect} V per device, additive along the string; up to ` +
+              `${r.maxPerString} per string. Sets how often one is fitted, not the ` +
+              `string length.`
+            : `${r.model} has no ratings on the Mid-circuit interrupters tab.`);
+    }
+  }
+
   const mnt = $("pv_dc_mounting");
   if (mnt) {
     const keep = mnt.value;
@@ -10196,18 +10792,7 @@ function pvPopulateSelectors() {
   }
   pvModeApply();
 
-  // Where each circuit lands. Defaults are the common case — an AC-module array
-  // into the combiner, the battery straight to the main service panel — but both
-  // are the designer's to change, which is why neither is a rule.
-  [["pv_poi", "IQ Combiner"], ["pv_ess_poi", "Main Service Panel"]].forEach(([id, dflt]) => {
-    const sel = $(id);
-    if (!sel) return;
-    const keep = sel.value;
-    sel.innerHTML = POI_POINTS.map(p =>
-      `<option value="${p}"${p === dflt ? " selected" : ""}>${p}</option>`).join("");
-    if (keep) sel.value = keep;
-  });
-  pvEssPoiNote();
+  poiPopulate();
 
   const cts = $("pv_conduit_type");
   if (cts) {
@@ -10288,6 +10873,7 @@ function pvReadInput() {
     dcJumpered: !!(($("pv_dc_jumper") || {}).value),
     dcStrings: pvReadDcStrings(),
     stringInverter: ($("string_inverter") || {}).value || "",
+    mciModel: ($("pv_dc_mci") || {}).value || "",
     vdropMax: Number($("pv_vdrop_max").value) || 3,
     phase: Number($("pv_phase").value) || 1,
     branches: pvReadBranches(),
@@ -10431,8 +11017,8 @@ function pvRenderDc(r) {
   if (kv) {
     kv.innerHTML = !d.module ? "" :
       `<div><span>Module</span><span>${modEscHtml(d.module.name)}</span></div>` +
-      `<div><span>Inverter</span><span>${modEscHtml(d.battery.model)} — ` +
-      `${d.battery.vMin}–${d.battery.vMax} V, ${d.battery.mpptCount || "?"} MPPT</span></div>` +
+      `<div><span>Inverter</span><span>${modEscHtml(d.inverter.model)} — ` +
+      `${d.inverter.vMin}–${d.inverter.vMax} V, ${d.inverter.mpptCount || "?"} MPPT</span></div>` +
       `<div><span>Design temperatures</span><span>${d.tMin} °C cold, ${d.tMax} °C hot` +
       ` + ${d.adder} = ${d.tHot} °C cell</span></div>` +
       `<div><span>βVoc / γPmax</span><span>${d.tkVoc} / ${d.tkVmp} %/°C</span></div>` +
@@ -10440,14 +11026,17 @@ function pvRenderDc(r) {
       `<div><span>Vmp at ${d.tHot} °C</span><span>${pvNum(d.vmpMin, 3)} V per module</span></div>` +
       `<div><span>Modules per string</span>` +
       `<span style="font-weight:700">${d.minPerString} to ${d.maxPerString}</span></div>` +
-      `<div><span>Governed by</span><span>${d.governedBy === "MCI"
-        ? `the ${d.battery.vMciMax} V limit per interrupter (${d.maxByMci}); the ` +
-          `inverter would allow ${d.maxByInverter}`
-        : `the inverter's ${d.battery.vMax} V input`}</span></div>` +
+      (d.modsPerMci !== null && d.modsPerMci !== undefined
+        ? `<div><span>${modEscHtml(d.mci.model)}</span><span>${d.modsPerMci} module(s) per ` +
+          `interrupter, ${d.mciTotal} total across all strings</span></div>` : "") +
+      `<div><span>Governed by</span><span>${d.governedBy === "MCI chain"
+        ? `${d.maxMciPerString} interrupters covering ${d.modsPerMci} each ` +
+          `(${d.maxByMciChain}); the inverter would allow ${d.maxByInverter}`
+        : `the inverter's ${d.inverter.vMax} V input (${d.maxByInverter})`}</span></div>` +
       `<div><span>Max circuit current</span><span>${pvNum(d.maxCurrentPerString, 2)} A ` +
       `per string (Isc × 1.25, 690.8(A)(1))</span></div>` +
       `<div><span>Array</span><span>${d.totalMods} module(s), ${pvNum(d.dcKw, 2)} kW DC` +
-      (d.battery.maxDcKw ? ` of ${d.battery.maxDcKw} kW` : "") + `</span></div>`;
+      (d.inverter.maxDcKw ? ` of ${d.inverter.maxDcKw} kW` : "") + `</span></div>`;
   }
 
   const tb = $("pv_dc_res") && $("pv_dc_res").querySelector("tbody");
@@ -10463,11 +11052,12 @@ function pvRenderDc(r) {
       return `<tr>
         <td>${s.index}</td><td>${s.nMod}</td><td>${s.mppt}</td>
         <td>${pvNum(s.vocCold, 1)}</td><td>${pvNum(s.vmpHot, 1)}</td>
-        <td>${pvNum(s.maxCurrent, 2)}</td><td>${s.runFt}</td>
+        <td>${pvNum(s.maxCurrent, 2)}</td><td>${s.mciCount === null ? "—" : s.mciCount}</td>
+        <td>${s.runFt}</td>
         <td style="color:${bad ? "var(--err)" : "var(--ok)"}">${status}</td>
       </tr>`;
     }).join("") ||
-      `<tr><td colspan="8" class="hint" style="padding:8px">No strings entered.</td></tr>`;
+      `<tr><td colspan="9" class="hint" style="padding:8px">No strings entered.</td></tr>`;
   }
 }
 
@@ -10596,6 +11186,54 @@ function pvDoCalculate() {
   if (result.errors.length) showMsg(result.errors[0], "err");
   else if (result.warnings.length) showMsg(`Calculated with ${result.warnings.length} warning(s) — see results.`, "warn");
   else showMsg(`Calculated: ${result.totalMods} modules, ${pvNum(result.acKW, 2)} kW AC.`, "ok");
+}
+
+/**
+ * Write the calculation sheet into the loaded project's CAD XRefs folder.
+ *
+ * The project has to be loaded, because the file goes inside its folder and the
+ * header comes from its project.json. Overwrites deliberately: this sheet is
+ * regenerated whenever the numbers change, and a stale one on a drawing set is worse
+ * than a replaced one.
+ */
+async function pvExportECalcs() {
+  const note = $("pv_ecalc_note");
+  const say = (msg, kind) => { if (note) note.textContent = msg; showMsg(msg, kind); };
+
+  if (!state.pvResult) { say("Press Calculate first — there is nothing to export.", "err"); return; }
+  const entry = LAST_PROJECT_LIST && BOM_PROJECT
+    ? (LAST_PROJECT_LIST.find(x => x.id === BOM_PROJECT.id) || null) : null;
+  const target = BOM_PROJECT || null;
+  if (!target || !target.handle) {
+    say("Load a project first — the sheet is written into its CAD XRefs folder.", "err");
+    return;
+  }
+
+  busy(true, "building the calculation sheet…");
+  try {
+    const tpl = await ecalcTemplateBytes(state.rootHandle);
+    const built = await buildECalcsPdf({
+      project: (target.entry && target.entry.manifest) || {},
+      result: state.pvResult,
+      templateBytes: tpl
+    });
+
+    // Projects/<group>/<folder>/CAD Files/CAD XRefs/
+    let cursor = target.handle;
+    for (const part of ["CAD Files", "CAD XRefs"]) cursor = await getDir(cursor, part, true);
+    const fh = await cursor.getFileHandle("Electrical Calculations.pdf", { create: true });
+    const w = await fh.createWritable();
+    await w.write(built.bytes);
+    await w.close();
+
+    const extra = built.notes.length ? " " + built.notes.join(" ") : "";
+    say(`Wrote Electrical Calculations.pdf to CAD Files\\CAD XRefs.` + extra,
+        built.overflow || built.notes.length ? "warn" : "ok");
+  } catch (e) {
+    say("Could not write the sheet: " + (e.message || e), "err");
+  } finally {
+    busy(false);
+  }
 }
 
 function pvReset() {
