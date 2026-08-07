@@ -53,8 +53,18 @@ const FIX_MI_240 = FIX_MI + " @ 240V";
 const FIX_MI_208 = FIX_MI + " @ 208V";
 
 let pass = 0, fail = 0;
+const pending = [];
 const t = (name, fn) => {
-  try { fn(); console.log("  ok   " + name); pass++; }
+  try {
+    const r = fn();
+    // A few tests are async (the .xlsx reader inflates). Let them settle before
+    // the summary, rather than reporting a pass for work that has not run.
+    if (r && typeof r.then === "function") {
+      pending.push(r.then(() => { console.log("  ok   " + name); pass++; })
+        .catch(e => { console.log("  FAIL " + name + " -> " + (e && e.message || e)); fail++; }));
+      return;
+    }
+    console.log("  ok   " + name); pass++; }
   catch (e) { console.log("  FAIL " + name + " -> " + e.message); fail++; }
 };
 const eq = (a, b, m) => {
@@ -2069,6 +2079,244 @@ t("each watched field really does change what equipmentSheets returns", () => {
   eq(missing, []);
 });
 
+console.log("\n=== Phase 4: reading a supplier BOM workbook (2.23.0) ===");
+
+/** A worksheet stub in the shape bomReadXlsx returns. */
+function sheetOf(rows) {
+  const cells = {};
+  let maxRow = 0, maxCol = 0;
+  const ref = (c, r) => {
+    let s = "";
+    for (let x = c; x > 0; x = Math.floor((x - 1) / 26)) s = String.fromCharCode(65 + ((x - 1) % 26)) + s;
+    return s + r;
+  };
+  rows.forEach((cols, ri) => cols.forEach((v, ci) => {
+    if (v === "" || v === null || v === undefined) return;
+    cells[ref(ci + 1, ri + 1)] = String(v);
+    maxRow = Math.max(maxRow, ri + 1); maxCol = Math.max(maxCol, ci + 1);
+  }));
+  return { cells, maxRow, maxCol, get: (c, r) => cells[ref(c, r)] || "" };
+}
+
+/** Kevin's workbook shape: merged label/value pairs, sections, a Total: row. */
+const WB_ROWS = [
+  ["Project Information", "", "", "", "", "Summary"],
+  ["Customer Name", "", "Brent Kliford Mara", "", "", "Total Modules", "", "29"],
+  ["Street", "", "7507 Daughtry Drive", "", "", "Total Watts", "", "12470"],
+  ["City", "", "Fredericksburg", "", "", "Total Attachments", "", "101"],
+  ["State", "", "VA"],
+  ["Zip code", "", "22407", "", "", "Equipments Type"],
+  ["Project Name", "", "-", "", "", "Module Manufacturer", "", "Qcells"],
+  ["Project Number", "", "-", "", "", "Module Number", "", "Q.TRON BLK M-G2.C+"],
+  ["AHJ", "", "Spotsylvania County", "", "", "Module Watts", "", "430.0"],
+  ["Wind Speed", "", "112.0 mph", "", "", "Inverter Manufacturer", "", "Enphase Energy Inc."],
+  ["ASCE", "", "7-22", "", "", "Inverter Model", "", "IQ8HC-72-M-DOM-US [240V]"],
+  ["Snow Load", "", "52 psf"],
+  [],
+  ["Racking Components"],
+  ["MFG", "P/N", "Description", "", "QTY", "QTY w/Spares"],
+  ["Pegasus", "PSR-M84-US", 'Pegasus Rail - Mill 84" - USA', "", "49", "52"],
+  ["Pegasus", "PF-SF70", "Pegasus SF 70mm Screw", "", "303", "303"],
+  ["", "", "", "", "", "", "", "Total:"],
+  [],
+  ["PV Module"],
+  ["MFG", "P/N", "Description", "", "QTY", "QTY w/Spares"],
+  ["Qcells", "Q.TRON BLK M-G2.C+", "", "", "29", "29"],
+  [],
+  ["Inverter & Accessories"],
+  ["MFG", "P/N", "Description", "", "QTY", "QTY w/Spares"],
+  ["Enphase Energy Inc.", "IQ8HC-72-M-DOM-US [240V]", "", "", "1", "1"]
+];
+
+t("the whole header block is read, wherever it sits", () => {
+  const h = L.parseBomWorkbook(sheetOf(WB_ROWS)).header;
+  eq([h.customer, h.city, h.zip], ["Brent Kliford Mara", "Fredericksburg", "22407"]);
+  eq([h.totalModules, h.totalWatts, h.totalAttachments], ["29", "12470", "101"]);
+  eq([h.moduleModel, h.inverterModel],
+     ["Q.TRON BLK M-G2.C+", "IQ8HC-72-M-DOM-US [240V]"]);
+});
+
+t("labels are found by scanning, not by cell address", () => {
+  // The supplier owns this layout. Insert a row at the top and everything must
+  // still be found, or the parser breaks silently the first time they edit it.
+  const shifted = [[], [], ["ignore me"]].concat(WB_ROWS);
+  const h = L.parseBomWorkbook(sheetOf(shifted)).header;
+  eq(h.customer, "Brent Kliford Mara");
+  eq(h.totalModules, "29");
+});
+
+t("each section's lines are read with the right category", () => {
+  const b = L.parseBomWorkbook(sheetOf(WB_ROWS));
+  eq(b.lines.map(l => l.category),
+     ["RACKING", "RACKING", "MODULE", "MICRO INVERTER"]);
+  eq(b.sections.map(x => [x.heading, x.count]),
+     [["Racking Components", 2], ["PV Module", 1], ["Inverter & Accessories", 1]]);
+  eq(b.problems, []);
+});
+
+t("quantity comes from QTY w/Spares when the supplier gives both", () => {
+  // Spares is what actually gets ordered.
+  const b = L.parseBomWorkbook(sheetOf(WB_ROWS));
+  eq(b.lines[0].qty, 52);        // QTY was 49
+});
+
+t("a Total: row ends a section rather than becoming a line", () => {
+  const b = L.parseBomWorkbook(sheetOf(WB_ROWS));
+  if (b.lines.some(l => /total/i.test(String(l.mfg) + l.pn)))
+    throw new Error("the Total: row was read as a line item");
+  eq(b.lines.length, 4);
+});
+
+t("a missing quantity is reported, not silently zero", () => {
+  const rows = JSON.parse(JSON.stringify(WB_ROWS));
+  rows[15][4] = ""; rows[15][5] = "";
+  const b = L.parseBomWorkbook(sheetOf(rows));
+  if (!b.problems.some(x => /no usable quantity/.test(x)))
+    throw new Error("no problem raised: " + JSON.stringify(b.problems));
+});
+
+t("the wrong workbook says so rather than producing an empty order", () => {
+  const b = L.parseBomWorkbook(sheetOf([["Some other spreadsheet"], ["a", "b"]]));
+  eq(b.lines, []);
+  if (!b.problems.some(x => /right workbook/.test(x))) throw new Error(b.problems);
+});
+
+console.log("\n=== Phase 4: the workbook is checked against the project ===");
+t("a disagreement about module, count, inverter or customer is reported", () => {
+  const h = L.parseBomWorkbook(sheetOf(WB_ROWS)).header;
+  const out = L.bomCrossCheck(h, { module_type: "REC470AA PURE-RX-DC", module_quantity: 26,
+    inverter_model: "IQ8MC-72-M-US", account_name: "SOMEONE ELSE" });
+  eq(out.length, 4);
+  if (!out.some(x => /Module count/.test(x))) throw new Error(out.join(" | "));
+});
+
+t("a matching project reports nothing", () => {
+  const h = L.parseBomWorkbook(sheetOf(WB_ROWS)).header;
+  eq(L.bomCrossCheck(h, { module_type: "Q.TRON BLK M-G2.C+ 430", module_quantity: 29,
+    inverter_model: "IQ8HC-72-M-DOM-US", account_name: "Brent Kliford Mara" }), []);
+});
+
+t("a blank on either side is not a disagreement", () => {
+  // A project half filled in must not produce four warnings.
+  const h = L.parseBomWorkbook(sheetOf(WB_ROWS)).header;
+  eq(L.bomCrossCheck(h, {}), []);
+  eq(L.bomCrossCheck({}, { module_type: "X", module_quantity: 5 }), []);
+});
+
+console.log("\n=== Phase 4: the purchase order ===");
+t("lines are renumbered with no gaps", () => {
+  const lines = [{ pn: "a" }, { pn: "b" }, { pn: "c" }];
+  L.bomRenumber(lines);
+  eq(lines.map(l => l.line), [1, 2, 3]);
+  lines.splice(1, 1);
+  L.bomRenumber(lines);
+  eq(lines.map(l => l.line), [1, 2]);
+});
+
+t("the PO header prefers the project over the workbook", () => {
+  // project.json is what the drawing was stamped from; the workbook is a supplier's
+  // copy of the same facts and can lag.
+  const h = L.bomPoHeader(
+    { project_number: "8961BOLA", account_name: "BADER BOLAND", street_address: "1 High St",
+      city: "Austin", state: "TX", zip_code: "78701", phone: "5125550123",
+      financier: "LIGHTREACH", loan_type: "LEASE", designer: "BGM",
+      date_drawn: "2026-08-07", roof_type: "COMP SHINGLE" },
+    { customer: "SOMEONE ELSE", street: "9 Old Rd" });
+  eq(h.customer, "BADER BOLAND");
+  eq(h.address, "1 High St, Austin, TX 78701");
+  eq(h.phone, "(512) 555-0123");
+  eq(h.poNumber, "8961BOLA");
+});
+
+t("the PO falls back to the workbook when the project is thin", () => {
+  const h = L.bomPoHeader({ project_number: "X1" },
+    { customer: "Brent Kliford Mara", street: "7507 Daughtry Drive",
+      city: "Fredericksburg", state: "VA", zip: "22407" });
+  eq(h.customer, "Brent Kliford Mara");
+  eq(h.address, "7507 Daughtry Drive, Fredericksburg, VA 22407");
+});
+
+t("the CSV carries the same columns as the PDF", () => {
+  const csv = L.bomToCsv([{ category: "RACKING", mfg: "Pegasus", pn: "PSR-M84-US",
+    description: 'Pegasus Rail - Mill 84" - USA', qty: 49 }]);
+  const lines = csv.replace(/^﻿/, "").split("\r\n");
+  eq(lines[0], "Line,Category,Manufacturer,Part #,Description,Qty");
+  // The embedded quote must be doubled or Excel splits the row.
+  eq(lines[1], '1,RACKING,Pegasus,PSR-M84-US,"Pegasus Rail - Mill 84"" - USA",49');
+});
+
+t("a comma or a newline in a description cannot break the CSV", () => {
+  const csv = L.bomToCsv([{ category: "OTHER", mfg: "m", pn: "p",
+    description: "one, two\nthree", qty: 1 }]);
+  if (!/"one, two\nthree"/.test(csv)) throw new Error(JSON.stringify(csv));
+});
+
+t("the CSV opens as UTF-8 in Excel without a wizard", () => {
+  // Excel assumes the system codepage unless there is a BOM, which mangles any
+  // accented manufacturer name.
+  eq(L.bomToCsv([]).charCodeAt(0), 0xFEFF);
+});
+
+t("CSV line numbers follow the order on screen, not a stale field", () => {
+  const csv = L.bomToCsv([{ pn: "a", line: 99 }, { pn: "b", line: 7 }]);
+  const rows = csv.replace(/^﻿/, "").split("\r\n").slice(1, 3);
+  eq(rows.map(r => r.split(",")[0]), ["1", "2"]);
+});
+
+console.log("\n=== Phase 4: the .xlsx reader ===");
+t("reads a real ZIP container", async () => {
+  // Built by hand with stored (uncompressed) entries, so this exercises the ZIP
+  // directory walk and the sheet XML parse for real rather than through a mock.
+  const enc = new TextEncoder();
+  const files = [
+    ["xl/sharedStrings.xml",
+     '<?xml version="1.0"?><sst><si><t>Customer Name</t></si><si><t>A &amp; B</t></si></sst>'],
+    ["xl/worksheets/sheet1.xml",
+     '<?xml version="1.0"?><worksheet><sheetData>' +
+     '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row>' +
+     '<row r="2"><c r="A2"><v>430.5</v></c><c r="B2" t="inlineStr"><is><t>7-22</t></is></c></row>' +
+     '</sheetData></worksheet>']
+  ];
+  const parts = [], central = [];
+  let offset = 0;
+  const u32 = n => [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255];
+  const u16 = n => [n & 255, (n >> 8) & 255];
+  files.forEach(([name, body]) => {
+    const nb = enc.encode(name), db = enc.encode(body);
+    const local = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(db.length), u32(db.length), u16(nb.length), u16(0));
+    parts.push(new Uint8Array(local), nb, db);
+    central.push({ nb, db, offset });
+    offset += local.length + nb.length + db.length;
+  });
+  const cd = [];
+  central.forEach(({ nb, db, offset: off }) => {
+    cd.push(...[].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(0), u32(db.length), u32(db.length), u16(nb.length), u16(0), u16(0), u16(0),
+      u16(0), u32(0), u32(off)), ...nb);
+  });
+  const cdStart = offset;
+  const eocd = [].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length),
+    u16(files.length), u32(cd.length), u32(cdStart), u16(0));
+  const total = [];
+  parts.forEach(p => total.push(...p));
+  total.push(...cd, ...eocd);
+
+  const sheet = await L.bomReadXlsx(new Uint8Array(total));
+  eq(sheet.get(1, 1), "Customer Name");     // shared string
+  eq(sheet.get(3, 1), "A & B");             // entity unescaped
+  eq(sheet.get(1, 2), "430.5");             // number kept as text
+  eq(sheet.get(2, 2), "7-22");              // inline string, not a date or a float
+  eq([sheet.maxRow, sheet.maxCol], [2, 3]);
+});
+
+t("something that is not a workbook is refused clearly", async () => {
+  let msg = "";
+  try { await L.bomReadXlsx(new Uint8Array([1, 2, 3, 4, 5])); }
+  catch (e) { msg = e.message; }
+  if (!/not an \.xlsx/i.test(msg)) throw new Error("unhelpful error: " + msg);
+});
+
 console.log("\n=== Phase 3: validation and warnings ===");
 t("unknown module is an error", () => {
   const r = L.pvCalculate({ moduleName: "NOT A MODULE", branches: [{ nMod: 4 }] });
@@ -2429,19 +2677,26 @@ t("without a root, only the relative path is produced", () =>
   eq(buildPath({ group: "Cobalt", folder: "X" }, "").full, "Projects\\Cobalt\\X"));
 
 console.log("\n=== project load round-trip ===");
-t("every form field maps to a Project field name", () => {
-  // FORM_FIELDS drives both saving and loading; a typo would silently skip a field.
-  const expected = ["project_number", "revision_code", "code_year", "account_name",
-    "street_address", "city", "state", "zip_code", "ahj_name", "utility_name",
-    "installer", "module_type", "module_quantity", "inverter_model", "roof_type",
-    "roof_pitch", "story_type", "attachment_type", "railing_type",
-    "service_voltage", "designer", "checked_by", "date_drawn", "notes"];
-  // Not exported directly; assert the mapped import fields are a subset.
-  const mapped = Object.values(L.COLUMN_MAP);
-  mapped.forEach(f => {
-    if (!expected.includes(f)) throw new Error(`imported field '${f}' has no form field`);
-  });
+t("every imported column lands in a real form field", () => {
+  // FORM_FIELDS drives saving and loading. Comparing against a copy of the list
+  // pasted into the test only proves the copy matches itself, and that copy went
+  // stale three times. Use the exported list.
+  const missing = Object.values(L.COLUMN_MAP).filter(f => !L.FORM_FIELDS.includes(f));
+  eq(missing, []);
 });
+
+t("every form field has a human label", () => {
+  // label() falls back to the underscored name, which reads badly on a change
+  // list and on a purchase order.
+  const unlabelled = L.FORM_FIELDS.filter(f => !L.FIELD_LABELS[f]);
+  // These read acceptably when underscores become spaces.
+  const acceptable = ["project_number", "revision_code", "code_year", "account_name",
+    "street_address", "city", "state", "zip_code", "ahj_name", "installer",
+    "roof_pitch", "story_type", "service_voltage", "designer", "checked_by",
+    "date_drawn", "notes", "inverter_model"];
+  eq(unlabelled.filter(f => !acceptable.includes(f)), []);
+});
+
 t("NOT_IN_CRM fields all have form fields to fill in", () => {
   const onForm = ["roof_pitch", "attachment_type", "railing_type"];
   onForm.forEach(f => {
@@ -2541,6 +2796,10 @@ t("validation does not throw when the folder listing is unavailable", () => {
   eq(L.validateTable("MODULE_DB", rows).errors, []);
 });
 
-fs.unlinkSync(tmp);
-console.log(`\n${pass} passed, ${fail} failed\n`);
-process.exit(fail ? 1 : 0);
+// Wait for the async tests before reporting, or their result lands after the
+// summary and a failure is invisible.
+Promise.all(pending).then(() => {
+  fs.unlinkSync(tmp);
+  console.log(`\n${pass} passed, ${fail} failed\n`);
+  process.exit(fail ? 1 : 0);
+});

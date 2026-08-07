@@ -3,6 +3,85 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.23.0 — 2026-08-07
+
+### Phase 4 — Bill of Materials
+
+The last greyed-out tab. Upload the supplier's BOM workbook, adjust the lines,
+and get a purchase order.
+
+**Reading .xlsx needs no library.** A workbook is a ZIP of XML, and the browser
+can already inflate and parse both — about 200 lines instead of the ~1 MB SheetJS
+would add to a file that is already most of a megabyte. Parsed with regex rather
+than DOMParser, which does not exist in Node, so the test suite exercises the
+code that actually ships.
+
+Values stay **strings**. A part number like `7-22`, or one with a leading zero,
+would be mangled into a float — and these are what someone orders parts against.
+
+**Nothing is located by cell address.** Labels, section headings and columns are
+all found by scanning. The workbook belongs to the supplier and its layout is
+theirs to change; a parser keyed to `C7` breaks the first time they insert a row,
+and it breaks silently. There is a test that shifts the whole sheet down three
+rows and expects everything still to be found.
+
+Your file reads clean: 21 header fields, 3 sections, 13 lines, no problems.
+
+### The workbook is checked against the project
+
+It comes from a different system fed by a different input. If the two disagree
+about the module, the count, the inverter or the customer, one of them is wrong,
+and finding that out after the parts arrive is expensive:
+
+> Module count: the workbook says "29", the project says "26".
+
+A blank on either side is not a disagreement, so a half-filled project does not
+produce four warnings about nothing.
+
+### Quantities come from QTY w/Spares
+
+Where the supplier gives both, spares is what actually gets ordered.
+
+### The line grid
+
+Pre-filled from the workbook, then yours. Add, delete, reorder, retype — the
+electrical items you enter by hand are marked **added** and survive re-reading
+the workbook. Lines renumber automatically, so inserting one mid-list leaves no
+gaps. The build is blocked while any line lacks a part number or a quantity.
+
+### Two files into Deliverables
+
+`<PO Number> - <CUSTOMER> - Purchase Order.pdf` and the matching `.csv`.
+
+The PDF is drawn with the pdf-lib already inlined for the iPermit package:
+letterhead, supplier and ship-to blocks, the six project fields, then the line
+table. Long orders paginate and **repeat the column headings** — a second page
+that is a wall of unlabelled numbers gets misread.
+
+Truncated text ends in an ellipsis. Silently clipping "…with Dovetail T-bolt" to
+"…with Dovet" reads as though that is the whole description. The Part # column
+was widened after testing showed `IQ8HC-72-M-DOM-US [240V]` losing its bracket.
+
+The CSV mirrors the PDF's columns, quotes embedded commas, quotes and newlines,
+and carries a BOM so Excel opens it as UTF-8 without a wizard.
+
+### Also
+
+`Financier`, `Loan type` and `Phone` are now project fields, mapped from the
+report by column **name** — the report is Salesforce's to reorder, and a
+positional map would quietly read the wrong column onto a purchase order. Phone
+formats to `(971) 219-0152`, leaving anything that is not a clean 10-digit number
+untouched.
+
+The PO number is the project number, as asked.
+
+### Tests
+
+381 passing, up from 362. Nineteen new, including a hand-built ZIP that exercises
+the container walk and sheet parse for real rather than through a mock. The runner
+now awaits async tests — before, an async failure landed after the summary and was
+invisible; verified by breaking one deliberately.
+
 ## 2.22.0 — 2026-08-06
 
 ### The shared folder's reference data is now baked in at every release

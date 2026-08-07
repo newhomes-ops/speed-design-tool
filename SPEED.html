@@ -469,7 +469,7 @@
     <button type="button" class="tab"        data-view="pvcalc"    role="tab">PV Calc</button>
     <button type="button" class="tab"        data-view="files"     role="tab">Files</button>
     <button type="button" class="tab"        data-view="reference" role="tab">Reference Data</button>
-    <button type="button" class="tab disabled" disabled title="Not built yet">BOM</button>
+    <button type="button" class="tab"        data-view="bom"       role="tab">BOM</button>
     <button type="button" class="tab"        data-view="spec"      role="tab">Spec Sheets</button>
   </div>
 </nav>
@@ -683,6 +683,9 @@
         <fieldset>
           <legend>Provenance</legend>
           <div class="grid three">
+            <div><label for="financier">Financier</label><input id="financier" autocomplete="off"></div>
+            <div><label for="loan_type">Loan type</label><input id="loan_type" autocomplete="off"></div>
+            <div><label for="phone">Phone</label><input id="phone" autocomplete="off"></div>
             <div><label for="designer">Designer</label><input id="designer" autocomplete="off"></div>
             <div><label for="checked_by">Checked by</label><input id="checked_by" value="EOR"></div>
             <div><label for="date_drawn">Date drawn</label><input id="date_drawn" type="date"></div>
@@ -1067,6 +1070,69 @@
     </div>
   </div>
 
+
+  <!-- ============ VIEW: BOM ============ -->
+  <div class="view" id="view-bom">
+    <div class="col wide">
+      <div class="panel">
+        <h2>Purchase order</h2>
+        <div class="body">
+
+          <div class="grid" style="grid-template-columns:1fr auto; align-items:flex-end">
+            <div>
+              <label for="bomProject">Project</label>
+              <select id="bomProject"></select>
+            </div>
+            <div class="actions">
+              <button id="btnBomReload" type="button">Reload</button>
+            </div>
+          </div>
+
+          <div class="actions" style="margin-top:12px">
+            <button id="btnBomPick" class="primary" type="button">Load BOM workbook…</button>
+            <input id="bomFile" type="file" accept=".xlsx" style="display:none">
+            <span id="bomFileInfo" class="hint"></span>
+          </div>
+
+          <div id="bomWarnings" style="margin-top:12px"></div>
+          <div class="kv" id="bomSummary" style="margin-top:12px; display:none"></div>
+
+          <div id="bomDetail" style="display:none; margin-top:16px">
+            <div class="actions">
+              <button id="btnBomAdd" type="button">Add line</button>
+              <button id="btnBomClearManual" type="button">Remove added lines</button>
+              <span class="hint" id="bomLineInfo"></span>
+            </div>
+
+            <div style="overflow-x:auto; margin-top:10px; max-height:460px; overflow-y:auto">
+              <table id="bom_table_el">
+                <thead><tr id="bom_head"></tr></thead>
+                <tbody id="bom_body"></tbody>
+              </table>
+            </div>
+
+            <div class="actions" style="margin-top:14px">
+              <button id="btnBomBuild" class="primary" type="button" disabled>
+                Build purchase order</button>
+            </div>
+            <div id="bomResult" style="margin-top:12px"></div>
+
+            <div class="hint" style="margin-top:12px">
+              Two files go to the project's <code>Deliverables</code> folder:
+              <code>&lt;Project Number&gt; - &lt;CUSTOMER&gt; - Purchase Order.pdf</code>
+              and the matching <code>.csv</code>.
+              <br><br>
+              Lines from the workbook are marked as such. Anything you add by hand is
+              marked <strong>added</strong> — the workbook is re-read every time you
+              load it, so added lines are yours to maintain.
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ VIEW: Reference data ============ -->
   <div class="view" id="view-reference">
     <div class="col wide">
@@ -1189,8 +1255,8 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.22.0";
-const APP_BUILD   = "2026-08-06";
+const APP_VERSION = "2.23.0";
+const APP_BUILD   = "2026-08-07";
 
 const CONFIG = {
   templateFolder: "Project Template",
@@ -1244,7 +1310,13 @@ const COLUMN_MAP = {
   "Panel Model Number Opportunity": "module_type",
   "Panel Count Opportunity": "module_quantity",
   "TaskRay Project : Account : Roof Material": "roof_type",
-  "Utility Company": "utility_name"
+  "Utility Company": "utility_name",
+  // Purchase-order header. Mapped by column NAME, not position: the report is
+  // Salesforce's to reorder, and a positional map would quietly read the wrong
+  // column onto a purchase order.
+  "Project Event: Lender Name": "financier",
+  "Agreement Type Project Event": "loan_type",
+  "TaskRay Project : Primary Contact : Phone": "phone"
 };
 
 /* Confirmed absent from all 143 TASKRAY__Project__c fields and Project_Event__c. */
@@ -1257,7 +1329,7 @@ const FORM_FIELDS = [
   "project_number","revision_code","code_year","account_name","street_address",
   "city","state","zip_code","ahj_name","utility_name","installer",
   "product_offering","module_type",
-  "combiner_type","battery_type",
+  "combiner_type","battery_type","financier","loan_type","phone",
   "module_quantity","inverter_model","roof_type","roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
   "date_drawn","notes"
@@ -1270,6 +1342,7 @@ const FIELD_LABELS = {
   system_location:"System location", system_orientation:"Orientation",
   roof_type:"Roof type", utility_name:"Utility", module_type:"Module type",
   product_offering:"Product offering", combiner_type:"Combiner type",
+  financier:"Financier", loan_type:"Loan type", phone:"Phone",
   battery_type:"Battery",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
@@ -2232,7 +2305,7 @@ let SPEC_SHEETS = [
 ];
 
 let MODULE_DB = [
-  {"name":"Q.PEAK DUO BLK ML-G10.C+ 410","brand":"QCELLS","Isc":11.11,"Voc":45.31,"Vmp":38.48,"Imp":10.65,"Wpeak":410,"Wptc":381,"length":74,"width":41.1,"specSheet":""},
+  {"name":"Q.PEAK DUO BLK ML-G10.C+ 410","brand":"QCELLS","Isc":11.11,"Voc":45.31,"Vmp":38.48,"Imp":10.65,"Wpeak":410,"Wptc":381,"length":74,"width":41.1,"specSheet":"Module_Q.TRON BLK M-G2+.pdf"},
   {"name":"Q.TRON BLK M-G2.C+ 430","brand":"QCELLS","Isc":13.74,"Voc":39.32,"Vmp":32.94,"Imp":13.05,"Wpeak":430,"Wptc":null,"length":67.8,"width":44.6,"specSheet":"Module_Q.TRON BLK M-G2+.pdf"},
   {"name":"JAM54D41 440/MB","brand":"JA SOLAR","Isc":13.85,"Voc":39.38,"Vmp":33.37,"Imp":13.18,"Wpeak":440,"Wptc":null,"length":67.8,"width":44.65,"specSheet":""},
   {"name":"SEG-440-BTD-BG","brand":"SEG SOLAR","Isc":14.15,"Voc":39.3,"Vmp":32.7,"Imp":13.46,"Wpeak":440,"Wptc":417.7,"length":67.8,"width":44.65,"specSheet":""},
@@ -2438,6 +2511,23 @@ function roofTypesAll() {
     if (rt && !out.some(x => sameText(x, rt))) out.push(rt);
   });
   return out;
+}
+
+/**
+ * Format a US phone for a purchase order.
+ *
+ * The report gives bare digits — "19712190152" — and the PO shows
+ * "(971) 219-0152". Anything not a recognisable 10-digit number comes back
+ * unchanged: an extension or an international number is better shown as typed
+ * than silently reshaped.
+ */
+function formatPhone(v) {
+  const raw = String(v === undefined || v === null ? "" : v).trim();
+  if (!raw) return "";
+  let d = raw.replace(/\D/g, "");
+  if (d.length === 11 && d[0] === "1") d = d.slice(1);
+  if (d.length !== 10) return raw;
+  return "(" + d.slice(0, 3) + ") " + d.slice(3, 6) + "-" + d.slice(6);
 }
 
 /** Five-digit ZIP, ignoring a +4 suffix and stray spaces. */
@@ -2838,6 +2928,330 @@ function rdParsePasted(name, text) {
   const { errors, warnings } = validateTable(name, rows);
   if (errors.length) throw new Error(`Validation failed: ${errors[0]}`);
   return { rows, warnings };
+}
+
+/* =====================================================================
+   Phase 4 — Bill of Materials
+
+   The designer uploads the supplier's BOM workbook; the tool turns it into a
+   purchase order. A workbook is a ZIP of XML, and the browser can already
+   inflate and parse both, so this needs no library — which matters in a file
+   that is already most of a megabyte.
+   ===================================================================== */
+
+async function bomInflateRaw(bytes) {
+  const st = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(st).arrayBuffer());
+}
+
+/** Read a ZIP's central directory into { name: Uint8Array }. */
+async function bomUnzip(buf) {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let eocd = -1;
+  for (let i = b.length - 22; i >= 0 && i > b.length - 66000; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("That is not an .xlsx file — no ZIP directory in it.");
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method   = dv.getUint16(p + 10, true);
+    const csize    = dv.getUint32(p + 20, true);
+    const nameLen  = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen   = dv.getUint16(p + 32, true);
+    const local    = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + cmtLen;
+    const lNameLen  = dv.getUint16(local + 26, true);
+    const lExtraLen = dv.getUint16(local + 28, true);
+    const start = local + 30 + lNameLen + lExtraLen;
+    const raw = b.subarray(start, start + csize);
+    out[name] = method === 0 ? raw : await bomInflateRaw(raw);
+  }
+  return out;
+}
+
+const BOM_XML_ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+function bomUnesc(s) {
+  return String(s).replace(/&(#x?[0-9a-fA-F]+|[a-z]+);/g, (m, e) => {
+    if (e[0] === "#") {
+      const n = e[1] === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : m;
+    }
+    return BOM_XML_ENT[e] !== undefined ? BOM_XML_ENT[e] : m;
+  });
+}
+
+/** "A1" -> { col: 1, row: 1 } */
+function bomCellRef(ref) {
+  const m = /^([A-Z]+)(\d+)$/.exec(String(ref || "").toUpperCase());
+  if (!m) return null;
+  let col = 0;
+  for (const ch of m[1]) col = col * 26 + (ch.charCodeAt(0) - 64);
+  return { col, row: Number(m[2]) };
+}
+
+/** { col, row } -> "A1" */
+function bomRefOf(col, row) {
+  let s = "";
+  for (let c = col; c > 0; c = Math.floor((c - 1) / 26)) {
+    s = String.fromCharCode(65 + ((c - 1) % 26)) + s;
+  }
+  return s + row;
+}
+
+/**
+ * Read the first worksheet of an .xlsx.
+ *
+ * Values stay strings deliberately. A part number like "7-22", or one with a
+ * leading zero, would be mangled by turning it into a float — and these end up
+ * on a purchase order that someone orders parts against.
+ *
+ * Parsed with regex rather than DOMParser: DOMParser does not exist in Node, and
+ * the test suite must exercise the code that actually ships.
+ */
+async function bomReadXlsx(buf) {
+  const files = await bomUnzip(buf);
+  const dec = u8 => new TextDecoder().decode(u8);
+  const texts = frag => bomUnesc((frag.match(/<t\b[^>]*>([\s\S]*?)<\/t>/g) || [])
+    .map(t => t.replace(/<t\b[^>]*>([\s\S]*?)<\/t>/, "$1")).join(""));
+
+  let shared = [];
+  if (files["xl/sharedStrings.xml"]) {
+    shared = (dec(files["xl/sharedStrings.xml"])
+      .match(/<si\b[\s\S]*?<\/si>|<si\b[^>]*\/>/g) || []).map(texts);
+  }
+
+  let sheetPath = "xl/worksheets/sheet1.xml";
+  const wbXml = files["xl/workbook.xml"] && dec(files["xl/workbook.xml"]);
+  const relXml = files["xl/_rels/workbook.xml.rels"] && dec(files["xl/_rels/workbook.xml.rels"]);
+  if (wbXml && relXml) {
+    const first = (wbXml.match(/<sheet\b[^>]*\/?>/) || [])[0] || "";
+    const rid = (first.match(/r:id="([^"]+)"/) || [])[1];
+    if (rid) {
+      const rel = (relXml.match(new RegExp('<Relationship[^>]*Id="' + rid + '"[^>]*>')) || [])[0] || "";
+      const target = (rel.match(/Target="([^"]+)"/) || [])[1];
+      if (target) sheetPath = target.startsWith("/")
+        ? target.slice(1) : "xl/" + target.replace(/^\.\//, "");
+    }
+  }
+  if (!files[sheetPath]) throw new Error("No worksheet inside the workbook.");
+
+  const sheet = dec(files[sheetPath]);
+  const cells = {};
+  let maxRow = 0, maxCol = 0, m;
+  const cellRe = /<c\b([^>]*)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  while ((m = cellRe.exec(sheet))) {
+    const attrs = m[1] || "", body = m[2] || "";
+    const ref = (attrs.match(/\br="([A-Z]+\d+)"/) || [])[1];
+    const pos = ref && bomCellRef(ref);
+    if (!pos) continue;
+    const type = (attrs.match(/\bt="([^"]+)"/) || [])[1];
+    let v;
+    if (type === "inlineStr") v = texts(body);
+    else {
+      const vm = body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/);
+      if (!vm) continue;
+      v = bomUnesc(vm[1]);
+      if (type === "s") v = shared[Number(v)] !== undefined ? shared[Number(v)] : "";
+    }
+    v = String(v).trim();
+    if (v === "") continue;
+    cells[ref] = v;
+    if (pos.row > maxRow) maxRow = pos.row;
+    if (pos.col > maxCol) maxCol = pos.col;
+  }
+  return { cells, maxRow, maxCol, get: (c, r) => cells[bomRefOf(c, r)] || "" };
+}
+
+/* ---- turning a worksheet into a purchase order ---------------------- */
+
+const BOM_HEADER_FIELDS = [
+  ["customer", "Customer Name"], ["street", "Street"], ["city", "City"],
+  ["state", "State"], ["zip", "Zip code"], ["projectName", "Project Name"],
+  ["projectNo", "Project Number"], ["ahj", "AHJ"], ["windSpeed", "Wind Speed"],
+  ["asce", "ASCE"], ["exposure", "Wind Exposure"], ["riskCat", "Risk Category"],
+  ["snowLoad", "Snow Load"], ["totalModules", "Total Modules"],
+  ["totalWatts", "Total Watts"], ["totalAttachments", "Total Attachments"],
+  ["moduleMfg", "Module Manufacturer"], ["moduleModel", "Module Number"],
+  ["moduleWatts", "Module Watts"], ["inverterMfg", "Inverter Manufacturer"],
+  ["inverterModel", "Inverter Model"]
+];
+
+/** Workbook section heading -> the category its lines start as. */
+const BOM_SECTION_CATEGORY = {
+  "racking components": "RACKING",
+  "pv module": "MODULE",
+  "inverter & accessories": "MICRO INVERTER",
+  "inverter and accessories": "MICRO INVERTER"
+};
+
+/** Categories a purchase-order line may carry. Editable per line. */
+const BOM_CATEGORIES = [
+  "MODULE", "MICRO INVERTER", "INVERTER", "RACKING", "ATTACHMENT",
+  "AC DISCONNECT", "BREAKER", "BREAKER (QUAD)", "ELECTRICAL BOX",
+  "ENPHASE EQP", "INVERTER EQP", "CONDUIT", "WIRE", "LABEL", "OTHER"
+];
+
+const bomNorm = s => String(s === undefined || s === null ? "" : s)
+  .replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Read a supplier BOM worksheet into { header, sections, lines, problems }.
+ *
+ * Everything is located by scanning for labels, never by cell address. The
+ * workbook belongs to the supplier and its layout is theirs to change; a parser
+ * keyed to "C7" breaks the first time they insert a row, and it breaks silently.
+ */
+function parseBomWorkbook(sheet) {
+  const problems = [];
+  const header = {};
+
+  for (const [key, label] of BOM_HEADER_FIELDS) {
+    let found = "";
+    outer:
+    for (let r = 1; r <= sheet.maxRow; r++) {
+      for (let c = 1; c <= sheet.maxCol; c++) {
+        if (bomNorm(sheet.get(c, r)) !== bomNorm(label)) continue;
+        for (let c2 = c + 1; c2 <= sheet.maxCol; c2++) {
+          const v = sheet.get(c2, r);
+          if (v) { found = v; break outer; }
+        }
+      }
+    }
+    header[key] = found;
+  }
+
+  const sections = [];
+  const lines = [];
+  for (let r = 1; r <= sheet.maxRow; r++) {
+    const heading = sheet.get(1, r);
+    if (!heading) continue;
+    const cat = BOM_SECTION_CATEGORY[bomNorm(heading)];
+    if (!cat) continue;
+
+    let hdr = 0;
+    for (let k = r + 1; k <= Math.min(r + 3, sheet.maxRow); k++) {
+      if (bomNorm(sheet.get(1, k)) === "mfg") { hdr = k; break; }
+    }
+    if (!hdr) { problems.push(`Section "${heading}" has no MFG header row.`); continue; }
+
+    // Columns by label, so a moved column does not shift the data under it.
+    const col = {};
+    for (let c = 1; c <= sheet.maxCol; c++) {
+      const h = bomNorm(sheet.get(c, hdr));
+      if (h === "mfg") col.mfg = c;
+      else if (h === "p/n") col.pn = c;
+      else if (h === "description") col.desc = c;
+      else if (h === "qty") col.qty = c;
+      else if (h === "qty w/spares") col.spares = c;
+    }
+    ["mfg", "pn", "qty"].forEach(need => {
+      if (!col[need]) problems.push(`Section "${heading}" has no ${need.toUpperCase()} column.`);
+    });
+
+    let found = 0;
+    for (let k = hdr + 1; k <= sheet.maxRow; k++) {
+      const mfg = sheet.get(col.mfg || 1, k);
+      const pn = sheet.get(col.pn || 2, k);
+      // Stop at the blank line, the Total: line, or the next section.
+      if (!mfg && !pn) break;
+      if (bomNorm(mfg) === "mfg" || BOM_SECTION_CATEGORY[bomNorm(mfg)]) break;
+      // Spares is what actually gets ordered when the supplier gives both.
+      const raw = (col.spares && sheet.get(col.spares, k)) || sheet.get(col.qty, k);
+      const qty = Number(String(raw).replace(/[^0-9.\-]/g, ""));
+      lines.push({
+        category: cat, mfg: mfg, pn: pn,
+        description: col.desc ? sheet.get(col.desc, k) : "",
+        qty: Number.isFinite(qty) ? qty : 0,
+        section: heading, source: "workbook"
+      });
+      found++;
+      if (!Number.isFinite(qty) || qty <= 0) {
+        problems.push(`"${pn || mfg}" has no usable quantity (${JSON.stringify(raw)}).`);
+      }
+    }
+    if (!found) problems.push(`Section "${heading}" has no line items.`);
+    sections.push({ heading, category: cat, count: found });
+  }
+
+  if (!lines.length) problems.push("No line items found — is this the right workbook?");
+  return { header, sections, lines, problems };
+}
+
+/**
+ * Compare the workbook against the project it is supposed to belong to.
+ *
+ * The workbook is produced by a different system from a different input. If the
+ * two disagree about the module or the count, one of them is wrong, and finding
+ * that out after the parts arrive is expensive.
+ */
+function bomCrossCheck(header, project) {
+  const out = [];
+  const say = (what, a, b) =>
+    out.push(`${what}: the workbook says "${a}", the project says "${b}".`);
+
+  const wbMod = bomNorm(header.moduleModel);
+  const pjMod = bomNorm(project.module_type);
+  if (wbMod && pjMod && !pjMod.includes(wbMod) && !wbMod.includes(pjMod)) {
+    say("Module", header.moduleModel, project.module_type);
+  }
+  const wbQty = Number(header.totalModules);
+  const pjQty = Number(project.module_quantity);
+  if (Number.isFinite(wbQty) && Number.isFinite(pjQty) && pjQty > 0 && wbQty !== pjQty) {
+    say("Module count", wbQty, pjQty);
+  }
+  const wbInv = bomNorm(header.inverterModel).replace(/\s*\[.*$/, "");
+  const pjInv = bomNorm(project.inverter_model);
+  if (wbInv && pjInv && !pjInv.includes(wbInv) && !wbInv.includes(pjInv)) {
+    say("Inverter", header.inverterModel, project.inverter_model);
+  }
+  const wbCust = bomNorm(header.customer), pjCust = bomNorm(project.account_name);
+  if (wbCust && pjCust && wbCust !== pjCust) say("Customer", header.customer, project.account_name);
+  return out;
+}
+
+/** Renumber lines 1..n. Called after every edit so there are never gaps. */
+function bomRenumber(lines) {
+  lines.forEach((l, i) => { l.line = i + 1; });
+  return lines;
+}
+
+/** The purchase order's own header, from the project plus the workbook. */
+function bomPoHeader(project, wb) {
+  const addr = [project.street_address, project.city,
+    [project.state, project.zip_code].filter(Boolean).join(" ")]
+    .filter(Boolean).join(", ");
+  return {
+    poNumber:   String(project.project_number || "").trim(),
+    customer:   String(project.account_name || wb.customer || "").trim(),
+    address:    addr || [wb.street, wb.city, [wb.state, wb.zip].filter(Boolean).join(" ")]
+                  .filter(Boolean).join(", "),
+    phone:      formatPhone(project.phone),
+    financier:  String(project.financier || "").trim(),
+    loanType:   String(project.loan_type || "").trim(),
+    designer:   String(project.designer || "").trim(),
+    designDate: String(project.date_drawn || "").trim(),
+    roofType:   String(project.roof_type || "").trim(),
+    projectName: String(project.project_number || "").trim()
+  };
+}
+
+/** The purchase order as CSV — the same columns as the PDF, for Excel. */
+function bomToCsv(lines) {
+  const esc = v => {
+    const s = String(v === undefined || v === null ? "" : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const head = ["Line", "Category", "Manufacturer", "Part #", "Description", "Qty"];
+  const rows = lines.map((l, i) =>
+    [i + 1, l.category, l.mfg, l.pn, l.description, l.qty].map(esc).join(","));
+  // CRLF and a BOM so Excel opens it as UTF-8 without a wizard.
+  return "﻿" + [head.join(","), ...rows].join("\r\n") + "\r\n";
 }
 
 /* =====================================================================
@@ -3589,7 +4003,9 @@ if (typeof module !== "undefined" && module.exports) {
     pvGetLocation, pvGetHeightAdder, pvGetTempFactor, pvGetFillFactor,
     pvGetWireRow, pvWireR, pvNextBreaker, pvGetEGC, pvVD, pvConduitSize,
     pvSizeBranch, pvCalculate, pvAutoDistribute, miKey, miResolve,
-    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip,
+    SERVICE_VOLTAGES, MI_DEFAULT_VAC, jurisdictionLookup, normZip, formatPhone,
+    bomReadXlsx, parseBomWorkbook, bomCrossCheck, bomRenumber, bomPoHeader,
+    bomToCsv, BOM_CATEGORIES, BOM_SECTION_CATEGORY, BOM_HEADER_FIELDS,
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
     offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
     SPEC_CATEGORIES, SPEC_CATEGORIES_OWNED_ELSEWHERE, SPEC_CHOSEN_ON_PROJECT,
@@ -4485,7 +4901,9 @@ async function refreshProjects() {
       b.addEventListener("click", () => browseProject(b.dataset.pid)));
     $("plist").querySelectorAll(".proj-path").forEach(b =>
       b.addEventListener("click", () => copyProjectPath(b.dataset.pid)));
+    // Both tabs read LAST_PROJECT_LIST, and this is the one place it is rebuilt.
     if (typeof specPopulateProjects === "function") specPopulateProjects();
+    if (typeof bomPopulateProjects === "function") bomPopulateProjects();
   } catch (e) {
     $("plist").innerHTML = `<div class="hint">Could not list projects: ${e.message}</div>`;
   }
@@ -4843,6 +5261,7 @@ async function init() {
     pvInit();
     rdInit();
     specInit();
+    bomInit();
     initViews();
   } catch (e) {
     fatal("wiring the interface", e);
@@ -5771,6 +6190,394 @@ function specRenderChecklist(chk) {
   }
 
   box.innerHTML = `<div class="kv">${cells}</div>` + notes.join("");
+}
+
+/* ---- BOM tab ---------------------------------------------------------
+   Fixed supplier block. Ambia buy for every project regardless of installer,
+   so this is not configuration.
+*/
+const BOM_SUPPLIER = {
+  name: "Sunpower",
+  addr1: "1403 N Research Way",
+  addr2: "Orem, UT  84097",
+  email: "supplychain@ambiasolar.com"
+};
+
+let BOM_PROJECT = null;    // { id, entry, handle }
+let BOM_LINES = [];        // the editable purchase-order lines
+let BOM_WB = null;         // last parsed workbook
+let BOM_FILE_NAME = "";
+
+function bomPopulateProjects() {
+  const sel = $("bomProject");
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">(choose a project)</option>' +
+    (LAST_PROJECT_LIST || []).map(p =>
+      `<option value="${modEscAttr(p.id)}">${modEscHtml(p.folder)}</option>`).join("");
+  sel.value = keep;
+}
+
+async function bomChooseProject(pid) {
+  BOM_PROJECT = null;
+  $("bomDetail").style.display = "none";
+  $("bomSummary").style.display = "none";
+  if (!pid) { bomRenderWarnings([]); return; }
+  const entry = (LAST_PROJECT_LIST || []).find(p => p.id === pid);
+  const handle = PROJECT_HANDLES.get(pid);
+  if (!entry || !handle) {
+    showMsg("Project not found — press Refresh on the Project tab.", "err");
+    return;
+  }
+  BOM_PROJECT = { id: pid, entry, handle };
+  bomRenderWarnings([]);
+  if (BOM_WB) bomApplyWorkbook(BOM_WB);   // re-check against the new project
+}
+
+function bomRenderWarnings(list, kind) {
+  const box = $("bomWarnings");
+  if (!box) return;
+  box.innerHTML = list.length
+    ? list.map(w => `<div class="msg show ${kind || "warn"}" style="margin:0 0 6px">${
+        modEscHtml(w)}</div>`).join("")
+    : "";
+}
+
+/** Read the chosen .xlsx and turn it into lines. */
+async function bomLoadFile(file) {
+  if (!file) return;
+  BOM_FILE_NAME = file.name;
+  busy(true, "reading the workbook…");
+  try {
+    const wb = parseBomWorkbook(await bomReadXlsx(await file.arrayBuffer()));
+    BOM_WB = wb;
+    bomApplyWorkbook(wb);
+    showMsg(`Read ${file.name}: ${wb.lines.length} line(s).`, wb.problems.length ? "warn" : "ok");
+  } catch (e) {
+    BOM_WB = null;
+    bomRenderWarnings(["Could not read that workbook: " + (e.message || e)], "err");
+    showMsg("Could not read that workbook.", "err");
+  } finally {
+    busy(false);
+  }
+}
+
+/** Put a parsed workbook on screen, keeping any lines added by hand. */
+function bomApplyWorkbook(wb) {
+  const manual = BOM_LINES.filter(l => l.source === "manual");
+  BOM_LINES = wb.lines.map(l => Object.assign({}, l)).concat(manual);
+  bomRenumber(BOM_LINES);
+
+  const project = BOM_PROJECT ? (BOM_PROJECT.entry.manifest || {}) : {};
+  const warn = wb.problems.slice();
+  if (BOM_PROJECT) warn.push(...bomCrossCheck(wb.header, project));
+  else warn.push("No project chosen, so nothing has been cross-checked.");
+  bomRenderWarnings(warn);
+
+  const h = wb.header;
+  $("bomSummary").style.display = "";
+  $("bomSummary").innerHTML =
+    `<div><span>Workbook</span><span>${modEscHtml(BOM_FILE_NAME)}</span></div>` +
+    `<div><span>Customer</span><span>${modEscHtml(h.customer || "—")}</span></div>` +
+    `<div><span>Module</span><span>${modEscHtml(h.moduleModel || "—")} ` +
+      `&times; ${modEscHtml(h.totalModules || "—")}</span></div>` +
+    `<div><span>Inverter</span><span>${modEscHtml(h.inverterModel || "—")}</span></div>` +
+    `<div><span>Total watts</span><span>${modEscHtml(h.totalWatts || "—")}</span></div>` +
+    `<div><span>Attachments</span><span>${modEscHtml(h.totalAttachments || "—")}</span></div>`;
+
+  $("bomDetail").style.display = "";
+  bomRenderLines();
+}
+
+function bomRenderLines() {
+  bomRenumber(BOM_LINES);
+  $("bom_head").innerHTML =
+    '<th style="width:4%">#</th>' +
+    '<th style="width:15%">Category</th>' +
+    '<th style="width:15%">Manufacturer</th>' +
+    '<th style="width:18%">Part #</th>' +
+    '<th style="width:32%">Description</th>' +
+    '<th style="width:8%">Qty</th>' +
+    '<th style="width:8%"></th>';
+
+  $("bom_body").innerHTML = BOM_LINES.map((l, i) => {
+    const catOpts = BOM_CATEGORIES.concat(
+      BOM_CATEGORIES.some(c => sameText(c, l.category)) ? [] : [l.category])
+      .map(c => `<option value="${modEscAttr(c)}"${
+        sameText(c, l.category) ? " selected" : ""}>${modEscHtml(c)}</option>`).join("");
+    return `<tr>
+      <td class="hint" style="padding-left:8px">${i + 1}${
+        l.source === "manual" ? '<div style="font-size:10px;color:var(--blue)">added</div>' : ""}</td>
+      <td><select data-i="${i}" data-f="category">${catOpts}</select></td>
+      <td><input data-i="${i}" data-f="mfg" value="${modEscAttr(l.mfg || "")}"></td>
+      <td><input data-i="${i}" data-f="pn" value="${modEscAttr(l.pn || "")}"></td>
+      <td><input data-i="${i}" data-f="description" value="${modEscAttr(l.description || "")}"></td>
+      <td><input class="num" data-i="${i}" data-f="qty" value="${modEscAttr(l.qty)}"></td>
+      <td style="white-space:nowrap">
+        <button type="button" class="small bom-up" data-i="${i}">↑</button>
+        <button type="button" class="small bom-down" data-i="${i}">↓</button>
+        <button type="button" class="small bom-del" data-i="${i}">✕</button>
+      </td></tr>`;
+  }).join("");
+
+  $("bom_body").querySelectorAll("input,select").forEach(el =>
+    el.addEventListener("change", () => {
+      const l = BOM_LINES[Number(el.dataset.i)];
+      if (!l) return;
+      if (el.dataset.f === "qty") {
+        const q = Number(String(el.value).replace(/[^0-9.\-]/g, ""));
+        l.qty = Number.isFinite(q) ? q : 0;
+        el.value = l.qty;
+      } else {
+        l[el.dataset.f] = el.value;
+      }
+      bomRefreshBuildState();
+    }));
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= BOM_LINES.length) return;
+    [BOM_LINES[i], BOM_LINES[j]] = [BOM_LINES[j], BOM_LINES[i]];
+    bomRenderLines(); bomRefreshBuildState();
+  };
+  $("bom_body").querySelectorAll(".bom-up").forEach(b =>
+    b.addEventListener("click", () => move(Number(b.dataset.i), -1)));
+  $("bom_body").querySelectorAll(".bom-down").forEach(b =>
+    b.addEventListener("click", () => move(Number(b.dataset.i), 1)));
+  $("bom_body").querySelectorAll(".bom-del").forEach(b =>
+    b.addEventListener("click", () => {
+      BOM_LINES.splice(Number(b.dataset.i), 1);
+      bomRenderLines(); bomRefreshBuildState();
+    }));
+
+  bomRefreshBuildState();
+}
+
+function bomRefreshBuildState() {
+  const bad = BOM_LINES.filter(l => !String(l.pn || "").trim() || !(Number(l.qty) > 0));
+  const manual = BOM_LINES.filter(l => l.source === "manual").length;
+  $("bomLineInfo").textContent =
+    `${BOM_LINES.length} line(s)` + (manual ? `, ${manual} added by hand` : "") +
+    (bad.length ? ` — ${bad.length} need a part number and a quantity` : "");
+  const ready = !!(BOM_PROJECT && BOM_LINES.length && !bad.length);
+  $("btnBomBuild").disabled = !ready;
+}
+
+/* ---- the purchase order itself -------------------------------------- */
+
+/**
+ * Draw the PO with pdf-lib, which is already inlined for the iPermit package.
+ * Continuation pages repeat the column headings, because a purchase order whose
+ * second page is a wall of unlabelled numbers gets misread.
+ */
+async function bomBuildPdf(header, lines) {
+  const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const W = 612, H = 792, M = 40;
+  const navy = rgb(0.086, 0.133, 0.255);
+  const grey = rgb(0.45, 0.45, 0.45);
+  const line = rgb(0.80, 0.82, 0.86);
+
+  // Column x positions and widths for the line table.
+  const cols = [
+    { key: "line", label: "Line",         x: M,       w: 32,  align: "l" },
+    { key: "category", label: "Category", x: M + 34,  w: 92,  align: "l" },
+    { key: "mfg", label: "Manufacturer",  x: M + 128, w: 92,  align: "l" },
+    // Part numbers are what someone orders against, so they get the room; a
+    // model like "IQ8HC-72-M-DOM-US [240V]" must not lose its bracket.
+    { key: "pn", label: "Part #",         x: M + 222, w: 124, align: "l" },
+    { key: "description", label: "Description", x: M + 350, w: 150, align: "l" },
+    { key: "qty", label: "Qty",           x: M + 502, w: 30,  align: "r" }
+  ];
+
+  // Truncate visibly. Silently clipping "…with Dovetail T-bolt" to "…with Dovet"
+  // reads as though that is the whole description.
+  const fit = (text, f, size, w) => {
+    let t = String(text === undefined || text === null ? "" : text);
+    if (f.widthOfTextAtSize(t, size) <= w) return t;
+    while (t.length && f.widthOfTextAtSize(t + "\u2026", size) > w) t = t.slice(0, -1);
+    return t + "\u2026";
+  };
+
+  let page, y;
+  const newPage = () => {
+    page = doc.addPage([W, H]);
+    y = H - M;
+  };
+  const drawHeadings = () => {
+    page.drawRectangle({ x: M - 4, y: y - 3, width: W - 2 * M + 8, height: 16, color: navy });
+    cols.forEach(c => {
+      const t = c.label;
+      const tw = bold.widthOfTextAtSize(t, 8);
+      page.drawText(t, {
+        x: c.align === "r" ? c.x + c.w - tw : c.x,
+        y: y + 1, size: 8, font: bold, color: rgb(1, 1, 1)
+      });
+    });
+    y -= 20;
+  };
+
+  newPage();
+
+  // ---- letterhead ----
+  page.drawText(BOM_SUPPLIER.name, { x: M, y: y - 10, size: 16, font: bold, color: navy });
+  page.drawText("Purchase Order", { x: M, y: y - 28, size: 11, font: bold, color: grey });
+  const poRight = "PO " + (header.poNumber || "—");
+  page.drawText(poRight, {
+    x: W - M - bold.widthOfTextAtSize(poRight, 14), y: y - 10, size: 14, font: bold, color: navy });
+  y -= 46;
+
+  // ---- supplier and customer, side by side ----
+  const colL = M, colR = M + 280;
+  let yL = y, yR = y;
+  const put = (t, x, yy, f, size, col) => {
+    page.drawText(String(t || ""), { x, y: yy, size: size || 9, font: f || font, color: col || rgb(0,0,0) });
+  };
+  put("Supplier", colL, yL, bold, 8, grey); yL -= 12;
+  [BOM_SUPPLIER.addr1, BOM_SUPPLIER.addr2, BOM_SUPPLIER.email].forEach(t => {
+    put(t, colL, yL); yL -= 11;
+  });
+  put("Ship to", colR, yR, bold, 8, grey); yR -= 12;
+  [header.customer, header.address, header.phone].filter(Boolean).forEach(t => {
+    put(fit(t, font, 9, W - M - colR), colR, yR); yR -= 11;
+  });
+  y = Math.min(yL, yR) - 10;
+
+  // ---- project meta, two columns of label/value ----
+  const meta = [
+    ["Financier", header.financier], ["Loan Type", header.loanType],
+    ["Designer", header.designer],   ["Design Date", header.designDate],
+    ["Roof Type", header.roofType],  ["PO Number", header.poNumber]
+  ];
+  page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: line });
+  y -= 14;
+  meta.forEach((pair, i) => {
+    const x = i % 2 === 0 ? M : M + 280;
+    put(pair[0], x, y, bold, 8, grey);
+    put(fit(pair[1] || "—", font, 9, 190), x + 70, y);
+    if (i % 2 === 1) y -= 13;
+  });
+  if (meta.length % 2 === 1) y -= 13;
+  y -= 8;
+  page.drawLine({ start: { x: M, y: y + 6 }, end: { x: W - M, y: y + 6 }, thickness: 0.5, color: line });
+  y -= 6;
+
+  // ---- lines ----
+  drawHeadings();
+  lines.forEach((l, i) => {
+    if (y < M + 40) { newPage(); drawHeadings(); }
+    if (i % 2 === 1) {
+      page.drawRectangle({ x: M - 4, y: y - 3, width: W - 2 * M + 8, height: 13,
+                           color: rgb(0.965, 0.972, 0.98) });
+    }
+    cols.forEach(c => {
+      const raw = c.key === "line" ? String(i + 1) : String(l[c.key] === undefined ? "" : l[c.key]);
+      const t = fit(raw, font, 8, c.w);
+      const tw = font.widthOfTextAtSize(t, 8);
+      page.drawText(t, { x: c.align === "r" ? c.x + c.w - tw : c.x, y, size: 8, font });
+    });
+    y -= 13;
+  });
+
+  // ---- total and footer on every page ----
+  y -= 4;
+  page.drawLine({ start: { x: M, y: y + 8 }, end: { x: W - M, y: y + 8 }, thickness: 0.5, color: line });
+  const total = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+  const tl = `${lines.length} line items` + "   ·   " + `${total} units`;
+  page.drawText(tl, { x: M, y: y - 4, size: 8, font: bold, color: grey });
+
+  const pages = doc.getPages();
+  pages.forEach((pg, i) => {
+    const foot = `${header.customer || ""}   ·   PO ${header.poNumber || ""}` +
+                 `   ·   page ${i + 1} of ${pages.length}`;
+    pg.drawText(fit(foot, font, 7, W - 2 * M), { x: M, y: 24, size: 7, font, color: grey });
+  });
+
+  return await doc.save();
+}
+
+/** Write the PO and its CSV into the project's Deliverables folder. */
+async function bomBuild() {
+  if (!BOM_PROJECT || !BOM_LINES.length) return;
+  const project = BOM_PROJECT.entry.manifest || {};
+  const header = bomPoHeader(project, (BOM_WB && BOM_WB.header) || {});
+
+  if (!header.poNumber) {
+    showMsg("This project has no project number, so the purchase order has no PO number. " +
+            "Set it on Project Information and press Update project.json.", "err");
+    return;
+  }
+
+  const base = [header.poNumber, String(header.customer || "").toUpperCase(), "Purchase Order"]
+    .filter(Boolean).join(" - ");
+  const name = sanitizeComponent(base, "Purchase Order");
+
+  if (!confirm(`Write "${name}.pdf" and "${name}.csv" to Deliverables?\n\n` +
+               `${BOM_LINES.length} line items.`)) return;
+
+  busy(true, "building the purchase order…");
+  try {
+    const bytes = await bomBuildPdf(header, BOM_LINES);
+    const csv = bomToCsv(BOM_LINES);
+
+    const dir = await getDir(BOM_PROJECT.handle, "Deliverables", true);
+    if (!dir) throw new Error("Could not open the Deliverables folder.");
+
+    const writeFile = async (fname, data) => {
+      const fh = await dir.getFileHandle(fname, { create: true });
+      const w = await fh.createWritable();
+      await w.write(data);
+      await w.close();
+    };
+    await writeFile(name + ".pdf", bytes);
+    await writeFile(name + ".csv", csv);
+
+    $("bomResult").innerHTML =
+      `<div class="msg show ok" style="margin:0"><strong>${modEscHtml(name)}.pdf</strong> and ` +
+      `<strong>${modEscHtml(name)}.csv</strong> written to Deliverables — ` +
+      `${BOM_LINES.length} line items.</div>`;
+    showMsg("Purchase order written to Deliverables.", "ok");
+  } catch (e) {
+    $("bomResult").innerHTML =
+      `<div class="msg show err" style="margin:0">${modEscHtml(e.message || String(e))}</div>`;
+    showMsg("Could not write the purchase order: " + (e.message || e), "err");
+  } finally {
+    busy(false);
+  }
+}
+
+function bomInit() {
+  $("bomProject").addEventListener("change", e => bomChooseProject(e.target.value));
+  $("btnBomReload").addEventListener("click", async () => {
+    await refreshProjects();
+    bomPopulateProjects();
+    if (BOM_PROJECT) await bomChooseProject(BOM_PROJECT.id);
+    showMsg("Reloaded the project list.", "ok");
+  });
+  $("btnBomPick").addEventListener("click", () => $("bomFile").click());
+  $("bomFile").addEventListener("change", e => {
+    const f = e.target.files && e.target.files[0];
+    // Reset so choosing the same file again still fires a change.
+    e.target.value = "";
+    bomLoadFile(f);
+  });
+  $("btnBomAdd").addEventListener("click", () => {
+    BOM_LINES.push({ category: "OTHER", mfg: "", pn: "", description: "", qty: 1,
+                     source: "manual" });
+    bomRenderLines();
+    const body = $("bom_body");
+    if (body) body.scrollTop = body.scrollHeight;
+  });
+  $("btnBomClearManual").addEventListener("click", () => {
+    const n = BOM_LINES.filter(l => l.source === "manual").length;
+    if (!n) { showMsg("There are no added lines.", "warn"); return; }
+    if (!confirm(`Remove ${n} line(s) you added by hand? Workbook lines stay.`)) return;
+    BOM_LINES = BOM_LINES.filter(l => l.source !== "manual");
+    bomRenderLines();
+  });
+  $("btnBomBuild").addEventListener("click", bomBuild);
 }
 
 /**
@@ -6799,6 +7606,7 @@ async function reconnectFolders() {
     await Promise.all([refreshProjects(), reloadReports()]);
     await specLoadFolder();
     specPopulateProjects();
+    bomPopulateProjects();
     showMsg("Reconnected to " + state.root.name + ". Tip: choose " +
             "\u201cAllow on every visit\u201d in Chrome's permission prompt and it " +
             "will stop asking after a restart.", "ok");
