@@ -790,7 +790,7 @@
               <div class="hint" style="margin-top:5px">Follows <b>Module type</b> on
                 Project Information &mdash; change it there.</div>
             </div>
-            <div>
+            <div id="pv_mi_wrap">
               <label for="pv_mi">Microinverter</label>
               <select id="pv_mi" disabled></select>
               <div class="hint" style="margin-top:5px">Follows <b>Inverter model</b> on
@@ -847,7 +847,40 @@
           </div>
         </fieldset>
 
-        <fieldset>
+        <div id="pv_mode_banner" class="msg show" style="margin-bottom:12px"></div>
+
+        <fieldset id="pv_fs_dc" style="display:none">
+          <legend>DC strings</legend>
+          <div class="hint" style="margin-bottom:10px">The modules string into the
+            battery's own inverter, so there are no microinverters and no AC branch
+            circuits. Temperatures come from the location above.</div>
+          <div class="grid">
+            <div>
+              <label for="pv_dc_mounting">Mounting method</label>
+              <select id="pv_dc_mounting"></select>
+              <div class="hint" style="margin-top:5px">Sets the hot-case cell
+                temperature adder. The cold case takes none.</div>
+            </div>
+            <div>
+              <label for="pv_dc_jumper">MPPT jumper fitted</label>
+              <select id="pv_dc_jumper">
+                <option value="">No</option><option value="1">Yes</option>
+              </select>
+              <div class="hint" style="margin-top:5px">Doubles the current limit on a
+                jumpered pair. MPPT 1&#8211;2 and 5&#8211;6 only.</div>
+            </div>
+          </div>
+          <div class="actions" style="margin:10px 0">
+            <button id="pv_dc_add" type="button">Add string</button>
+            <span id="pv_dc_note" class="hint"></span>
+          </div>
+          <table id="pv_dc_table">
+            <thead><tr><th>#</th><th>Modules</th><th>MPPT</th><th>Run ft</th><th></th></tr></thead>
+            <tbody id="pv_dc_body"></tbody>
+          </table>
+        </fieldset>
+
+        <fieldset id="pv_fs_branches">
           <legend>Branch circuits</legend>
           <div class="actions" style="margin-bottom:10px">
             <button id="pv_btn_auto" type="button">Auto-distribute from module qty</button>
@@ -952,6 +985,16 @@
 
         <div class="hint" style="font-weight:700;margin:16px 0 4px">Combined AC output</div>
         <div class="kv" id="pv_kv_combined"></div>
+
+        <div id="pv_dc_results" style="display:none">
+          <h4 style="margin:18px 0 4px">DC string sizing</h4>
+          <div class="kv" id="pv_kv_dc"></div>
+          <div style="overflow-x:auto; margin-top:10px"><table id="pv_dc_res">
+            <thead><tr><th>#</th><th>Modules</th><th>MPPT</th>
+              <th>Voc cold (V)</th><th>Vmp hot (V)</th>
+              <th>Max current (A)</th><th>Run ft</th><th>Status</th></tr></thead>
+            <tbody></tbody></table></div>
+        </div>
 
         <h4 style="margin:18px 0 4px">Conductor schedule — pre-plumb</h4>
         <div class="hint" style="margin-bottom:6px">THWN-2 copper in conduit.</div>
@@ -1305,7 +1348,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.29.0";
+const APP_VERSION = "2.30.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2406,7 +2449,7 @@ let RT_BATTERY = [
 ];
 
 /** The RT_BATTERY row for a battery model, or null. */
-function batteryRow(model) {
+function battElecRow(model) {
   const m = String(model || "").trim();
   if (!m) return null;
   return RT_BATTERY.find(r => sameText(r.model, m)) || null;
@@ -2421,7 +2464,7 @@ function batteryRow(model) {
 function projectCoupling(project) {
   const explicit = String((project && project.coupling) || "").trim();
   if (explicit) return explicit;
-  const row = batteryRow(project && project.battery_type);
+  const row = battElecRow(project && project.batteryModel || (project && project.battery_type));
   return row ? String(row.coupling || "") : "";
 }
 
@@ -3066,6 +3109,230 @@ function pvSizeRun(o) {
   };
 }
 
+/*
+ * Mounting method and its cell-temperature adder, in °C.
+ *
+ * Tesla's own values, from the Solar Stringing Tool. The adder applies only to the
+ * HOT case: a module in still air behind a roof plane runs well above ambient. The
+ * cold case takes no adder, because the worst cold Voc happens with no sun on the
+ * array and therefore no heating — which is the single most common mistake in
+ * hand-rolled string calculations.
+ */
+const DC_MOUNTINGS = [
+  { name: "Roof mount, parallel to roof (<6 in. standoff)", adderC: 35 },
+  { name: "Roof mount, rack type (>6 in. standoff)", adderC: 30 },
+  { name: "Ground or pole mount", adderC: 25 }
+];
+const DC_MOUNTING_DEFAULT = DC_MOUNTINGS[0].name;
+const DC_TEMP_STC = 25;
+
+/** The adder for a mounting method, or the default's. */
+function dcMountAdder(name) {
+  const hit = DC_MOUNTINGS.find(m => sameText(m.name, name));
+  return hit ? hit.adderC : DC_MOUNTINGS[0].adderC;
+}
+
+/**
+ * Size a DC string for an integrated string inverter.
+ *
+ * The arithmetic is Tesla's, taken from the Solar Stringing Tool rather than from
+ * their published documentation — the DC System Sizing web page prints
+ * `Voc × tempco × count`, which is dimensionally impossible and would give nonsense.
+ * Verified against the tool to the last decimal on a REC470AA at ZIP 94305.
+ *
+ *   Vmp_min = Vmp × (1 + (Tmax + Tadd − 25) × γPmax/100)
+ *   Voc_max = Voc × (1 + (Tmin        − 25) × βVoc /100)
+ *   min per string = ROUNDUP  (Vmin / Vmp_min)
+ *   max per string = ROUNDDOWN(Vmax / Voc_max)
+ *   max per MCI    = ROUNDDOWN(Vmci / Voc_max)
+ *
+ * Tesla reads γPmax — the POWER coefficient — for the Vmp term, because the CEC
+ * list populates the proper βVpmax on only about 69% of rows. Matching them beats
+ * being tidy: an AHJ comparing the two documents should see one number.
+ *
+ * A module with either coefficient blank is refused. An assumed coefficient moves
+ * the maximum string length, and that reaches a stamped drawing.
+ *
+ * @param {object} o  moduleName, batteryModel, tMax, tMin, mounting,
+ *                    strings [{ nMod, mppt, runFt }], jumpered
+ */
+function dcStringSize(o) {
+  const errors = [], warnings = [], notes = [];
+
+  const mod = MODULE_DB.find(m => sameText(m.name, o.moduleName)) || null;
+  if (!mod) {
+    errors.push(`Module '${o.moduleName || ""}' is not in the PV modules table.`);
+    return { ok: false, errors, warnings, notes, strings: [] };
+  }
+
+  const batt = battElecRow(o.batteryModel);
+  if (!batt) {
+    errors.push(`'${o.batteryModel || ""}' is not in the Batteries (ESS) table, so ` +
+                `there are no inverter limits to string against.`);
+    return { ok: false, errors, warnings, notes, strings: [] };
+  }
+  if (!sameText(batt.coupling, "DC-coupled")) {
+    errors.push(`${batt.model} is ${batt.coupling || "not DC-coupled"}, so its ` +
+                `modules do not string into it. DC string sizing does not apply.`);
+    return { ok: false, errors, warnings, notes, strings: [] };
+  }
+
+  const tkVoc = mod.Tk_Voc, tkVmp = mod.Tk_Vmp;
+  const blank = v => v === null || v === undefined || v === "";
+  if (blank(tkVoc) || blank(tkVmp)) {
+    errors.push(`'${mod.name}' has no ${blank(tkVoc) ? "βVoc" : "γPmax"} on the PV ` +
+      `modules tab. String length cannot be worked out without it, and assuming a ` +
+      `typical value would change the answer — fill it in from the CEC PV Module ` +
+      `List or the datasheet.`);
+    return { ok: false, errors, warnings, notes, strings: [] };
+  }
+
+  const need = [["vMin", "minimum MPPT voltage"], ["vMax", "maximum DC voltage"]];
+  for (const [k, label] of need) {
+    if (blank(batt[k])) {
+      errors.push(`${batt.model} has no ${label} on the Batteries (ESS) tab.`);
+      return { ok: false, errors, warnings, notes, strings: [] };
+    }
+  }
+
+  const tMax = Number(o.tMax), tMin = Number(o.tMin);
+  if (!Number.isFinite(tMax) || !Number.isFinite(tMin)) {
+    errors.push(`Both a high and a low design temperature are needed — choose a ` +
+                `location so they come from the 517-city table.`);
+    return { ok: false, errors, warnings, notes, strings: [] };
+  }
+
+  const adder = dcMountAdder(o.mounting);
+  const vmpMin = Number(mod.Vmp) * (1 + (tMax + adder - DC_TEMP_STC) * Number(tkVmp) / 100);
+  const vocMax = Number(mod.Voc) * (1 + (tMin - DC_TEMP_STC) * Number(tkVoc) / 100);
+
+  const minPerString = vmpMin > 0 ? Math.ceil(Number(batt.vMin) / vmpMin) : 0;
+  const maxByInverter = vocMax > 0 ? Math.floor(Number(batt.vMax) / vocMax) : 0;
+  const maxByMci = (!blank(batt.vMciMax) && vocMax > 0)
+    ? Math.floor(Number(batt.vMciMax) / vocMax) : null;
+
+  // The rapid-shutdown device caps modules per interrupter, and on these modules it
+  // usually binds well before the inverter does. It is not on the datasheet — it
+  // comes only from Tesla's tool — so it is worth saying which limit governs.
+  const maxPerString = maxByMci !== null ? Math.min(maxByInverter, maxByMci) : maxByInverter;
+  const governedBy = maxByMci !== null && maxByMci < maxByInverter ? "MCI" : "inverter";
+  if (governedBy === "MCI") {
+    notes.push(`Maximum modules per string is set by the ${batt.vMciMax} V limit per ` +
+      `mid-circuit interrupter (${maxByMci}), not by the inverter's ${batt.vMax} V ` +
+      `(${maxByInverter}).`);
+  }
+
+  if (minPerString > maxPerString) {
+    errors.push(`No string length works: at least ${minPerString} modules are needed ` +
+      `to reach ${batt.vMin} V when hot, but no more than ${maxPerString} may be used ` +
+      `to stay under ${maxByMci !== null && governedBy === "MCI" ? batt.vMciMax + " V per MCI" : batt.vMax + " V"} ` +
+      `when cold.`);
+  }
+
+  // Per-string checks against the inverter's current limits.
+  const imp = Number(mod.Imp) || 0, isc = Number(mod.Isc) || 0;
+  const impLimit = blank(batt.impPerMppt) ? null : Number(batt.impPerMppt);
+  const iscLimit = blank(batt.iscPerMppt) ? null : Number(batt.iscPerMppt);
+
+  const byMppt = {};
+  const strings = (o.strings || []).map((s, i) => {
+    const nMod = Number(s.nMod) || 0;
+    const mppt = Number(s.mppt) || (i + 1);
+    byMppt[mppt] = (byMppt[mppt] || 0) + 1;
+    const vocCold = nMod * vocMax;
+    const vmpHot = nMod * vmpMin;
+    const out = {
+      index: i + 1, nMod, mppt, runFt: Number(s.runFt) || 0,
+      vocCold, vmpHot,
+      // NEC 690.8(A)(1): the maximum circuit current of a PV source circuit is
+      // 125% of Isc.
+      maxCurrent: isc * 1.25,
+      tooShort: nMod > 0 && nMod < minPerString,
+      tooLong: nMod > maxPerString,
+      overVoltage: vocCold > Number(batt.vMax),
+      belowMppt: nMod > 0 && vmpHot < Number(batt.vMin)
+    };
+    if (out.tooShort) {
+      errors.push(`String ${out.index} has ${nMod} modules; at least ${minPerString} ` +
+        `are needed to stay above ${batt.vMin} V at ${tMax + adder} °C.`);
+    }
+    if (out.tooLong) {
+      errors.push(`String ${out.index} has ${nMod} modules; at most ${maxPerString} ` +
+        `may be used, or cold Voc exceeds the limit.`);
+    }
+    if (out.overVoltage) {
+      errors.push(`String ${out.index} reaches ${vocCold.toFixed(1)} V at ${tMin} °C, ` +
+        `above the ${batt.vMax} V input limit.`);
+    }
+    return out;
+  });
+
+  // MPPT loading. Two strings on one MPPT parallel their current, which is what the
+  // jumper is for — and the jumper cannot be used on MPPT 3 or 4.
+  Object.keys(byMppt).forEach(k => {
+    const n = byMppt[k];
+    if (n <= 1) return;
+    const impTotal = imp * n, iscTotal = isc * n;
+    const impCap = impLimit === null ? null : (o.jumpered ? impLimit * 2 : impLimit);
+    const iscCap = iscLimit === null ? null : (o.jumpered ? iscLimit * 2 : iscLimit);
+    if (impCap !== null && impTotal > impCap) {
+      errors.push(`MPPT ${k} carries ${n} strings, ${impTotal.toFixed(1)} A Imp, above ` +
+        `the ${impCap} A limit${o.jumpered ? " even jumpered" : " — a jumper doubles it"}.`);
+    }
+    if (iscCap !== null && iscTotal > iscCap) {
+      warnings.push(`MPPT ${k} carries ${iscTotal.toFixed(1)} A Isc against a ` +
+        `${iscCap} A limit.`);
+    }
+    if (["3", "4"].includes(String(k))) {
+      errors.push(`MPPT ${k} has ${n} strings paralleled, but MPPT 3 and 4 cannot be ` +
+        `jumpered — they are closed from the factory. Move one string.`);
+    }
+  });
+
+  const mpptUsed = Object.keys(byMppt).length;
+  if (!blank(batt.mpptCount) && mpptUsed > Number(batt.mpptCount)) {
+    errors.push(`${mpptUsed} MPPTs are in use; ${batt.model} has ` +
+      `${batt.mpptCount}.`);
+  }
+
+  const totalMods = strings.reduce((s, x) => s + x.nMod, 0);
+  const dcKw = totalMods * (Number(mod.Wpeak) || 0) / 1000;
+  if (!blank(batt.maxDcKw) && dcKw > Number(batt.maxDcKw)) {
+    warnings.push(`${dcKw.toFixed(2)} kW DC exceeds ${batt.model}'s ` +
+      `${batt.maxDcKw} kW maximum, so the array will be curtailed.`);
+  }
+
+  // Tesla limits the round-trip DC circuit distance, and paralleled strings must be
+  // equal length or the interrupters misbehave.
+  const DC_MAX_CIRCUIT_FT = 525;
+  strings.forEach(s => {
+    if (s.runFt * 2 > DC_MAX_CIRCUIT_FT) {
+      errors.push(`String ${s.index} is ${s.runFt} ft each way, ${s.runFt * 2} ft ` +
+        `round trip, above the ${DC_MAX_CIRCUIT_FT} ft limit.`);
+    }
+  });
+  Object.keys(byMppt).forEach(k => {
+    if (byMppt[k] < 2) return;
+    const lens = strings.filter(s => String(s.mppt) === String(k)).map(s => s.runFt);
+    if (Math.max(...lens) - Math.min(...lens) > 0.001) {
+      warnings.push(`The strings paralleled on MPPT ${k} are different lengths ` +
+        `(${lens.join(", ")} ft). Tesla requires them equal or the mid-circuit ` +
+        `interrupters may not function.`);
+    }
+  });
+
+  return {
+    ok: errors.length === 0,
+    errors, warnings, notes,
+    module: mod, battery: batt,
+    tMax, tMin, adder, tHot: tMax + adder,
+    tkVoc: Number(tkVoc), tkVmp: Number(tkVmp),
+    vmpMin, vocMax, minPerString, maxPerString, maxByInverter, maxByMci, governedBy,
+    strings, totalMods, dcKw,
+    maxCurrentPerString: isc * 1.25
+  };
+}
+
 /**
  * The whole conductor schedule, in both variants.
  *
@@ -3416,9 +3683,18 @@ function pvCalculate(input) {
   const mod = MODULE_DB.find(m => m.name === input.moduleName) || null;
   if (input.moduleName && !mod) errors.push(`Module '${input.moduleName}' not in the database.`);
 
+  /*
+   * A DC-coupled project has no microinverter, so none of the microinverter checks
+   * below apply. Demanding one would make a Powerwall 3 design impossible to
+   * calculate — which is what happened before layer 3 existed.
+   */
+  const isDc = sameText(projectCoupling(input), "DC-coupled");
+
   const miHit = miResolve(input.miModel, input.vac);
   const miRow = miHit.row;
-  if (miHit.state === "defaulted") {
+  if (isDc) {
+    // Nothing to say: the string engine below owns this project's array.
+  } else if (miHit.state === "defaulted") {
     warnings.push(`'${input.miModel}' is sold in ` +
       miHit.candidates.map(c => c.Vac + " V").join(" and ") +
       `. Defaulted to ${miHit.defaultedTo} V (Iac ${miRow.Iac} A, ` +
@@ -3441,7 +3717,7 @@ function pvCalculate(input) {
   const iac = miRow ? Number(miRow.Iac) || 0 : 0;
   // Only worth saying when a real microinverter was found but its Iac is unset —
   // otherwise it just repeats the "choose a microinverter" error.
-  if (miRow && !iac) {
+  if (!isDc && miRow && !iac) {
     errors.push(`Microinverter '${miRow.miModel}' has no Iac value — set it on the ` +
                 `Microinverters tab before sizing conductors.`);
   }
@@ -3555,9 +3831,26 @@ function pvCalculate(input) {
 
   // The conductor schedule. Built from the same currents the branch results use,
   // so the two can never disagree about how much current a run carries.
+  /*
+   * DC string sizing, for a DC-coupled project only. It replaces the branch
+   * calculation rather than adding to it: on a string inverter the array has no AC
+   * side until the inverter output, which is where the schedule picks up.
+   */
+  let dc = null;
+  if (isDc) {
+    dc = dcStringSize({
+      moduleName: input.moduleName, batteryModel: input.batteryModel,
+      tMax: tAmb, tMin: tMin, mounting: input.dcMounting,
+      strings: input.dcStrings || [], jumpered: !!input.dcJumpered
+    });
+    dc.errors.forEach(e => errors.push(e));
+    dc.warnings.forEach(w => warnings.push(w));
+    dc.notes.forEach(n => warnings.push(n));
+  }
+
   // The battery supplies its own current and breaker; a typed value still wins,
   // because the reference table cannot know about a derated configuration.
-  const battRow = batteryRow(input.batteryModel);
+  const battRow = battElecRow(input.batteryModel);
   const schedule = buildSchedule({
     branchCurrent: worstBranch ? worstBranch.iBranch : 0,
     totalCurrent: iTotal,
@@ -3579,7 +3872,7 @@ function pvCalculate(input) {
     errors, warnings,
     module: mod, mi: miRow,
     location: loc,
-    schedule,
+    schedule, dc, isDc, coupling: projectCoupling(input),
     codeYear, rooftopRegime: necRooftopRegime(codeYear),
     vac, iac, minBranch, maxBranch,
     tAmb, tMin, tAdder, tUsed, tempFactor, wireTempSel,
@@ -5274,7 +5567,8 @@ if (typeof module !== "undefined" && module.exports) {
     get RT_COND_TYPE() { return RT_COND_TYPE; },
     get RT_SCHEDULE() { return RT_SCHEDULE; },
     get RT_BATTERY() { return RT_BATTERY; },
-    batteryRow, projectCoupling, COUPLINGS,
+    battElecRow, projectCoupling, COUPLINGS, POI_POINTS,
+    dcStringSize, dcMountAdder, DC_MOUNTINGS, DC_MOUNTING_DEFAULT, DC_TEMP_STC,
     get SCHEDULE_NOTE() { return SCHEDULE_NOTE; },
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
     offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
@@ -6467,9 +6761,13 @@ function wireControls() {
   // The battery decides the coupling default and whether the ESS run exists, so
   // both notes have to follow it rather than wait for the next Calculate.
   const btSel = $("battery_type");
-  if (btSel) btSel.addEventListener("change", () => { couplingPopulate(); pvEssPoiNote(); });
+  if (btSel) btSel.addEventListener("change", () => {
+    couplingPopulate(); pvEssPoiNote(); pvModeApply();
+  });
   const cpSel = $("coupling");
-  if (cpSel) cpSel.addEventListener("change", couplingPopulate);
+  if (cpSel) cpSel.addEventListener("change", () => { couplingPopulate(); pvModeApply(); });
+  const dcAdd = $("pv_dc_add");
+  if (dcAdd) dcAdd.addEventListener("click", () => pvDcAddRow());
   const epSel = $("pv_ess_poi");
   if (epSel) epSel.addEventListener("change", pvEssPoiNote);
 
@@ -9507,7 +9805,7 @@ function couplingPopulate() {
   const sel = $("coupling");
   if (!sel) return;
   const keep = sel.value;
-  const row = batteryRow(($("battery_type") || {}).value);
+  const row = battElecRow(($("battery_type") || {}).value);
   sel.innerHTML = `<option value="">(from the battery)</option>` +
     COUPLINGS.map(c => `<option value="${c}">${c}</option>`).join("");
   if (keep) sel.value = keep;
@@ -9569,12 +9867,101 @@ function pvReadSchedManual() {
   return out;
 }
 
+/**
+ * Show the half of the tab the project actually uses.
+ *
+ * DC-coupled means the modules string into the battery's own inverter, so there is
+ * no microinverter and no AC branch circuit — those inputs are hidden rather than
+ * disabled, because a greyed-out field still invites the question of what it is for.
+ */
+function pvModeApply() {
+  const coupling = projectCoupling({
+    coupling: ($("coupling") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  const dc = sameText(coupling, "DC-coupled");
+
+  const fsDc = $("pv_fs_dc"), fsBr = $("pv_fs_branches");
+  if (fsDc) fsDc.style.display = dc ? "" : "none";
+  if (fsBr) fsBr.style.display = dc ? "none" : "";
+
+  // The microinverter picker has no meaning on a DC-coupled job. Its wrapper has an
+  // id rather than being found with closest(): closest is absent from the stubbed
+  // DOM the startup test runs against, and this failed there before release.
+  const miWrap = $("pv_mi_wrap");
+  if (miWrap) miWrap.style.display = dc ? "none" : "";
+
+  const banner = $("pv_mode_banner");
+  if (banner) {
+    const b = battElecRow(($("battery_type") || {}).value);
+    banner.className = "msg show" + (dc ? " warn" : "");
+    banner.innerHTML = dc
+      ? `<b>DC-coupled — string inverter.</b> Modules string into ` +
+        `${b ? modEscHtml(b.model) : "the battery"}'s integrated inverter. No ` +
+        `microinverters, no AC branch circuits; string lengths are sized against the ` +
+        `inverter and the mid-circuit interrupters.`
+      : `<b>AC-coupled — microinverters.</b> Each module has its own microinverter, ` +
+        `so the roof produces AC and there are no DC strings to size.`;
+  }
+  if (dc && !$("pv_dc_body").children.length) pvDcAddRow();
+  pvDcNote();
+}
+
+/** One string row. Modules and MPPT are what the sizing actually checks. */
+function pvDcAddRow(nMod, mppt, runFt) {
+  const body = $("pv_dc_body");
+  if (!body) return;
+  const n = body.children.length + 1;
+  const tr = document.createElement("tr");
+  tr.innerHTML =
+    `<td class="dc-idx">${n}</td>` +
+    `<td><input class="dc-mod" type="number" min="0" step="1" style="width:80px" value="${nMod || 0}"></td>` +
+    `<td><input class="dc-mppt" type="number" min="1" step="1" style="width:70px" value="${mppt || n}"></td>` +
+    `<td><input class="dc-run" type="number" min="0" step="0.1" style="width:80px" value="${runFt === undefined ? 0 : runFt}"></td>` +
+    `<td><button type="button" class="dc-del">Remove</button></td>`;
+  body.appendChild(tr);
+  tr.querySelector(".dc-del").addEventListener("click", () => {
+    tr.remove(); pvDcRenumber(); pvDcNote();
+  });
+  tr.querySelectorAll("input").forEach(i => i.addEventListener("input", pvDcNote));
+  pvDcNote();
+}
+
+function pvDcRenumber() {
+  document.querySelectorAll("#pv_dc_body tr").forEach((tr, i) => {
+    tr.querySelector(".dc-idx").textContent = i + 1;
+  });
+}
+
+/** The strings as typed. */
+function pvReadDcStrings() {
+  return [...document.querySelectorAll("#pv_dc_body tr")].map(tr => ({
+    nMod: Number(tr.querySelector(".dc-mod").value) || 0,
+    mppt: Number(tr.querySelector(".dc-mppt").value) || 1,
+    runFt: Number(tr.querySelector(".dc-run").value) || 0
+  }));
+}
+
+/** A running total beside the Add string button, so a mistake shows before Calculate. */
+function pvDcNote() {
+  const el = $("pv_dc_note");
+  if (!el) return;
+  const s = pvReadDcStrings();
+  const mods = s.reduce((a, x) => a + x.nMod, 0);
+  const b = battElecRow(($("battery_type") || {}).value);
+  const cap = b && b.mpptCount ? ` of ${b.mpptCount} MPPTs` : "";
+  const used = new Set(s.map(x => x.mppt)).size;
+  el.textContent = s.length
+    ? `${s.length} string(s), ${mods} module(s), ${used}${cap} in use.`
+    : "No strings yet.";
+}
+
 /** Say plainly whether the ESS runs are on the schedule at all. */
 function pvEssPoiNote() {
   const note = $("pv_ess_poi_note");
   if (!note) return;
   const b = ($("battery_type") || {}).value || "";
-  const row = batteryRow(b);
+  const row = battElecRow(b);
   if (!b) { note.textContent = "No battery selected, so no ESS run is scheduled."; return; }
   note.textContent = row && Number(row.acAmps) > 0
     ? `${b}: ${row.acAmps} A continuous` +
@@ -9658,6 +10045,16 @@ function pvPopulateSelectors() {
   pvRooftopPopulate();
   couplingPopulate();
   pvSchedInputsRender();
+
+  const mnt = $("pv_dc_mounting");
+  if (mnt) {
+    const keep = mnt.value;
+    mnt.innerHTML = DC_MOUNTINGS.map(m =>
+      `<option value="${m.name}"${m.name === DC_MOUNTING_DEFAULT ? " selected" : ""}>` +
+      `${m.name} — +${m.adderC} °C</option>`).join("");
+    if (keep) mnt.value = keep;
+  }
+  pvModeApply();
 
   // Where each circuit lands. Defaults are the common case — an AC-module array
   // into the combiner, the battery straight to the main service panel — but both
@@ -9747,6 +10144,9 @@ function pvReadInput() {
     batteryModel: ($("battery_type") || {}).value || "",
     coupling: ($("coupling") || {}).value || "",
     scheduleManual: pvReadSchedManual(),
+    dcMounting: ($("pv_dc_mounting") || {}).value || DC_MOUNTING_DEFAULT,
+    dcJumpered: !!(($("pv_dc_jumper") || {}).value),
+    dcStrings: pvReadDcStrings(),
     vdropMax: Number($("pv_vdrop_max").value) || 3,
     phase: Number($("pv_phase").value) || 1,
     branches: pvReadBranches(),
@@ -9868,6 +10268,66 @@ function pvRenderResults(r) {
     `${pvNum(r.worstTotalVd, 4)} % of ${r.vdropMax} %</span></div>`;
 
   pvRenderSchedule(r);
+  pvRenderDc(r);
+}
+
+/**
+ * The string sizing result.
+ *
+ * Every intermediate is shown — the hot and cold temperatures actually used, both
+ * derated module voltages, and which limit governs the maximum. A reviewer checking
+ * this against Tesla's stringing tool should be able to follow every number rather
+ * than take the answer on trust.
+ */
+function pvRenderDc(r) {
+  const box = $("pv_dc_results");
+  if (!box) return;
+  const d = r.dc;
+  if (!r.isDc || !d) { box.style.display = "none"; return; }
+  box.style.display = "";
+
+  const kv = $("pv_kv_dc");
+  if (kv) {
+    kv.innerHTML = !d.module ? "" :
+      `<div><span>Module</span><span>${modEscHtml(d.module.name)}</span></div>` +
+      `<div><span>Inverter</span><span>${modEscHtml(d.battery.model)} — ` +
+      `${d.battery.vMin}–${d.battery.vMax} V, ${d.battery.mpptCount || "?"} MPPT</span></div>` +
+      `<div><span>Design temperatures</span><span>${d.tMin} °C cold, ${d.tMax} °C hot` +
+      ` + ${d.adder} = ${d.tHot} °C cell</span></div>` +
+      `<div><span>βVoc / γPmax</span><span>${d.tkVoc} / ${d.tkVmp} %/°C</span></div>` +
+      `<div><span>Voc at ${d.tMin} °C</span><span>${pvNum(d.vocMax, 3)} V per module</span></div>` +
+      `<div><span>Vmp at ${d.tHot} °C</span><span>${pvNum(d.vmpMin, 3)} V per module</span></div>` +
+      `<div><span>Modules per string</span>` +
+      `<span style="font-weight:700">${d.minPerString} to ${d.maxPerString}</span></div>` +
+      `<div><span>Governed by</span><span>${d.governedBy === "MCI"
+        ? `the ${d.battery.vMciMax} V limit per interrupter (${d.maxByMci}); the ` +
+          `inverter would allow ${d.maxByInverter}`
+        : `the inverter's ${d.battery.vMax} V input`}</span></div>` +
+      `<div><span>Max circuit current</span><span>${pvNum(d.maxCurrentPerString, 2)} A ` +
+      `per string (Isc × 1.25, 690.8(A)(1))</span></div>` +
+      `<div><span>Array</span><span>${d.totalMods} module(s), ${pvNum(d.dcKw, 2)} kW DC` +
+      (d.battery.maxDcKw ? ` of ${d.battery.maxDcKw} kW` : "") + `</span></div>`;
+  }
+
+  const tb = $("pv_dc_res") && $("pv_dc_res").querySelector("tbody");
+  if (tb) {
+    tb.innerHTML = d.strings.map(s => {
+      const bad = s.tooShort || s.tooLong || s.overVoltage || s.belowMppt;
+      const status = s.nMod === 0 ? "—"
+        : s.tooLong ? `too long (max ${d.maxPerString})`
+        : s.tooShort ? `too short (min ${d.minPerString})`
+        : s.overVoltage ? "over the input voltage limit"
+        : s.belowMppt ? "below the MPPT window when hot"
+        : "ok";
+      return `<tr>
+        <td>${s.index}</td><td>${s.nMod}</td><td>${s.mppt}</td>
+        <td>${pvNum(s.vocCold, 1)}</td><td>${pvNum(s.vmpHot, 1)}</td>
+        <td>${pvNum(s.maxCurrent, 2)}</td><td>${s.runFt}</td>
+        <td style="color:${bad ? "var(--err)" : "var(--ok)"}">${status}</td>
+      </tr>`;
+    }).join("") ||
+      `<tr><td colspan="8" class="hint" style="padding:8px">No strings entered.</td></tr>`;
+  }
 }
 
 /** The schedule's column headings, in the order the reference plan uses. */
