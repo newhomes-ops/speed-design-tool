@@ -661,9 +661,12 @@
               <div id="module_type_status" class="hint" style="margin-top:5px"></div></div>
             <div><label for="module_quantity">Module qty</label>
               <input id="module_quantity" type="number" min="0" step="1" value="0"></div>
-            <div><label for="battery_type">Battery</label>
+            <div><label for="battery_type">Battery (ESS)</label>
               <select id="battery_type"></select>
               <div id="battery_note" class="hint" style="margin-top:5px"></div></div>
+            <div><label for="coupling">Coupling</label>
+              <select id="coupling"></select>
+              <div id="coupling_note" class="hint" style="margin-top:5px"></div></div>
             <div><label for="combiner_type">Combiner type</label>
               <select id="combiner_type"></select></div>
             <div><label for="inverter_model">Inverter model</label>
@@ -829,6 +832,15 @@
               <select id="pv_conduit_type"></select>
             </div>
             <div>
+              <label for="pv_poi">PV lands at</label>
+              <select id="pv_poi"></select>
+            </div>
+            <div>
+              <label for="pv_ess_poi">ESS lands at</label>
+              <select id="pv_ess_poi"></select>
+              <div id="pv_ess_poi_note" class="hint" style="margin-top:5px"></div>
+            </div>
+            <div>
               <label for="pv_vdrop_max">Max voltage drop %</label>
               <input id="pv_vdrop_max" type="number" step="0.1" min="0.1" value="3">
             </div>
@@ -882,6 +894,21 @@
         </fieldset>
 
         <div class="actions">
+        <fieldset>
+          <legend>Schedule runs</legend>
+          <div class="hint" style="margin-bottom:8px">Every run of the conductor
+            schedule. Current is filled from the branches or the battery where the
+            project supplies it; type it here when it does not. Leave OCPD at 0 to
+            size a breaker from the load.</div>
+          <div style="overflow-x:auto"><table id="pv_sched_inputs">
+            <thead><tr>
+              <th style="text-align:left">#</th><th style="text-align:left">From</th>
+              <th style="text-align:left">To</th><th>Current (A)</th>
+              <th>OCPD (A)</th><th>Length (ft)</th>
+            </tr></thead><tbody id="pv_sched_inputs_body"></tbody>
+          </table></div>
+        </fieldset>
+
           <button id="pv_btn_calc" class="primary" type="button">Calculate</button>
           <button id="pv_btn_clear" type="button">Reset</button>
         </div>
@@ -1278,7 +1305,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.28.0";
+const APP_VERSION = "2.29.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1353,7 +1380,7 @@ const FORM_FIELDS = [
   "city","state","zip_code","ahj_name","utility_name","installer",
   "product_offering","module_type",
   "combiner_type","battery_type","financier","loan_type","phone",
-  "module_quantity","inverter_model","roof_type","module_orientation",
+  "module_quantity","inverter_model","roof_type","module_orientation","coupling",
   "roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
   "date_drawn","notes"
@@ -1368,7 +1395,7 @@ const FIELD_LABELS = {
   utility_name:"Utility", module_type:"Module type",
   product_offering:"Product offering", combiner_type:"Combiner type",
   financier:"Financier", loan_type:"Loan type", phone:"Phone",
-  battery_type:"Battery",
+  battery_type:"Battery (ESS)", coupling:"Coupling",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -2332,15 +2359,71 @@ const CONDUIT_DEFAULT = "EMT";
  * battery deletes two rows, a job with a load centre adds one.
  */
 let RT_SCHEDULE = [
-  {"id":1,"from":"ARRAY","to":"JUNCTION BOX","current":"branch","plumb":"PV WIRE","wire":"PV WIRE","conduit":"","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0},
-  {"id":2,"from":"JUNCTION BOX","to":"ESS","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0},
-  {"id":3,"from":"ESS","to":"GATEWAY","current":"ess","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":3,"lengthFt":5,"rooftop":false,"ocpd":80},
-  {"id":4,"from":"GATEWAY","to":"SUB PANEL","current":"manual","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":3,"lengthFt":5,"rooftop":false,"ocpd":100},
-  {"id":5,"from":"GATEWAY","to":"MAIN SERVICE PANEL","current":"manual","plumb":"THWN-2","wire":"SER-AL","conduit":"PVC Sch 80","ccc":3,"lengthFt":90,"rooftop":false,"ocpd":100}
+  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"PV WIRE","wire":"PV WIRE","conduit":"","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":""},
+  {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv"},
+  {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess"}
 ];
 
 /** Where a schedule run's current comes from. */
 const SCHEDULE_CURRENT_SOURCES = ["branch", "total", "ess", "manual"];
+
+/** How the battery couples to the PV. Decides whether strings are sized at all. */
+const COUPLINGS = ["AC-coupled", "DC-coupled"];
+
+/*
+ * Where a circuit can land — its point of interconnection.
+ *
+ * The PV and the ESS land independently: an AC-module array lands in the IQ
+ * Combiner, while the battery may land in the same combiner (an IQ Combiner 6C has
+ * provision for it) or run to the main service panel on its own. Making both a
+ * choice rather than a rule is Kevin's call, because a 6C job can still be tied at
+ * the MSP and a rule would be wrong the first time that happened.
+ */
+const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"];
+
+/*
+ * Battery / ESS electrical characteristics.
+ *
+ * "Battery" and "ESS" are the same thing; the tool says Battery on the form and
+ * ESS on the schedule because that is what each document calls it.
+ *
+ * `acAmps` is the continuous AC output that sizes the conductor to the ESS point of
+ * interconnection; `ocpd` is the breaker the manufacturer specifies, which is often
+ * larger than 125% of acAmps and therefore governs the conductor under 240.4.
+ *
+ * `coupling` says whether the PV meets the battery on the AC side (microinverters,
+ * so no DC strings) or the DC side (an integrated string inverter, so strings must
+ * be sized). A DC-coupled row also carries the inverter limits used for stringing.
+ *
+ * Powerwall 3 is filled from Tesla's own specifications. The Enphase rows are left
+ * blank deliberately: 5P and 10C output currents were not verified against a
+ * datasheet, and a guessed current would size a feeder.
+ */
+let RT_BATTERY = [
+  {"model":"Powerwall 3","coupling":"DC-coupled","acAmps":48,"ocpd":60,"mpptCount":6,"vMax":550,"vMin":60,"vMciMax":165,"impPerMppt":13,"iscPerMppt":15,"maxDcKw":20},
+  {"model":"Enphase 5P","coupling":"AC-coupled","acAmps":null,"ocpd":null,"mpptCount":null,"vMax":null,"vMin":null,"vMciMax":null,"impPerMppt":null,"iscPerMppt":null,"maxDcKw":null},
+  {"model":"Enphase 10C","coupling":"AC-coupled","acAmps":null,"ocpd":null,"mpptCount":null,"vMax":null,"vMin":null,"vMciMax":null,"impPerMppt":null,"iscPerMppt":null,"maxDcKw":null}
+];
+
+/** The RT_BATTERY row for a battery model, or null. */
+function batteryRow(model) {
+  const m = String(model || "").trim();
+  if (!m) return null;
+  return RT_BATTERY.find(r => sameText(r.model, m)) || null;
+}
+
+/**
+ * The coupling a project uses.
+ *
+ * Taken from the chosen battery unless the designer has overridden it. With no
+ * battery there is nothing to couple, so it is "" and no strings are sized.
+ */
+function projectCoupling(project) {
+  const explicit = String((project && project.coupling) || "").trim();
+  if (explicit) return explicit;
+  const row = batteryRow(project && project.battery_type);
+  return row ? String(row.coupling || "") : "";
+}
 
 /**
  * The note that goes on the drawing beside the schedule.
@@ -3012,22 +3095,54 @@ function buildSchedule(o) {
     }
   };
 
-  const build = variant => RT_SCHEDULE.map(run => {
+  /*
+   * A run that mentions the ESS only belongs on the schedule when there is a
+   * battery. Previously every project got the ESS runs and then three warnings
+   * saying they had no current — which was unresolvable, because a solar-only job
+   * has no ESS current to supply. Dropping the runs is the answer, not warning
+   * about them.
+   */
+  const hasBattery = !!String(o.batteryModel || "").trim() || Number(o.essCurrent) > 0;
+  const runs = RT_SCHEDULE.filter(run => {
+    const touchesEss = String(run.current) === "ess" ||
+      /\bESS\b|BATTERY|POWERWALL/i.test(String(run.from) + " " + String(run.to));
+    return hasBattery || !touchesEss;
+  });
+  if (!hasBattery && runs.length < RT_SCHEDULE.length) {
+    notes.push(`No battery is selected, so the ${RT_SCHEDULE.length - runs.length} ` +
+      `ESS run(s) were left off the schedule. Choose a Battery on Project ` +
+      `Information to include them.`);
+  }
+
+  // Where each circuit lands. A run tagged "pv" or "ess" takes its destination from
+  // the designer's choice rather than the table, so the topology follows two
+  // dropdowns instead of needing the reference table edited per job.
+  const poiFor = run => {
+    const role = String(run.poiRole || "");
+    const pick = role === "pv" ? o.pvPoi : role === "ess" ? o.essPoi : "";
+    return String(pick || "").trim() || run.to;
+  };
+
+  const build = variant => runs.map(run => {
     const m = manual[run.id] || {};
     const cont = currentFor(run);
     const condType = variant === "plumb" ? run.plumb : run.wire;
     if (!cont) {
-      notes.push(`Run ${run.id} (${run.from} to ${run.to}) has no current yet` +
+      notes.push(`Run ${run.id} (${run.from} to ${poiFor(run)}) has no current. ` +
         (String(run.current) === "manual"
-          ? " — it is a typed-in value, so enter it below."
-          : ` — nothing in the project supplies the "${run.current}" current.`));
+          ? `Enter it under "Schedule runs" on the PV Calculations tab.`
+          : String(run.current) === "ess"
+            ? `It comes from the battery — set "AC output (A)" for ` +
+              `"${o.batteryModel || "the chosen battery"}" on the Batteries (ESS) ` +
+              `reference tab, or type it under "Schedule runs".`
+            : `It comes from the microinverter branches, so add a branch above.`));
     }
     // Every branch lands in the same raceway on the junction-box run, so the
     // conductor count there is the branch count, not one.
     const parallel = String(run.current) === "branch" && run.id !== 1
       ? Math.max(1, Number(o.branches) || 1) : 1;
     return pvSizeRun({
-      id: run.id, from: run.from, to: run.to,
+      id: run.id, from: run.from, to: poiFor(run),
       typical: String(run.current) === "branch" && run.id === 1
         ? Math.max(1, Number(o.branches) || 1) : 1,
       contCurrent: cont, condType,
@@ -3037,7 +3152,11 @@ function buildSchedule(o) {
       lengthFt: m.lengthFt !== undefined && m.lengthFt !== "" ? m.lengthFt : run.lengthFt,
       vac: o.vac, tAmb: o.tAmb, rooftop: !!run.rooftop,
       heightKey: o.heightKey, codeYear: o.codeYear,
-      ocpd: Number(m.ocpd) || Number(run.ocpd) || 0,
+      // A battery's own breaker beats the table default on its runs — the
+      // manufacturer specifies it, and under 240.4 it governs the conductor.
+      ocpd: Number(m.ocpd) ||
+            (String(run.current) === "ess" && Number(o.essOcpd) > 0 ? Number(o.essOcpd) : 0) ||
+            Number(run.ocpd) || 0,
       vdropMax: o.vdropMax, conduitTypes: o.conduitTypes
     });
   });
@@ -3436,10 +3555,16 @@ function pvCalculate(input) {
 
   // The conductor schedule. Built from the same currents the branch results use,
   // so the two can never disagree about how much current a run carries.
+  // The battery supplies its own current and breaker; a typed value still wins,
+  // because the reference table cannot know about a derated configuration.
+  const battRow = batteryRow(input.batteryModel);
   const schedule = buildSchedule({
     branchCurrent: worstBranch ? worstBranch.iBranch : 0,
     totalCurrent: iTotal,
-    essCurrent: Number(input.essCurrent) || 0,
+    essCurrent: Number(input.essCurrent) || (battRow ? Number(battRow.acAmps) || 0 : 0),
+    essOcpd: battRow ? Number(battRow.ocpd) || 0 : 0,
+    batteryModel: input.batteryModel || "",
+    pvPoi: input.pvPoi || "", essPoi: input.essPoi || "",
     manual: input.scheduleManual || {},
     branches: branches.length,
     tAmb, heightKey: input.conduitHeight, codeYear,
@@ -4662,6 +4787,36 @@ const TABLE_SCHEMAS = {
     ]
   },
 
+  RT_BATTERY: {
+    label: "Batteries (ESS)",
+    note: "Battery and ESS are the same thing — the form says Battery, the " +
+          "conductor schedule says ESS. 'AC output' is the continuous current that " +
+          "sizes the conductor to the battery's point of interconnection. 'OCPD' is " +
+          "the breaker the manufacturer specifies; where it exceeds 125% of the AC " +
+          "output it governs the conductor under NEC 240.4, so leaving it at 0 will " +
+          "undersize the run. 'Coupling' decides whether DC strings need sizing at " +
+          "all: AC-coupled means microinverters and no strings, DC-coupled means an " +
+          "integrated string inverter. The DC columns are only used when " +
+          "DC-coupled. Powerwall 3 is filled from Tesla's specifications; the " +
+          "Enphase rows are blank because their output currents were not verified " +
+          "— fill them before using those batteries.",
+    key: "model",
+    fields: [
+      { name: "model",       type: "text", required: true, label: "Model" },
+      { name: "coupling",    type: "text", required: true, label: "Coupling",
+        choices: COUPLINGS },
+      { name: "acAmps",      type: "number", nullable: true, label: "AC output (A)" },
+      { name: "ocpd",        type: "int", nullable: true, label: "OCPD (A)" },
+      { name: "mpptCount",   type: "int", nullable: true, label: "MPPTs" },
+      { name: "vMax",        type: "number", nullable: true, label: "Max DC (V)" },
+      { name: "vMin",        type: "number", nullable: true, label: "Min MPPT (V)" },
+      { name: "vMciMax",     type: "number", nullable: true, label: "Max V per MCI" },
+      { name: "impPerMppt",  type: "number", nullable: true, label: "Imp/MPPT (A)" },
+      { name: "iscPerMppt",  type: "number", nullable: true, label: "Isc/MPPT (A)" },
+      { name: "maxDcKw",     type: "number", nullable: true, label: "Max DC (kW)" }
+    ]
+  },
+
   RT_CONDUIT: {
     label: "Conduit areas",
     note: "NEC Chapter 9 Table 4 — internal cross-sectional area in square inches. " +
@@ -4738,7 +4893,9 @@ const TABLE_SCHEMAS = {
       { name: "ccc",      type: "int", required: true, label: "CCC per circuit" },
       { name: "lengthFt", type: "number", label: "Default length (ft)" },
       { name: "rooftop",  type: "bool", label: "Rooftop" },
-      { name: "ocpd",     type: "int", label: "OCPD (0 = size it)" }
+      { name: "ocpd",     type: "int", label: "OCPD (0 = size it)" },
+      { name: "poiRole",  type: "text", label: "POI controlled by",
+        choices: ["", "pv", "ess"] }
     ]
   },
 
@@ -5044,6 +5201,7 @@ function getTable(name) {
     case "RT_LOCATION": return RT_LOCATION;
     case "RT_ESS": return RT_ESS;
     case "RT_ENPHASE_AC": return RT_ENPHASE_AC;
+    case "RT_BATTERY": return RT_BATTERY;
     case "RT_CONDUIT": return RT_CONDUIT;
     case "RT_COND_AREA": return RT_COND_AREA;
     case "RT_COND_TYPE": return RT_COND_TYPE;
@@ -5069,6 +5227,7 @@ function setTable(name, rows) {
     case "RT_LOCATION": RT_LOCATION = rows; break;
     case "RT_ESS": RT_ESS = rows; break;
     case "RT_ENPHASE_AC": RT_ENPHASE_AC = rows; break;
+    case "RT_BATTERY": RT_BATTERY = rows; break;
     case "RT_CONDUIT": RT_CONDUIT = rows; break;
     case "RT_COND_AREA": RT_COND_AREA = rows; break;
     case "RT_COND_TYPE": RT_COND_TYPE = rows; break;
@@ -5114,6 +5273,8 @@ if (typeof module !== "undefined" && module.exports) {
     get RT_COND_AREA() { return RT_COND_AREA; },
     get RT_COND_TYPE() { return RT_COND_TYPE; },
     get RT_SCHEDULE() { return RT_SCHEDULE; },
+    get RT_BATTERY() { return RT_BATTERY; },
+    batteryRow, projectCoupling, COUPLINGS,
     get SCHEDULE_NOTE() { return SCHEDULE_NOTE; },
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
     offeringChecklist, roofLookup, roofTypesAll, sameText, specPrefixFor,
@@ -6302,6 +6463,15 @@ function wireControls() {
   // with the code year rather than keep offering bands that no longer exist.
   const cySel = $("code_year");
   if (cySel) cySel.addEventListener("change", pvRooftopPopulate);
+
+  // The battery decides the coupling default and whether the ESS run exists, so
+  // both notes have to follow it rather than wait for the next Calculate.
+  const btSel = $("battery_type");
+  if (btSel) btSel.addEventListener("change", () => { couplingPopulate(); pvEssPoiNote(); });
+  const cpSel = $("coupling");
+  if (cpSel) cpSel.addEventListener("change", couplingPopulate);
+  const epSel = $("pv_ess_poi");
+  if (epSel) epSel.addEventListener("change", pvEssPoiNote);
 
   // The trunk cable part number and quantity both hang off this, so a change
   // has to rebuild the purchase order rather than wait for the next upload.
@@ -9325,6 +9495,94 @@ function moduleSyncDownstream() {
  * on a 2020 project invites someone to pick "0.5-3.5" and expect 22 °C, which the
  * Code no longer recognises.
  */
+/**
+ * The coupling dropdown, and what it currently means.
+ *
+ * Blank is a real answer: with no battery there is nothing to couple and no DC
+ * strings to size. The battery's own row supplies the default, because Powerwall 3
+ * is always DC-coupled and an IQ Battery is always AC-coupled — but the designer
+ * can override it, since a Powerwall can be AC-coupled to an existing array.
+ */
+function couplingPopulate() {
+  const sel = $("coupling");
+  if (!sel) return;
+  const keep = sel.value;
+  const row = batteryRow(($("battery_type") || {}).value);
+  sel.innerHTML = `<option value="">(from the battery)</option>` +
+    COUPLINGS.map(c => `<option value="${c}">${c}</option>`).join("");
+  if (keep) sel.value = keep;
+
+  const note = $("coupling_note");
+  if (!note) return;
+  const eff = keep || (row ? row.coupling : "");
+  note.textContent = !eff
+    ? "No battery selected — no DC strings to size."
+    : eff === "DC-coupled"
+      ? "Modules string into the battery's own inverter, so DC string sizing applies."
+      : "Microinverters make AC on the roof, so there are no DC strings to size.";
+}
+
+/**
+ * One editable row per schedule run.
+ *
+ * This is the "below" the warnings used to point at and which did not exist. Values
+ * the project already supplies are shown as placeholders rather than filled in, so
+ * it is obvious which numbers are derived and which are typed.
+ */
+function pvSchedInputsRender() {
+  const body = $("pv_sched_inputs_body");
+  if (!body) return;
+  const prev = pvReadSchedManual();
+  body.innerHTML = RT_SCHEDULE.map(r => {
+    const m = prev[r.id] || {};
+    const src = String(r.current || "");
+    const ph = src === "manual" ? "type it" : `from ${src}`;
+    return `<tr data-run="${r.id}">
+      <td>${r.id}</td><td>${modEscHtml(r.from)}</td><td>${modEscHtml(r.to)}</td>
+      <td><input class="sched-cur" type="number" step="0.01" min="0" style="width:90px"
+           placeholder="${ph}" value="${m.current !== undefined ? m.current : ""}"></td>
+      <td><input class="sched-ocpd" type="number" step="1" min="0" style="width:80px"
+           placeholder="${r.ocpd ? r.ocpd : "auto"}" value="${m.ocpd !== undefined ? m.ocpd : ""}"></td>
+      <td><input class="sched-len" type="number" step="0.1" min="0" style="width:80px"
+           placeholder="${r.lengthFt}" value="${m.lengthFt !== undefined ? m.lengthFt : ""}"></td>
+    </tr>`;
+  }).join("");
+}
+
+/** The typed schedule overrides, keyed by run id. Blank fields are omitted. */
+function pvReadSchedManual() {
+  const out = {};
+  document.querySelectorAll("#pv_sched_inputs_body tr").forEach(tr => {
+    const id = Number(tr.dataset.run);
+    const get = cls => {
+      const el = tr.querySelector("." + cls);
+      const v = el ? String(el.value).trim() : "";
+      return v === "" ? undefined : Number(v);
+    };
+    const rec = {};
+    const c = get("sched-cur"), o = get("sched-ocpd"), l = get("sched-len");
+    if (c !== undefined) rec.current = c;
+    if (o !== undefined) rec.ocpd = o;
+    if (l !== undefined) rec.lengthFt = l;
+    if (Object.keys(rec).length) out[id] = rec;
+  });
+  return out;
+}
+
+/** Say plainly whether the ESS runs are on the schedule at all. */
+function pvEssPoiNote() {
+  const note = $("pv_ess_poi_note");
+  if (!note) return;
+  const b = ($("battery_type") || {}).value || "";
+  const row = batteryRow(b);
+  if (!b) { note.textContent = "No battery selected, so no ESS run is scheduled."; return; }
+  note.textContent = row && Number(row.acAmps) > 0
+    ? `${b}: ${row.acAmps} A continuous` +
+      (Number(row.ocpd) > 0 ? `, ${row.ocpd} A breaker.` : `, no breaker on file.`)
+    : `${b} has no AC output on the Batteries (ESS) tab — set it there, or type the ` +
+      `current under Schedule runs.`;
+}
+
 function pvRooftopPopulate() {
   const sel = $("pv_conduit_height");
   if (!sel) return;
@@ -9398,6 +9656,21 @@ function pvPopulateSelectors() {
       `${r.Iac} A, ${r.minBranch}-${r.maxBranch}/branch</option>`).join("");
 
   pvRooftopPopulate();
+  couplingPopulate();
+  pvSchedInputsRender();
+
+  // Where each circuit lands. Defaults are the common case — an AC-module array
+  // into the combiner, the battery straight to the main service panel — but both
+  // are the designer's to change, which is why neither is a rule.
+  [["pv_poi", "IQ Combiner"], ["pv_ess_poi", "Main Service Panel"]].forEach(([id, dflt]) => {
+    const sel = $(id);
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = POI_POINTS.map(p =>
+      `<option value="${p}"${p === dflt ? " selected" : ""}>${p}</option>`).join("");
+    if (keep) sel.value = keep;
+  });
+  pvEssPoiNote();
 
   const cts = $("pv_conduit_type");
   if (cts) {
@@ -9468,6 +9741,12 @@ function pvReadInput() {
     // The code year drives the rooftop adder, so the calculation has to see it.
     codeYear: ($("code_year") || {}).value || "",
     conduitType: ($("pv_conduit_type") || {}).value || CONDUIT_DEFAULT,
+    // Where each circuit lands, and the battery it lands from.
+    pvPoi: ($("pv_poi") || {}).value || "",
+    essPoi: ($("pv_ess_poi") || {}).value || "",
+    batteryModel: ($("battery_type") || {}).value || "",
+    coupling: ($("coupling") || {}).value || "",
+    scheduleManual: pvReadSchedManual(),
     vdropMax: Number($("pv_vdrop_max").value) || 3,
     phase: Number($("pv_phase").value) || 1,
     branches: pvReadBranches(),
