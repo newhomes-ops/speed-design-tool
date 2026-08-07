@@ -1371,7 +1371,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.35.0";
+const APP_VERSION = "2.35.2";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -6295,6 +6295,15 @@ const state = { root: null, reports: null, csv: null, plan: null,
 
 /** Folder handles for the listed projects, so a row can load or locate one. */
 const PROJECT_HANDLES = new Map();
+/*
+ * The project loaded on Project Information — what "Load" selects.
+ *
+ * Distinct from BOM_PROJECT, which is the BOM tab's own picker. Conflating the two
+ * is what made the Electrical Calculations export claim no project was loaded when
+ * one plainly was.
+ */
+let LOADED_PROJECT = null;
+
 let LAST_PROJECT_LIST = [];
 
 function showMsg(text, kind) {
@@ -6798,6 +6807,10 @@ async function loadProject(pid) {
               `It may have been created by an older tool or edited by hand.`, "err");
       return;
     }
+
+    // Remember what is loaded, so features that write into the project folder can
+    // find it without going through the BOM tab's picker.
+    LOADED_PROJECT = { id: pid, entry, handle, manifest: data };
 
     // Populate only the fields the form owns; ignore the _generated block.
     let filled = 0, skipped = [];
@@ -8363,6 +8376,40 @@ function bomRefreshBuildState() {
  * line breaks. Embedding a real Arial would add roughly 200 KB for a difference
  * nobody can see in print.
  */
+/*
+ * Standard PDF fonts encode WinAnsi, which has no Greek and little maths. Drawing a
+ * Greek beta threw "WinAnsi cannot encode" and lost the entire export, so every
+ * string is passed through here rather than trusting its contents.
+ *
+ * This matters well beyond the two coefficient labels: module names, customer names
+ * and AHJ names all arrive from reference data or a CSV, and one stray character
+ * would otherwise cost the whole sheet.
+ */
+const WINANSI_MAP = {
+  "\u03b2": "B", "\u03b3": "y", "\u0394": "delta", "\u03a9": "ohm",
+  "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
+  "\u00b2": "2", "\u00b3": "3", "\u2192": "->", "\u2190": "<-",
+  "\u00d7": "x", "\u00f7": "/"
+};
+
+/** Characters above Latin-1 that WinAnsi does encode, so they may stay. */
+const WINANSI_HIGH_OK = new Set([0x20AC, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020,
+  0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017D, 0x2018, 0x2019, 0x201C,
+  0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x017E,
+  0x0178]);
+
+/** A string safe for a standard PDF font. Unknown high characters are dropped. */
+function winAnsi(v) {
+  let t = String(v === undefined || v === null ? "" : v);
+  Object.keys(WINANSI_MAP).forEach(k => { t = t.split(k).join(WINANSI_MAP[k]); });
+  let out = "";
+  for (const ch of t) {
+    const c = ch.codePointAt(0);
+    if (c <= 0xFF || WINANSI_HIGH_OK.has(c)) out += ch;
+  }
+  return out;
+}
+
 const ECALC_TEMPLATE_PATH = ["Templates", "E CALCS TEMPLATE.pdf"];
 const ECALC_BOX = { x0: 14.8, y0: 11.1, x1: 993.4, y1: 780.8 };
 const ECALC_PAD = 9;
@@ -8420,12 +8467,12 @@ async function buildECalcsPdf(o) {
   let y = ECALC_BOX.y1 - ECALC_PAD - 12;
 
   const clip = (s, max, f, size) => {
-    let t = String(s === undefined || s === null ? "" : s);
+    let t = winAnsi(s);
     while (t.length > 1 && f.widthOfTextAtSize(t, size) > max) t = t.slice(0, -1);
     return t;
   };
   const text = (s, x, size, f, col, maxW) => {
-    const str = maxW ? clip(s, maxW, f, size) : String(s === undefined ? "" : s);
+    const str = maxW ? clip(s, maxW, f, size) : winAnsi(s);
     page.drawText(str, { x, y, size, font: f || font, color: col || ink });
   };
   const hline = (yy, col) => page.drawLine({
@@ -8539,7 +8586,9 @@ async function buildECalcsPdf(o) {
       ["Voc at low temp", `${n(d.vocMax, 3)} V / module`],
       ["Vmp at cell temp", `${n(d.vmpMin, 3)} V / module`],
       ["Cell temp (hot)", `${n(d.tHot, 1)} °C (+${n(d.adder, 0)} mounting)`],
-      ["βVoc / γPmax", `${n(d.tkVoc, 3)} / ${n(d.tkVmp, 3)} %/°C`],
+      // Written out rather than as Greek: a standard PDF font cannot encode beta or
+      // gamma, and on a drawing the words are clearer anyway.
+      ["Voc / Pmax temp coeff", `${n(d.tkVoc, 3)} / ${n(d.tkVmp, 3)} %/°C`],
       ["Modules per string", `${d.minPerString} to ${d.maxPerString}`],
       ["Governed by", d.governedBy === "MCI chain"
         ? `${d.maxMciPerString} interrupters × ${d.modsPerMci}` : "inverter input"],
@@ -8608,7 +8657,7 @@ async function buildECalcsPdf(o) {
   y -= 11;
   // Wrapped by hand: pdf-lib has no line breaking, and the note is a
   // Code-permission statement that must appear verbatim.
-  const words = String(sch.note || "").split(/\s+/);
+  const words = winAnsi(sch.note || "").split(/\s+/);
   let lineBuf = "";
   words.forEach(w => {
     const trial = lineBuf ? lineBuf + " " + w : w;
@@ -11201,11 +11250,12 @@ async function pvExportECalcs() {
   const say = (msg, kind) => { if (note) note.textContent = msg; showMsg(msg, kind); };
 
   if (!state.pvResult) { say("Press Calculate first — there is nothing to export.", "err"); return; }
-  const entry = LAST_PROJECT_LIST && BOM_PROJECT
-    ? (LAST_PROJECT_LIST.find(x => x.id === BOM_PROJECT.id) || null) : null;
-  const target = BOM_PROJECT || null;
+
+  // Either picker will do: the one on Project Information, or the BOM tab's.
+  const target = LOADED_PROJECT || BOM_PROJECT || null;
   if (!target || !target.handle) {
-    say("Load a project first — the sheet is written into its CAD XRefs folder.", "err");
+    say("Load a project first — the sheet is written into its own CAD XRefs folder. " +
+        "Use Load on the Projects panel.", "err");
     return;
   }
 
@@ -11213,7 +11263,13 @@ async function pvExportECalcs() {
   try {
     const tpl = await ecalcTemplateBytes(state.rootHandle);
     const built = await buildECalcsPdf({
-      project: (target.entry && target.entry.manifest) || {},
+      // The manifest as loaded, falling back to the list entry's copy, then to the
+      // live form — so an export still carries a header if project.json was thin.
+      project: target.manifest ||
+               (target.entry && target.entry.manifest) ||
+               FORM_FIELDS.reduce((o, f) => {
+                 const el = $(f); if (el && el.value) o[f] = el.value; return o;
+               }, {}),
       result: state.pvResult,
       templateBytes: tpl
     });
