@@ -664,6 +664,9 @@
             <div><label for="battery_type">Battery (ESS)</label>
               <select id="battery_type"></select>
               <div id="battery_note" class="hint" style="margin-top:5px"></div></div>
+            <div><label for="string_inverter">String inverter</label>
+              <select id="string_inverter"></select>
+              <div id="string_inverter_note" class="hint" style="margin-top:5px"></div></div>
             <div><label for="coupling">Coupling</label>
               <select id="coupling"></select>
               <div id="coupling_note" class="hint" style="margin-top:5px"></div></div>
@@ -1348,7 +1351,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.30.0";
+const APP_VERSION = "2.31.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1424,6 +1427,7 @@ const FORM_FIELDS = [
   "product_offering","module_type",
   "combiner_type","battery_type","financier","loan_type","phone",
   "module_quantity","inverter_model","roof_type","module_orientation","coupling",
+  "string_inverter",
   "roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
   "date_drawn","notes"
@@ -1438,7 +1442,7 @@ const FIELD_LABELS = {
   utility_name:"Utility", module_type:"Module type",
   product_offering:"Product offering", combiner_type:"Combiner type",
   financier:"Financier", loan_type:"Loan type", phone:"Phone",
-  battery_type:"Battery (ESS)", coupling:"Coupling",
+  battery_type:"Battery (ESS)", coupling:"Coupling", string_inverter:"String inverter",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -2443,9 +2447,26 @@ const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"]
  * datasheet, and a guessed current would size a feeder.
  */
 let RT_BATTERY = [
-  {"model":"Powerwall 3","coupling":"DC-coupled","acAmps":48,"ocpd":60,"mpptCount":6,"vMax":550,"vMin":60,"vMciMax":165,"impPerMppt":13,"iscPerMppt":15,"maxDcKw":20},
-  {"model":"Enphase 5P","coupling":"AC-coupled","acAmps":null,"ocpd":null,"mpptCount":null,"vMax":null,"vMin":null,"vMciMax":null,"impPerMppt":null,"iscPerMppt":null,"maxDcKw":null},
-  {"model":"Enphase 10C","coupling":"AC-coupled","acAmps":null,"ocpd":null,"mpptCount":null,"vMax":null,"vMin":null,"vMciMax":null,"impPerMppt":null,"iscPerMppt":null,"maxDcKw":null}
+  {"model":"Powerwall 3","coupling":"DC-coupled","acAmps":48,"ocpd":60,"stringInverter":"Powerwall 3"},
+  {"model":"Enphase 5P","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":""},
+  {"model":"Enphase 10C","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":""}
+];
+
+/*
+ * String inverters, and the DC limits a string is sized against.
+ *
+ * Deliberately separate from the battery. A Powerwall 3 is a string inverter that
+ * also stores energy, but those are two different things in one enclosure — and a
+ * plain string inverter with no battery is a perfectly ordinary design. Keeping the
+ * DC limits here means adding a SolarEdge or an Enphase string inverter is a row in
+ * this table, not a code change.
+ *
+ * Powerwall 3 is filled from Tesla's own specifications. `impPerMppt` is 13 A
+ * because that is what an unlabelled unit carries; units whose product label says
+ * 15 A IMP may be edited up, and the jumpered pair doubles whichever is set.
+ */
+let RT_STRING_INV = [
+  {"model":"Powerwall 3","brand":"Tesla","mpptCount":6,"vMax":550,"vMin":60,"vMciMax":165,"impPerMppt":13,"iscPerMppt":15,"maxDcKw":20,"acAmps":48,"maxCircuitFt":525,"jumpPairs":"1-2, 5-6","noJumpMppt":"3, 4"}
 ];
 
 /** The RT_BATTERY row for a battery model, or null. */
@@ -2453,6 +2474,32 @@ function battElecRow(model) {
   const m = String(model || "").trim();
   if (!m) return null;
   return RT_BATTERY.find(r => sameText(r.model, m)) || null;
+}
+
+/** The RT_STRING_INV row for a string inverter, or null. */
+function stringInvRow(model) {
+  const m = String(model || "").trim();
+  if (!m) return null;
+  return RT_STRING_INV.find(r => sameText(r.model, m)) || null;
+}
+
+/**
+ * The string inverter a project uses.
+ *
+ * An explicit choice wins — that is the solar-plus-string-inverter case with no
+ * battery at all. Otherwise it comes from the battery's own link, which is how a
+ * Powerwall 3 supplies its own inverter without the designer naming it twice.
+ */
+function projectStringInv(project) {
+  const explicit = String((project && project.stringInverter) || "").trim();
+  if (explicit) return stringInvRow(explicit);
+  const b = battElecRow((project && project.batteryModel) || (project && project.battery_type));
+  return b ? stringInvRow(b.stringInverter) : null;
+}
+
+/** Every string inverter name, for a dropdown. */
+function stringInvNames() {
+  return RT_STRING_INV.map(r => r.model).filter(Boolean);
 }
 
 /**
@@ -2464,7 +2511,11 @@ function battElecRow(model) {
 function projectCoupling(project) {
   const explicit = String((project && project.coupling) || "").trim();
   if (explicit) return explicit;
-  const row = battElecRow(project && project.batteryModel || (project && project.battery_type));
+  // A string inverter chosen on its own is DC-coupled by definition — that is solar
+  // with a string inverter and no battery, which has to work without a battery row
+  // to read the coupling from.
+  if (String((project && project.stringInverter) || "").trim()) return "DC-coupled";
+  const row = battElecRow((project && project.batteryModel) || (project && project.battery_type));
   return row ? String(row.coupling || "") : "";
 }
 
@@ -3165,15 +3216,26 @@ function dcStringSize(o) {
     return { ok: false, errors, warnings, notes, strings: [] };
   }
 
+  /*
+   * The DC limits come from the string inverter, not the battery. A Powerwall 3
+   * supplies its own; a plain string inverter with no battery is chosen directly.
+   * That separation is what lets a different string inverter be added as a row.
+   */
   const batt = battElecRow(o.batteryModel);
-  if (!batt) {
-    errors.push(`'${o.batteryModel || ""}' is not in the Batteries (ESS) table, so ` +
-                `there are no inverter limits to string against.`);
-    return { ok: false, errors, warnings, notes, strings: [] };
-  }
-  if (!sameText(batt.coupling, "DC-coupled")) {
-    errors.push(`${batt.model} is ${batt.coupling || "not DC-coupled"}, so its ` +
-                `modules do not string into it. DC string sizing does not apply.`);
+  const inv = projectStringInv({ stringInverter: o.stringInverter,
+                                 batteryModel: o.batteryModel });
+  if (!inv) {
+    if (batt && !sameText(batt.coupling, "DC-coupled")) {
+      errors.push(`${batt.model} is ${batt.coupling || "not DC-coupled"} and embeds no ` +
+        `string inverter, so its modules do not string into it. DC string sizing ` +
+        `does not apply.`);
+    } else if (batt) {
+      errors.push(`${batt.model} is DC-coupled but its 'String inverter' is blank on ` +
+        `the Batteries (ESS) tab, so there are no DC limits to string against.`);
+    } else {
+      errors.push(`No string inverter — choose one, or a DC-coupled battery that ` +
+        `embeds one. Nothing supplies the DC voltage and current limits.`);
+    }
     return { ok: false, errors, warnings, notes, strings: [] };
   }
 
@@ -3189,8 +3251,8 @@ function dcStringSize(o) {
 
   const need = [["vMin", "minimum MPPT voltage"], ["vMax", "maximum DC voltage"]];
   for (const [k, label] of need) {
-    if (blank(batt[k])) {
-      errors.push(`${batt.model} has no ${label} on the Batteries (ESS) tab.`);
+    if (blank(inv[k])) {
+      errors.push(`${inv.model} has no ${label} on the String inverters tab.`);
       return { ok: false, errors, warnings, notes, strings: [] };
     }
   }
@@ -3206,10 +3268,10 @@ function dcStringSize(o) {
   const vmpMin = Number(mod.Vmp) * (1 + (tMax + adder - DC_TEMP_STC) * Number(tkVmp) / 100);
   const vocMax = Number(mod.Voc) * (1 + (tMin - DC_TEMP_STC) * Number(tkVoc) / 100);
 
-  const minPerString = vmpMin > 0 ? Math.ceil(Number(batt.vMin) / vmpMin) : 0;
-  const maxByInverter = vocMax > 0 ? Math.floor(Number(batt.vMax) / vocMax) : 0;
-  const maxByMci = (!blank(batt.vMciMax) && vocMax > 0)
-    ? Math.floor(Number(batt.vMciMax) / vocMax) : null;
+  const minPerString = vmpMin > 0 ? Math.ceil(Number(inv.vMin) / vmpMin) : 0;
+  const maxByInverter = vocMax > 0 ? Math.floor(Number(inv.vMax) / vocMax) : 0;
+  const maxByMci = (!blank(inv.vMciMax) && vocMax > 0)
+    ? Math.floor(Number(inv.vMciMax) / vocMax) : null;
 
   // The rapid-shutdown device caps modules per interrupter, and on these modules it
   // usually binds well before the inverter does. It is not on the datasheet — it
@@ -3217,22 +3279,22 @@ function dcStringSize(o) {
   const maxPerString = maxByMci !== null ? Math.min(maxByInverter, maxByMci) : maxByInverter;
   const governedBy = maxByMci !== null && maxByMci < maxByInverter ? "MCI" : "inverter";
   if (governedBy === "MCI") {
-    notes.push(`Maximum modules per string is set by the ${batt.vMciMax} V limit per ` +
-      `mid-circuit interrupter (${maxByMci}), not by the inverter's ${batt.vMax} V ` +
+    notes.push(`Maximum modules per string is set by the ${inv.vMciMax} V limit per ` +
+      `mid-circuit interrupter (${maxByMci}), not by the inverter's ${inv.vMax} V ` +
       `(${maxByInverter}).`);
   }
 
   if (minPerString > maxPerString) {
     errors.push(`No string length works: at least ${minPerString} modules are needed ` +
-      `to reach ${batt.vMin} V when hot, but no more than ${maxPerString} may be used ` +
-      `to stay under ${maxByMci !== null && governedBy === "MCI" ? batt.vMciMax + " V per MCI" : batt.vMax + " V"} ` +
+      `to reach ${inv.vMin} V when hot, but no more than ${maxPerString} may be used ` +
+      `to stay under ${maxByMci !== null && governedBy === "MCI" ? inv.vMciMax + " V per MCI" : inv.vMax + " V"} ` +
       `when cold.`);
   }
 
   // Per-string checks against the inverter's current limits.
   const imp = Number(mod.Imp) || 0, isc = Number(mod.Isc) || 0;
-  const impLimit = blank(batt.impPerMppt) ? null : Number(batt.impPerMppt);
-  const iscLimit = blank(batt.iscPerMppt) ? null : Number(batt.iscPerMppt);
+  const impLimit = blank(inv.impPerMppt) ? null : Number(inv.impPerMppt);
+  const iscLimit = blank(inv.iscPerMppt) ? null : Number(inv.iscPerMppt);
 
   const byMppt = {};
   const strings = (o.strings || []).map((s, i) => {
@@ -3249,12 +3311,12 @@ function dcStringSize(o) {
       maxCurrent: isc * 1.25,
       tooShort: nMod > 0 && nMod < minPerString,
       tooLong: nMod > maxPerString,
-      overVoltage: vocCold > Number(batt.vMax),
-      belowMppt: nMod > 0 && vmpHot < Number(batt.vMin)
+      overVoltage: vocCold > Number(inv.vMax),
+      belowMppt: nMod > 0 && vmpHot < Number(inv.vMin)
     };
     if (out.tooShort) {
       errors.push(`String ${out.index} has ${nMod} modules; at least ${minPerString} ` +
-        `are needed to stay above ${batt.vMin} V at ${tMax + adder} °C.`);
+        `are needed to stay above ${inv.vMin} V at ${tMax + adder} °C.`);
     }
     if (out.tooLong) {
       errors.push(`String ${out.index} has ${nMod} modules; at most ${maxPerString} ` +
@@ -3262,7 +3324,7 @@ function dcStringSize(o) {
     }
     if (out.overVoltage) {
       errors.push(`String ${out.index} reaches ${vocCold.toFixed(1)} V at ${tMin} °C, ` +
-        `above the ${batt.vMax} V input limit.`);
+        `above the ${inv.vMax} V input limit.`);
     }
     return out;
   });
@@ -3290,21 +3352,21 @@ function dcStringSize(o) {
   });
 
   const mpptUsed = Object.keys(byMppt).length;
-  if (!blank(batt.mpptCount) && mpptUsed > Number(batt.mpptCount)) {
-    errors.push(`${mpptUsed} MPPTs are in use; ${batt.model} has ` +
-      `${batt.mpptCount}.`);
+  if (!blank(inv.mpptCount) && mpptUsed > Number(inv.mpptCount)) {
+    errors.push(`${mpptUsed} MPPTs are in use; ${inv.model} has ` +
+      `${inv.mpptCount}.`);
   }
 
   const totalMods = strings.reduce((s, x) => s + x.nMod, 0);
   const dcKw = totalMods * (Number(mod.Wpeak) || 0) / 1000;
-  if (!blank(batt.maxDcKw) && dcKw > Number(batt.maxDcKw)) {
-    warnings.push(`${dcKw.toFixed(2)} kW DC exceeds ${batt.model}'s ` +
-      `${batt.maxDcKw} kW maximum, so the array will be curtailed.`);
+  if (!blank(inv.maxDcKw) && dcKw > Number(inv.maxDcKw)) {
+    warnings.push(`${dcKw.toFixed(2)} kW DC exceeds ${inv.model}'s ` +
+      `${inv.maxDcKw} kW maximum, so the array will be curtailed.`);
   }
 
   // Tesla limits the round-trip DC circuit distance, and paralleled strings must be
   // equal length or the interrupters misbehave.
-  const DC_MAX_CIRCUIT_FT = 525;
+  const DC_MAX_CIRCUIT_FT = Number(inv.maxCircuitFt) || 525;
   strings.forEach(s => {
     if (s.runFt * 2 > DC_MAX_CIRCUIT_FT) {
       errors.push(`String ${s.index} is ${s.runFt} ft each way, ${s.runFt * 2} ft ` +
@@ -3324,7 +3386,7 @@ function dcStringSize(o) {
   return {
     ok: errors.length === 0,
     errors, warnings, notes,
-    module: mod, battery: batt,
+    module: mod, battery: batt, inverter: inv,
     tMax, tMin, adder, tHot: tMax + adder,
     tkVoc: Number(tkVoc), tkVmp: Number(tkVmp),
     vmpMin, vocMax, minPerString, maxPerString, maxByInverter, maxByMci, governedBy,
@@ -3355,7 +3417,9 @@ function buildSchedule(o) {
 
   const currentFor = run => {
     switch (String(run.current || "").trim()) {
-      case "branch": return Number(o.branchCurrent) || 0;
+      case "branch": return dcMode && run.id === 1
+        ? Number(o.dcStringCurrent) || 0
+        : Number(o.branchCurrent) || 0;
       case "total":  return Number(o.totalCurrent) || 0;
       case "ess":    return Number(o.essCurrent) || 0;
       default:       return Number((manual[run.id] || {}).current) || 0;
@@ -3390,12 +3454,23 @@ function buildSchedule(o) {
     return String(pick || "").trim() || run.to;
   };
 
+  /*
+   * On a DC-coupled job the modules land at the string inverter, not a combiner —
+   * there is no combiner, because there is no AC on the roof. The inverter's own
+   * output then runs to the PV point of interconnection.
+   */
+  const invName = String(o.stringInvName || "").trim();
+  const dcMode = !!o.dcMode && !!invName;
+  const fromFor = run => (dcMode && String(run.poiRole || "") === "pv")
+    ? invName.toUpperCase() : run.from;
+  const toFor = run => (dcMode && run.id === 1) ? invName.toUpperCase() : poiFor(run);
+
   const build = variant => runs.map(run => {
     const m = manual[run.id] || {};
     const cont = currentFor(run);
     const condType = variant === "plumb" ? run.plumb : run.wire;
     if (!cont) {
-      notes.push(`Run ${run.id} (${run.from} to ${poiFor(run)}) has no current. ` +
+      notes.push(`Run ${run.id} (${fromFor(run)} to ${toFor(run)}) has no current. ` +
         (String(run.current) === "manual"
           ? `Enter it under "Schedule runs" on the PV Calculations tab.`
           : String(run.current) === "ess"
@@ -3409,7 +3484,7 @@ function buildSchedule(o) {
     const parallel = String(run.current) === "branch" && run.id !== 1
       ? Math.max(1, Number(o.branches) || 1) : 1;
     return pvSizeRun({
-      id: run.id, from: run.from, to: poiFor(run),
+      id: run.id, from: fromFor(run), to: toFor(run),
       typical: String(run.current) === "branch" && run.id === 1
         ? Math.max(1, Number(o.branches) || 1) : 1,
       contCurrent: cont, condType,
@@ -3841,6 +3916,7 @@ function pvCalculate(input) {
     dc = dcStringSize({
       moduleName: input.moduleName, batteryModel: input.batteryModel,
       tMax: tAmb, tMin: tMin, mounting: input.dcMounting,
+      stringInverter: input.stringInverter || "",
       strings: input.dcStrings || [], jumpered: !!input.dcJumpered
     });
     dc.errors.forEach(e => errors.push(e));
@@ -3853,11 +3929,14 @@ function pvCalculate(input) {
   const battRow = battElecRow(input.batteryModel);
   const schedule = buildSchedule({
     branchCurrent: worstBranch ? worstBranch.iBranch : 0,
-    totalCurrent: iTotal,
+    totalCurrent: isDc && dc ? (Number((dc.battery || dc.inverter || {}).acAmps) || 0) : iTotal,
+    dcStringCurrent: isDc && dc ? Number(dc.maxCurrentPerString) || 0 : 0,
     essCurrent: Number(input.essCurrent) || (battRow ? Number(battRow.acAmps) || 0 : 0),
     essOcpd: battRow ? Number(battRow.ocpd) || 0 : 0,
     batteryModel: input.batteryModel || "",
     pvPoi: input.pvPoi || "", essPoi: input.essPoi || "",
+    dcMode: isDc,
+    stringInvName: (projectStringInv(input) || {}).model || "",
     manual: input.scheduleManual || {},
     branches: branches.length,
     tAmb, heightKey: input.conduitHeight, codeYear,
@@ -5100,13 +5179,37 @@ const TABLE_SCHEMAS = {
         choices: COUPLINGS },
       { name: "acAmps",      type: "number", nullable: true, label: "AC output (A)" },
       { name: "ocpd",        type: "int", nullable: true, label: "OCPD (A)" },
-      { name: "mpptCount",   type: "int", nullable: true, label: "MPPTs" },
-      { name: "vMax",        type: "number", nullable: true, label: "Max DC (V)" },
-      { name: "vMin",        type: "number", nullable: true, label: "Min MPPT (V)" },
-      { name: "vMciMax",     type: "number", nullable: true, label: "Max V per MCI" },
-      { name: "impPerMppt",  type: "number", nullable: true, label: "Imp/MPPT (A)" },
-      { name: "iscPerMppt",  type: "number", nullable: true, label: "Isc/MPPT (A)" },
-      { name: "maxDcKw",     type: "number", nullable: true, label: "Max DC (kW)" }
+      { name: "stringInverter", type: "text", label: "String inverter it embeds" }
+    ]
+  },
+
+  RT_STRING_INV: {
+    label: "String inverters",
+    note: "The DC limits a string is sized against. Deliberately separate from the " +
+          "battery: a Powerwall 3 is a string inverter that also stores energy, but " +
+          "those are two things in one box, and solar with a plain string inverter " +
+          "and no battery is an ordinary design. Adding a different string inverter " +
+          "is a row here, not a code change. " +
+          "A DC-coupled battery names its inverter in 'String inverter it embeds' on " +
+          "the Batteries (ESS) tab; a project with no battery picks one directly. " +
+          "'Imp/MPPT' is 13 A for an unlabelled Powerwall 3 — units whose product " +
+          "label reads 15 A IMP may be raised, and a jumpered pair doubles whichever " +
+          "is set. 'Max circuit ft' is the round-trip DC distance limit.",
+    key: "model",
+    fields: [
+      { name: "model",        type: "text", required: true, label: "Model" },
+      { name: "brand",        type: "text", label: "Brand" },
+      { name: "mpptCount",    type: "int", nullable: true, label: "MPPTs" },
+      { name: "vMax",         type: "number", nullable: true, label: "Max DC (V)" },
+      { name: "vMin",         type: "number", nullable: true, label: "Min MPPT (V)" },
+      { name: "vMciMax",      type: "number", nullable: true, label: "Max V per MCI" },
+      { name: "impPerMppt",   type: "number", nullable: true, label: "Imp/MPPT (A)" },
+      { name: "iscPerMppt",   type: "number", nullable: true, label: "Isc/MPPT (A)" },
+      { name: "maxDcKw",      type: "number", nullable: true, label: "Max DC (kW)" },
+      { name: "acAmps",       type: "number", nullable: true, label: "AC output (A)" },
+      { name: "maxCircuitFt", type: "number", nullable: true, label: "Max circuit ft" },
+      { name: "jumpPairs",    type: "text", label: "Jumperable MPPT pairs" },
+      { name: "noJumpMppt",   type: "text", label: "MPPTs that cannot jumper" }
     ]
   },
 
@@ -5495,6 +5598,7 @@ function getTable(name) {
     case "RT_ESS": return RT_ESS;
     case "RT_ENPHASE_AC": return RT_ENPHASE_AC;
     case "RT_BATTERY": return RT_BATTERY;
+    case "RT_STRING_INV": return RT_STRING_INV;
     case "RT_CONDUIT": return RT_CONDUIT;
     case "RT_COND_AREA": return RT_COND_AREA;
     case "RT_COND_TYPE": return RT_COND_TYPE;
@@ -5521,6 +5625,7 @@ function setTable(name, rows) {
     case "RT_ESS": RT_ESS = rows; break;
     case "RT_ENPHASE_AC": RT_ENPHASE_AC = rows; break;
     case "RT_BATTERY": RT_BATTERY = rows; break;
+    case "RT_STRING_INV": RT_STRING_INV = rows; break;
     case "RT_CONDUIT": RT_CONDUIT = rows; break;
     case "RT_COND_AREA": RT_COND_AREA = rows; break;
     case "RT_COND_TYPE": RT_COND_TYPE = rows; break;
@@ -5568,6 +5673,8 @@ if (typeof module !== "undefined" && module.exports) {
     get RT_SCHEDULE() { return RT_SCHEDULE; },
     get RT_BATTERY() { return RT_BATTERY; },
     battElecRow, projectCoupling, COUPLINGS, POI_POINTS,
+    get RT_STRING_INV() { return RT_STRING_INV; },
+    stringInvRow, projectStringInv, stringInvNames,
     dcStringSize, dcMountAdder, DC_MOUNTINGS, DC_MOUNTING_DEFAULT, DC_TEMP_STC,
     get SCHEDULE_NOTE() { return SCHEDULE_NOTE; },
     PRODUCT_OFFERINGS, OFFERING_COMPONENTS, offeringByName, offeringComponents,
@@ -6762,10 +6869,14 @@ function wireControls() {
   // both notes have to follow it rather than wait for the next Calculate.
   const btSel = $("battery_type");
   if (btSel) btSel.addEventListener("change", () => {
-    couplingPopulate(); pvEssPoiNote(); pvModeApply();
+    stringInvPopulate(); couplingPopulate(); pvEssPoiNote(); pvModeApply();
   });
   const cpSel = $("coupling");
   if (cpSel) cpSel.addEventListener("change", () => { couplingPopulate(); pvModeApply(); });
+  const siSel = $("string_inverter");
+  if (siSel) siSel.addEventListener("change", () => {
+    stringInvPopulate(); couplingPopulate(); pvModeApply();
+  });
   const dcAdd = $("pv_dc_add");
   if (dcAdd) dcAdd.addEventListener("click", () => pvDcAddRow());
   const epSel = $("pv_ess_poi");
@@ -9956,6 +10067,34 @@ function pvDcNote() {
     : "No strings yet.";
 }
 
+/**
+ * The string-inverter dropdown.
+ *
+ * Blank means "whatever the battery embeds", which covers Powerwall 3 without the
+ * designer naming it twice. Choosing one explicitly is the case with no battery at
+ * all — solar plus a string inverter — and that alone makes the project DC-coupled.
+ */
+function stringInvPopulate() {
+  const sel = $("string_inverter");
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">(from the battery, if any)</option>` +
+    stringInvNames().map(n => `<option value="${n}">${n}</option>`).join("");
+  if (keep) sel.value = keep;
+
+  const note = $("string_inverter_note");
+  if (!note) return;
+  const eff = projectStringInv({
+    stringInverter: sel.value,
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  note.textContent = !eff
+    ? "No string inverter — microinverters, or pick one for a string design."
+    : `${eff.model}: ${eff.vMin}\u2013${eff.vMax} V, ${eff.mpptCount} MPPT` +
+      (eff.vMciMax ? `, ${eff.vMciMax} V per interrupter.` : ".") +
+      (sel.value ? "" : " From the battery.");
+}
+
 /** Say plainly whether the ESS runs are on the schedule at all. */
 function pvEssPoiNote() {
   const note = $("pv_ess_poi_note");
@@ -10043,6 +10182,7 @@ function pvPopulateSelectors() {
       `${r.Iac} A, ${r.minBranch}-${r.maxBranch}/branch</option>`).join("");
 
   pvRooftopPopulate();
+  stringInvPopulate();
   couplingPopulate();
   pvSchedInputsRender();
 
@@ -10147,6 +10287,7 @@ function pvReadInput() {
     dcMounting: ($("pv_dc_mounting") || {}).value || DC_MOUNTING_DEFAULT,
     dcJumpered: !!(($("pv_dc_jumper") || {}).value),
     dcStrings: pvReadDcStrings(),
+    stringInverter: ($("string_inverter") || {}).value || "",
     vdropMax: Number($("pv_vdrop_max").value) || 3,
     phase: Number($("pv_phase").value) || 1,
     branches: pvReadBranches(),
@@ -10428,12 +10569,21 @@ function pvDoCalculate() {
   // produce numbers built on an empty module.
   const gate = moduleGate();
   if (!gate.ok) { moduleSyncDownstream(); showMsg(gate.reason, "err"); return; }
-  const inv = inverterGate();
-  if (!inv.ok) { moduleSyncDownstream(); showMsg(inv.reason, "err"); return; }
-
   const input = pvReadInput();
-  if (!input.branches.some(b => b.nMod > 0)) {
-    showMsg("Add at least one branch with modules.", "err");
+  const dcMode = sameText(projectCoupling(input), "DC-coupled");
+
+  // A DC-coupled job has no microinverter and no branch circuits, so neither gate
+  // applies. Both used to fire and stop the calculation dead, which is why a
+  // Powerwall 3 design could not be run at all.
+  if (!dcMode) {
+    const inv = inverterGate();
+    if (!inv.ok) { moduleSyncDownstream(); showMsg(inv.reason, "err"); return; }
+    if (!input.branches.some(b => b.nMod > 0)) {
+      showMsg("Add at least one branch with modules.", "err");
+      return;
+    }
+  } else if (!input.dcStrings.some(s => s.nMod > 0)) {
+    showMsg("Add at least one DC string with modules.", "err");
     return;
   }
   let result;
