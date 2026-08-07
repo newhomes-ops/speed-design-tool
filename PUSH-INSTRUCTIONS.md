@@ -25,11 +25,33 @@ https://newhomes-ops.github.io/speed-design-tool/ against `APP_VERSION` in
 ## Before pushing
 
 ```
-node tests/run-tests.js
+node tools/bake-reference-data.js "<SPEED folder>"           # dry run, read the diff
+node tools/bake-reference-data.js "<SPEED folder>" --write
+node tests/run-tests.js        # logic
+node tests/smoke-startup.js    # does the tool actually start
 ```
 
-All tests must pass. They extract the logic from `SPEED.html` at run time, so they
+`<SPEED folder>` is the shared Teams one containing `Reference Data`, **not** the
+OneDrive copy.
+
+**Baking** copies the shared folder's reference tables into `SPEED.html`'s
+built-ins. Anyone with the folder connected already sees the right data — the
+folder overrides the built-ins at run time. This is for a designer who has not
+connected it and for a fresh copy of the tool, who would otherwise get whatever
+was hardcoded months ago.
+
+**Read the diff before writing.** It lists added, removed and changed rows per
+table. These values reach PE-stamped drawings, so a removal deserves a look
+rather than a silent commit. Any table failing validation is refused and nothing
+is written.
+
+**Both must pass.** They extract the logic from `SPEED.html` at run time, so they
 test the file that actually ships.
+
+`run-tests.js` never touches the DOM, so it cannot catch a function that is called
+but never defined — that shows up only in a browser as "X is not defined", which
+is exactly what shipped in 2.16.0 and 2.17.0. `smoke-startup.js` runs the real
+`init()` against a stubbed DOM and catches it before release.
 
 Bump both constants near the top of the `<script>` block and add a `CHANGELOG.md`
 entry:

@@ -339,6 +339,13 @@
      extra width goes to padding instead of to the data. */
   #rd_body table input, #rd_body table select,
   .rd-table input, .rd-table select { width: 100%; min-width: 0; box-sizing: border-box; }
+  /* Declared widths win, so a long filename cannot stretch its column and
+     squeeze every other one. */
+  #rd_table_el { table-layout: fixed; }
+  #rd_table_el th, #rd_table_el td { overflow: hidden; }
+  /* A one-column table has to fill the row, but a two-digit breaker rating in a
+     90%-wide box looks broken. Cap the input, not the column. */
+  #rd_table_el td input.num { max-width: 110px; }
   thead th {
     background: var(--navy); color: var(--white);
     font-size: 11px; font-weight: 700; letter-spacing: .04em;
@@ -1081,6 +1088,7 @@
 
         <div id="rd_source" class="hint" style="margin-top:10px"></div>
         <div id="rd_note" class="hint" style="margin-top:6px"></div>
+        <div id="rd_scanInfo" class="hint" style="margin-top:4px"></div>
         <div id="rd_issues" style="margin-top:10px"></div>
 
         <div style="overflow-x:auto; margin-top:12px; max-height:460px; overflow-y:auto">
@@ -1094,6 +1102,7 @@
         <div class="actions" style="margin-top:14px">
           <button id="rd_save" class="primary" type="button">Save to folder</button>
           <button id="rd_save_all" type="button">Save all changed</button>
+          <button id="rd_rescan" type="button">Rescan Spec Sheets</button>
           <button id="rd_validate" type="button">Validate</button>
           <button id="rd_import_toggle" type="button">Paste JSON…</button>
           <button id="rd_export" type="button">Copy table code</button>
@@ -1180,7 +1189,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.20.1";
+const APP_VERSION = "2.22.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1505,21 +1514,623 @@ const SPEED_LOGIC = {
    engineering reference data feeding PE-stamped drawings.
    --------------------------------------------------------------------- */
 
-let RT_LOCATION = [{"city":"00 WORST CASE","state":"AA","display":"00 WORST CASE, AA","tHigh":47.0,"tMin":-25.0},{"city":"Adelanto","state":"CA","display":"Adelanto, CA","tHigh":42.0,"tMin":-6.0},{"city":"Agouora Hills","state":"CA","display":"Agouora Hills, CA","tHigh":38.0,"tMin":1.0},{"city":"Alameda","state":"CA","display":"Alameda, CA","tHigh":29.0,"tMin":1.0},{"city":"Albuquerque","state":"NM","display":"Albuquerque, NM","tHigh":37.0,"tMin":-12.0},{"city":"Alhambra","state":"CA","display":"Alhambra, CA","tHigh":38.0,"tMin":1.0},{"city":"Altadena","state":"CA","display":"Altadena, CA","tHigh":38.0,"tMin":1.0},{"city":"American Canyon","state":"CA","display":"American Canyon, CA","tHigh":35.0,"tMin":-4.0},{"city":"Anaheim","state":"CA","display":"Anaheim, CA","tHigh":34.0,"tMin":2.0},{"city":"Anderson","state":"CA","display":"Anderson , CA","tHigh":44.0,"tMin":-4.0},{"city":"Angels Camp","state":"CA","display":"Angels Camp, CA","tHigh":41.0,"tMin":-3.0},{"city":"Antelope","state":"CA","display":"Antelope, CA","tHigh":41.0,"tMin":-3.0},{"city":"Antioch","state":"CA","display":"Antioch, CA","tHigh":29.0,"tMin":1.0},{"city":"Apex","state":"NC","display":"Apex, NC","tHigh":36.0,"tMin":-12.0},{"city":"Apopka","state":"FL","display":"Apopka, FL","tHigh":35.0,"tMin":1.0},{"city":"Apple Valley","state":"CA","display":"Apple Valley, CA","tHigh":42.0,"tMin":-6.0},{"city":"Arcadia","state":"CA","display":"Arcadia, CA","tHigh":39.0,"tMin":-1.0},{"city":"Arvada","state":"CO","display":"Arvada, CO","tHigh":36.0,"tMin":-25.0},{"city":"Artesia","state":"CA","display":"Artesia, CA","tHigh":34.0,"tMin":2.0},{"city":"Atascadero","state":"CA","display":"Atascadero, CA","tHigh":42.0,"tMin":-6.0},{"city":"Aurora","state":"CO","display":"Aurora, CO","tHigh":36.0,"tMin":-25.0},{"city":"Austin","state":"TX","display":"Austin, TX","tHigh":39.0,"tMin":-7.0},{"city":"Ave Maria","state":"FL","display":"Ave Maria, FL","tHigh":35.0,"tMin":1.0},{"city":"Avondale","state":"AZ","display":"Avondale, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Azusa","state":"CA","display":"Azusa, CA","tHigh":39.0,"tMin":-1.0},{"city":"Bakersfield","state":"CA","display":"Bakersfield, CA","tHigh":42.0,"tMin":-2.0},{"city":"Baldwin","state":"CA","display":"Baldwin , CA","tHigh":34.0,"tMin":2.0},{"city":"Banning","state":"CA","display":"Banning, CA","tHigh":40.0,"tMin":0.0},{"city":"Bealeton","state":"VA","display":"Bealeton, VA","tHigh":36.0,"tMin":-16.0},{"city":"Beaumont","state":"CA","display":"Beaumont, CA","tHigh":41.0,"tMin":-2.0},{"city":"Bee Cave","state":"TX","display":"Bee Cave, TX","tHigh":39.0,"tMin":-5.0},{"city":"Belmont","state":"CA","display":"Belmont, CA","tHigh":29.0,"tMin":2.0},{"city":"Bellflower","state":"CA","display":"Bellflower, CA","tHigh":33.0,"tMin":2.0},{"city":"Benicia","state":"CA","display":"Benicia, CA","tHigh":35.0,"tMin":0.0},{"city":"Berkeley","state":"CA","display":"Berkeley, CA","tHigh":29.0,"tMin":1.0},{"city":"Bethel Island","state":"CA","display":"Bethel Island, CA","tHigh":41.0,"tMin":-3.0},{"city":"Beverly Hills","state":"CA","display":"Beverly Hills, CA","tHigh":38.0,"tMin":1.0},{"city":"Bickford","state":"CA","display":"Bickford, CA","tHigh":41.0,"tMin":-3.0},{"city":"Bloomington","state":"CA","display":"Bloomington, CA","tHigh":41.0,"tMin":-2.0},{"city":"Boerne","state":"TX","display":"Boerne, TX","tHigh":38.0,"tMin":4.27},{"city":"Bonney Lake","state":"WA","display":"Bonney Lake, WA","tHigh":34.0,"tMin":-10.0},{"city":"Bonsall","state":"CA","display":"Bonsall, CA","tHigh":32.0,"tMin":-2.0},{"city":"Boulder","state":"CO","display":"Boulder, CO","tHigh":36.0,"tMin":-25.0},{"city":"Boxford","state":"MA","display":"Boxford, MA","tHigh":34.0,"tMin":-18.0},{"city":"Brea","state":"CA","display":"Brea, CA","tHigh":34.0,"tMin":2.0},{"city":"Bremerton","state":"WA","display":"Bremerton, WA","tHigh":34.0,"tMin":-8.0},{"city":"Brentwood","state":"CA","display":"Brentwood, CA","tHigh":41.0,"tMin":-3.0},{"city":"Brighton","state":"CO","display":"Brighton, CO","tHigh":37.0,"tMin":-23.0},{"city":"Broomfield","state":"CO","display":"Broomfield, CO","tHigh":36.0,"tMin":-25.0},{"city":"Buckeye","state":"AZ","display":"Buckeye, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Buena Park","state":"CA","display":"Buena Park, CA","tHigh":34.0,"tMin":2.0},{"city":"Calimesa","state":"CA","display":"Calimesa, CA","tHigh":41.0,"tMin":-2.0},{"city":"Camalot","state":"NJ","display":"Camalot, NJ","tHigh":36.0,"tMin":-16.0},{"city":"Camarillo","state":"CA","display":"Camarillo, CA","tHigh":28.0,"tMin":1.0},{"city":"Camp Lejeune","state":"NC","display":"Camp Lejeune, NC","tHigh":36.0,"tMin":-9.0},{"city":"Campbell","state":"CA","display":"Campbell, CA","tHigh":36.0,"tMin":0.0},{"city":"Carlsbad","state":"CA","display":"Carlsbad, CA","tHigh":28.0,"tMin":4.0},{"city":"Carlsbad 3","state":"CA","display":"Carlsbad 3, CA","tHigh":28.0,"tMin":4.0},{"city":"Carmichael","state":"CA","display":"Carmichael, CA","tHigh":42.0,"tMin":-3.0},{"city":"Carpinteria","state":"CA","display":"Carpinteria, CA","tHigh":29.0,"tMin":-1.0},{"city":"Carson","state":"CA","display":"Carson, CA","tHigh":33.0,"tMin":2.0},{"city":"Cary","state":"NC","display":"Cary, NC","tHigh":36.0,"tMin":-12.0},{"city":"Casa Grande","state":"AZ","display":"Casa Grande, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Castaic","state":"CA","display":"Castaic, CA","tHigh":35.0,"tMin":-5.0},{"city":"Castle Rock","state":"CO","display":"Castle Rock, CO","tHigh":36.0,"tMin":-23.0},{"city":"Castro Valley","state":"Ca","display":"Castro Valley , Ca","tHigh":33.0,"tMin":1.0},{"city":"Cathedral City","state":"Ca","display":"Cathedral City, Ca","tHigh":47.0,"tMin":3.0},{"city":"Cedar Park","state":"TX","display":"Cedar Park, TX","tHigh":39.0,"tMin":-5.0},{"city":"Ceres","state":"CA","display":"Ceres, CA","tHigh":42.0,"tMin":-2.0},{"city":"Chandler","state":"AZ","display":"Chandler, AZ","tHigh":45.0,"tMin":1.0},{"city":"Chapel Hill","state":"NC","display":"Chapel Hill, NC","tHigh":36.0,"tMin":-12.0},{"city":"Charlotte","state":"NC","display":"Charlotte, NC","tHigh":37.0,"tMin":-11.0},{"city":"Charlotte","state":"TX","display":"Charlotte, TX","tHigh":41.0,"tMin":-4.0},{"city":"Chatsworth","state":"CA","display":"Chatsworth, CA","tHigh":38.0,"tMin":1.0},{"city":"Chico","state":"CA","display":"Chico, CA","tHigh":44.0,"tMin":-4.0},{"city":"Chino","state":"CA","display":"Chino, CA","tHigh":39.0,"tMin":-1.0},{"city":"Chino Hills","state":"CA","display":"Chino Hills, CA","tHigh":39.0,"tMin":-1.0},{"city":"Chula Vista","state":"CA","display":"Chula Vista, CA","tHigh":31.0,"tMin":2.0},{"city":"Cibolo","state":"TX","display":"Cibolo, TX","tHigh":39.0,"tMin":-6.0},{"city":"Citrus Heights","state":"CA","display":"Citrus Heights, CA","tHigh":41.0,"tMin":-3.0},{"city":"Claremont","state":"CA","display":"Claremont, CA","tHigh":39.0,"tMin":-1.0},{"city":"Clayton","state":"CA","display":"Clayton, CA","tHigh":29.0,"tMin":1.0},{"city":"Clermont","state":"FL","display":"Clermont, FL","tHigh":35.0,"tMin":-1.0},{"city":"Cloverdale","state":"CA","display":"Cloverdale, CA","tHigh":38.0,"tMin":-3.0},{"city":"Clovis","state":"CA","display":"Clovis, CA","tHigh":42.0,"tMin":-2.0},{"city":"Coachella","state":"CA","display":"Coachella, CA","tHigh":47.0,"tMin":-5.0},{"city":"Coalinga","state":"CA","display":"Coalinga, CA","tHigh":41.0,"tMin":-3.0},{"city":"Colton","state":"CA","display":"Colton, CA","tHigh":41.0,"tMin":-2.0},{"city":"Colorado Springs","state":"CO","display":"Colorado Springs, CO","tHigh":35.0,"tMin":-23.0},{"city":"Columbia","state":"TN","display":"Columbia, TN","tHigh":46.0,"tMin":-1.0},{"city":"Commerce","state":"C0","display":"Commerce, C0","tHigh":36.0,"tMin":-25.0},{"city":"Compton","state":"CA","display":"Compton, CA","tHigh":33.0,"tMin":2.0},{"city":"Concord","state":"CA","display":"Concord, CA","tHigh":35.0,"tMin":-4.0},{"city":"Converse","state":"TX","display":"Converse, TX","tHigh":39.0,"tMin":-6.0},{"city":"Coolidge","state":"AZ","display":"Coolidge, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Corona","state":"CA","display":"Corona, CA","tHigh":39.0,"tMin":-1.0},{"city":"Costa Mesa","state":"CA","display":"Costa Mesa, CA","tHigh":34.0,"tMin":2.0},{"city":"Cotati","state":"CA","display":"Cotati, CA","tHigh":38.0,"tMin":-3.0},{"city":"Covina","state":"CA","display":"Covina, CA","tHigh":39.0,"tMin":-1.0},{"city":"Cupertino","state":"CA","display":"Cupertino, CA","tHigh":36.0,"tMin":0.0},{"city":"Cypress","state":"CA","display":"Cypress, CA","tHigh":34.0,"tMin":2.0},{"city":"Dallas","state":"TX","display":"Dallas, TX","tHigh":40.0,"tMin":-8.0},{"city":"Daly","state":"CA","display":"Daly, CA","tHigh":29.0,"tMin":2.0},{"city":"Danville","state":"CA","display":"Danville, CA","tHigh":41.0,"tMin":-3.0},{"city":"Davis","state":"CA","display":"Davis, CA","tHigh":41.0,"tMin":-3.0},{"city":"Del Valle","state":"TX","display":"Del Valle, TX","tHigh":39.0,"tMin":-7.0},{"city":"Del Mar","state":"CA","display":"Del Mar, CA","tHigh":32.0,"tMin":1.0},{"city":"Denver","state":"CO","display":"Denver, CO","tHigh":36.0,"tMin":-25.0},{"city":"Desert Hot Springs","state":"CA","display":"Desert Hot Springs, CA","tHigh":47.0,"tMin":3.0},{"city":"Dinuba","state":"CA","display":"Dinuba, CA","tHigh":39.0,"tMin":-3.0},{"city":"Discovery Bay","state":"CA","display":"Discovery Bay, CA","tHigh":41.0,"tMin":-3.0},{"city":"Dix Hills","state":"CA","display":"Dix Hills, CA","tHigh":35.0,"tMin":-13.0},{"city":"Dix Hills","state":"NY","display":"Dix Hills, NY","tHigh":34.0,"tMin":-15.0},{"city":"Dixon","state":"CA","display":"Dixon, CA","tHigh":40.0,"tMin":-3.0},{"city":"Downey","state":"CA","display":"Downey, CA","tHigh":34.0,"tMin":2.0},{"city":"Draper","state":"UT","display":"Draper , UT","tHigh":38.0,"tMin":-15.0},{"city":"Duarte","state":"CA","display":"Duarte, CA","tHigh":39.0,"tMin":-1.0},{"city":"Dublin","state":"CA","display":"Dublin, CA","tHigh":41.0,"tMin":-3.0},{"city":"Durham","state":"NC","display":"Durham, NC","tHigh":36.0,"tMin":-12.0},{"city":"Eagle Lake","state":"FL","display":"Eagle Lake, FL","tHigh":35.0,"tMin":1.0},{"city":"Eagle Mountain","state":"UT","display":"Eagle Mountain, UT","tHigh":38.0,"tMin":-15.0},{"city":"East Windsor","state":"NJ","display":"East Windsor, NJ","tHigh":36.0,"tMin":-16.0},{"city":"EastVale","state":"CA","display":"EastVale, CA","tHigh":39.0,"tMin":-1.0},{"city":"Echo Park","state":"CA","display":"Echo Park, CA","tHigh":38.0,"tMin":1.0},{"city":"Egg Harbor Township","state":"NJ","display":"Egg Harbor Township, NJ","tHigh":36.0,"tMin":-16.0},{"city":"El Cajon","state":"CA","display":"El Cajon, CA","tHigh":32.0,"tMin":3.0},{"city":"El Cerrito","state":"CA","display":"El Cerrito, CA","tHigh":29.0,"tMin":1.0},{"city":"El Dorado Hills","state":"CA","display":"El Dorado Hills, CA","tHigh":42.0,"tMin":-3.0},{"city":"El Monte","state":"CA","display":"El Monte, CA","tHigh":34.0,"tMin":2.0},{"city":"Elk Grove","state":"CA","display":"Elk Grove, CA","tHigh":42.0,"tMin":-3.0},{"city":"Encinitas","state":"CA","display":"Encinitas, CA","tHigh":32.0,"tMin":1.0},{"city":"Encino","state":"CA","display":"Encino, CA","tHigh":38.0,"tMin":1.0},{"city":"Erie","state":"CO","display":"Erie, CO","tHigh":37.0,"tMin":-23.0},{"city":"Escondido","state":"CA","display":"Escondido, CA","tHigh":28.0,"tMin":4.0},{"city":"Essex","state":"MD","display":"Essex, MD","tHigh":37.0,"tMin":-15.0},{"city":"Ewa Beach, Oahu","state":"HI","display":"Ewa Beach, Oahu, HI","tHigh":34.0,"tMin":13.0},{"city":"Fair Oaks","state":"CA","display":"Fair Oaks, CA","tHigh":42.0,"tMin":-3.0},{"city":"Fair Oaks Ranch","state":"TX","display":"Fair Oaks Ranch, TX","tHigh":38.0,"tMin":-6.0},{"city":"Fairfield","state":"CA","display":"Fairfield, CA","tHigh":40.0,"tMin":-3.0},{"city":"Fallbrook","state":"CA","display":"Fallbrook, CA","tHigh":32.0,"tMin":-2.0},{"city":"Fillmore","state":"CA","display":"Fillmore, CA","tHigh":28.0,"tMin":1.0},{"city":"Flintridge","state":"CA","display":"Flintridge, CA","tHigh":38.0,"tMin":1.0},{"city":"Florence","state":"CO","display":"Florence, CO","tHigh":39.0,"tMin":-24.0},{"city":"Florence","state":"AZ","display":"Florence, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Folsom","state":"CA","display":"Folsom, CA","tHigh":42.0,"tMin":-3.0},{"city":"Fontana","state":"CA","display":"Fontana, CA","tHigh":41.0,"tMin":-2.0},{"city":"Fort Collins","state":"CO","display":"Fort Collins, CO","tHigh":34.0,"tMin":-23.0},{"city":"Fort Washington","state":"MD","display":"Fort Washington, MD","tHigh":37.0,"tMin":-15.0},{"city":"Fountain Valley","state":"CA","display":"Fountain Valley, CA","tHigh":34.0,"tMin":2.0},{"city":"Fowler","state":"CA","display":"Fowler, CA","tHigh":42.0,"tMin":-2.0},{"city":"Fremont","state":"CA","display":"Fremont, CA","tHigh":33.0,"tMin":0.0},{"city":"French Valley","state":"CA","display":"French Valley, CA","tHigh":32.0,"tMin":-2.0},{"city":"Fresno","state":"CA","display":"Fresno, CA","tHigh":42.0,"tMin":-2.0},{"city":"Friant","state":"CA","display":"Friant, CA","tHigh":42.0,"tMin":-2.0},{"city":"Frisco","state":"TX","display":"Frisco, TX","tHigh":39.0,"tMin":-10.0},{"city":"Fullerton","state":"CA","display":"Fullerton, CA","tHigh":34.0,"tMin":2.0},{"city":"Galt","state":"CA","display":"Galt, CA","tHigh":41.0,"tMin":-3.0},{"city":"Garden Grove","state":"CA","display":"Garden Grove, CA","tHigh":34.0,"tMin":2.0},{"city":"Gardena","state":"CA","display":"Gardena, CA","tHigh":31.0,"tMin":4.0},{"city":"Georgetown","state":"TX","display":"Georgetown, TX","tHigh":38.0,"tMin":-7.0},{"city":"Gilbert","state":"AZ","display":"Gilbert, AZ","tHigh":45.0,"tMin":1.0},{"city":"Gilroy","state":"CA","display":"Gilroy, CA","tHigh":36.0,"tMin":0.0},{"city":"Glendale","state":"AZ","display":"Glendale, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Glendale","state":"CA","display":"Glendale, CA","tHigh":38.0,"tMin":1.0},{"city":"Glendora","state":"CA","display":"Glendora, CA","tHigh":39.0,"tMin":-1.0},{"city":"Gold Canyon","state":"AZ","display":"Gold Canyon, AZ","tHigh":46.0,"tMin":1.0},{"city":"Golden","state":"CO","display":"Golden, CO","tHigh":36.0,"tMin":-23.0},{"city":"Goleta","state":"CA","display":"Goleta, CA","tHigh":29.0,"tMin":-1.0},{"city":"Goodyear","state":"AZ","display":"Goodyear, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Goshen","state":"CA","display":"Goshen, CA","tHigh":39.0,"tMin":-3.0},{"city":"Granite Bay","state":"CA","display":"Granite Bay, CA","tHigh":41.0,"tMin":-3.0},{"city":"Grass Valley","state":"CA","display":"Grass Valley, CA","tHigh":41.0,"tMin":-3.0},{"city":"Greenfield","state":"CA","display":"Greenfield, CA","tHigh":29.0,"tMin":-1.0},{"city":"Greenwood Village","state":"CO","display":"Greenwood Village, CO","tHigh":36.0,"tMin":-23.0},{"city":"Guelph Ontario","state":"Canada","display":"Guelph Ontario, Canada","tHigh":33.0,"tMin":-20.0},{"city":"Haines City","state":"FL","display":"Haines City, FL","tHigh":35.0,"tMin":-1.0},{"city":"Hanford","state":"CA","display":"Hanford, CA","tHigh":41.0,"tMin":-3.0},{"city":"Harbor","state":"CA","display":"Harbor, CA","tHigh":31.0,"tMin":4.0},{"city":"Hayward","state":"CA","display":"Hayward, CA","tHigh":33.0,"tMin":1.0},{"city":"Healdsburg","state":"CA","display":"Healdsburg, CA","tHigh":38.0,"tMin":-3.0},{"city":"Hemet","state":"CA","display":"Hemet, CA","tHigh":40.0,"tMin":-2.0},{"city":"Henderson","state":"NV","display":"Henderson, NV","tHigh":45.0,"tMin":-4.0},{"city":"Hercules","state":"CA","display":"Hercules, CA","tHigh":35.0,"tMin":-4.0},{"city":"Herriman","state":"UT","display":"Herriman, UT","tHigh":39.0,"tMin":-16.0},{"city":"Hesperia","state":"CA","display":"Hesperia , CA","tHigh":42.0,"tMin":-6.0},{"city":"Highgrove","state":"CA","display":"Highgrove, CA","tHigh":39.0,"tMin":-1.0},{"city":"Highland","state":"CA","display":"Highland, CA","tHigh":41.0,"tMin":-2.0},{"city":"Hillsborough","state":"CA","display":"Hillsborough, CA","tHigh":29.0,"tMin":2.0},{"city":"Hollister","state":"CA","display":"Hollister, CA","tHigh":29.0,"tMin":-1.0},{"city":"Homeland","state":"CA","display":"Homeland, CA","tHigh":40.0,"tMin":-2.0},{"city":"Houston","state":"TX","display":"Houston, TX","tHigh":36.0,"tMin":-3.0},{"city":"Hughson","state":"CA","display":"Hughson, CA","tHigh":42.0,"tMin":-2.0},{"city":"Huntington Beach","state":"CA","display":"Huntington Beach, CA","tHigh":34.0,"tMin":2.0},{"city":"Hutto","state":"TX","display":"Hutto, TX","tHigh":38.0,"tMin":-7.0},{"city":"Indian Wells","state":"CA","display":"Indian Wells, CA","tHigh":47.0,"tMin":3.0},{"city":"Indio","state":"CA","display":"Indio, CA","tHigh":47.0,"tMin":-5.0},{"city":"Inglewood","state":"CA","display":"Inglewood, CA","tHigh":28.0,"tMin":4.0},{"city":"Irvine","state":"CA","display":"Irvine, CA","tHigh":34.0,"tMin":2.0},{"city":"Jackson","state":"NJ","display":"Jackson, NJ","tHigh":36.0,"tMin":-16.0},{"city":"Jacksonville","state":"FL","display":"Jacksonville, FL","tHigh":37.0,"tMin":-6.0},{"city":"Jarrell","state":"TX","display":"Jarrell, TX","tHigh":38.0,"tMin":-7.0},{"city":"Jefferson","state":"CO","display":"Jefferson, CO","tHigh":36.0,"tMin":-25.0},{"city":"Jurupa Valley","state":"CA","display":"Jurupa Valley, CA","tHigh":39.0,"tMin":-1.0},{"city":"Kapolei (Oahu)","state":"HI","display":"Kapolei (Oahu), HI","tHigh":34.0,"tMin":13.0},{"city":"Kehalani, Maui","state":"HI","display":"Kehalani, Maui, HI","tHigh":32.0,"tMin":13.0},{"city":"Keller","state":"TX","display":"Keller, TX","tHigh":40.0,"tMin":-9.0},{"city":"Kensington","state":"CA","display":"Kensington, CA","tHigh":29.0,"tMin":1.0},{"city":"Kenwood","state":"CA","display":"Kenwood, CA","tHigh":38.0,"tMin":-3.0},{"city":"Kerman","state":"CA","display":"Kerman, CA","tHigh":42.0,"tMin":-2.0},{"city":"King City","state":"CA","display":"King City, CA","tHigh":21.0,"tMin":3.0},{"city":"Kyle","state":"TX","display":"Kyle, TX","tHigh":38.0,"tMin":-5.0},{"city":"La Habra","state":"CA","display":"La Habra, CA","tHigh":34.0,"tMin":2.0},{"city":"La Mesa","state":"CA","display":"La Mesa, CA","tHigh":29.0,"tMin":5.0},{"city":"La Quinta","state":"CA","display":"La Quinta, CA","tHigh":47.0,"tMin":-5.0},{"city":"La Verne","state":"CA","display":"La Verne, CA","tHigh":39.0,"tMin":-1.0},{"city":"Ladera Ranch","state":"CA","display":"Ladera Ranch, CA","tHigh":34.0,"tMin":3.0},{"city":"Lafayette","state":"CA","display":"Lafayette, CA","tHigh":29.0,"tMin":1.0},{"city":"Laguna Beach","state":"CA","display":"Laguna Beach, CA","tHigh":34.0,"tMin":2.0},{"city":"Lake Elsinore","state":"CA","display":"Lake Elsinore, CA","tHigh":40.0,"tMin":-2.0},{"city":"Lake Forest","state":"CA","display":"Lake Forest, CA","tHigh":34.0,"tMin":3.0},{"city":"Lake Hamilton","state":"FL","display":"Lake Hamilton, FL","tHigh":35.0,"tMin":-1.0},{"city":"Lake Point","state":"UT","display":"Lake Point, UT","tHigh":39.0,"tMin":-16.0},{"city":"Lakeside","state":"CA","display":"Lakeside, CA","tHigh":32.0,"tMin":3.0},{"city":"Lakeway","state":"TX","display":"Lakeway, TX","tHigh":39.0,"tMin":-5.0},{"city":"Lakewood","state":"CA","display":"Lakewood, CA","tHigh":33.0,"tMin":2.0},{"city":"Lancaster","state":"CA","display":"Lancaster, CA","tHigh":42.0,"tMin":-9.0},{"city":"Larkspur","state":"CA","display":"Larkspur, CA","tHigh":30.0,"tMin":3.0},{"city":"Las Vegas","state":"NV","display":"Las Vegas, NV","tHigh":45.0,"tMin":-4.0},{"city":"Lathrop","state":"CA","display":"Lathrop, CA","tHigh":41.0,"tMin":-3.0},{"city":"Laveen","state":"AZ","display":"Laveen, AZ","tHigh":45.0,"tMin":1.0},{"city":"Leander","state":"TX","display":"Leander, TX","tHigh":38.0,"tMin":-7.0},{"city":"Lemon Grove","state":"CA","display":"Lemon Grove, CA","tHigh":29.0,"tMin":5.0},{"city":"Lemoore","state":"CA","display":"Lemoore, CA","tHigh":41.0,"tMin":-3.0},{"city":"Leonardtown","state":"MD","display":"Leonardtown, MD","tHigh":36.0,"tMin":-13.0},{"city":"Liberty Hill","state":"TX","display":"Liberty Hill, TX","tHigh":38.0,"tMin":-7.0},{"city":"Liguna Niguel","state":"CA","display":"Liguna Niguel, CA","tHigh":34.0,"tMin":3.0},{"city":"Lincoln","state":"CA","display":"Lincoln, CA","tHigh":41.0,"tMin":-3.0},{"city":"Litchfield Park","state":"AZ","display":"Litchfield Park, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Littleton","state":"CO","display":"Littleton, CO","tHigh":36.0,"tMin":-23.0},{"city":"Live Oak","state":"CA","display":"Live Oak, CA","tHigh":41.0,"tMin":-3.0},{"city":"Livermore","state":"CA","display":"Livermore, CA","tHigh":41.0,"tMin":-3.0},{"city":"Lodi","state":"CA","display":"Lodi, CA","tHigh":41.0,"tMin":-3.0},{"city":"Loma Linda","state":"CA","display":"Loma Linda, CA","tHigh":41.0,"tMin":-2.0},{"city":"Lompoc","state":"CA","display":"Lompoc, CA","tHigh":26.0,"tMin":-2.0},{"city":"Long Beach","state":"CA","display":"Long Beach, CA","tHigh":33.0,"tMin":2.0},{"city":"Longmont","state":"CO","display":"Longmont, CO","tHigh":36.0,"tMin":-25.0},{"city":"Los Alamos","state":"CA","display":"Los Alamos, CA","tHigh":26.0,"tMin":-2.0},{"city":"Los Altos","state":"CA","display":"Los Altos, CA","tHigh":33.0,"tMin":0.0},{"city":"Los Angeles","state":"CA","display":"Los Angeles, CA","tHigh":39.0,"tMin":4.0},{"city":"Los Banos","state":"CA","display":"Los Banos, CA","tHigh":40.0,"tMin":-3.0},{"city":"Loveland","state":"CO","display":"Loveland, CO","tHigh":38.0,"tMin":-23.0},{"city":"Lowry","state":"CO","display":"Lowry, CO","tHigh":36.0,"tMin":-25.0},{"city":"Madera","state":"CA","display":"Madera, CA","tHigh":42.0,"tMin":-2.0},{"city":"Makakilo (Oahu)","state":"HI","display":"Makakilo (Oahu), HI","tHigh":34.0,"tMin":13.0},{"city":"Makena","state":"HI","display":"Makena, HI","tHigh":32.0,"tMin":13.0},{"city":"Manalapan","state":"NJ","display":"Manalapan, NJ","tHigh":36.0,"tMin":-14.0},{"city":"Manchester","state":"NJ","display":"Manchester, NJ","tHigh":36.0,"tMin":-16.0},{"city":"Manhasset","state":"NY","display":"Manhasset, NY","tHigh":36.0,"tMin":-14.0},{"city":"Manhatton Beach","state":"CA","display":"Manhatton Beach, CA","tHigh":28.0,"tMin":4.0},{"city":"Manor","state":"TX","display":"Manor, TX","tHigh":39.0,"tMin":-5.0},{"city":"Manteca","state":"CA","display":"Manteca, CA","tHigh":41.0,"tMin":-3.0},{"city":"Marana","state":"AZ","display":"Marana, AZ","tHigh":43.0,"tMin":-3.0},{"city":"Maricopa","state":"AZ","display":"Maricopa, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Marina","state":"CA","display":"Marina, CA","tHigh":24.0,"tMin":1.0},{"city":"Martinez","state":"CA","display":"Martinez, CA","tHigh":35.0,"tMin":-4.0},{"city":"Marysville","state":"CA","display":"Marysville, CA","tHigh":41.0,"tMin":-3.0},{"city":"Menifee","state":"CA","display":"Menifee, CA","tHigh":40.0,"tMin":-2.0},{"city":"Menlo Park","state":"CA","display":"Menlo Park, CA","tHigh":33.0,"tMin":0.0},{"city":"Mentone","state":"CA","display":"Mentone, CA","tHigh":41.0,"tMin":-2.0},{"city":"Merced","state":"CA","display":"Merced, CA","tHigh":40.0,"tMin":-3.0},{"city":"Mesa","state":"AZ","display":"Mesa, AZ","tHigh":45.0,"tMin":1.0},{"city":"Mesquite","state":"NV","display":"Mesquite, NV","tHigh":44.0,"tMin":-6.0},{"city":"Miami","state":"FL","display":"Miami, FL","tHigh":34.0,"tMin":5.0},{"city":"Middletown","state":"NY","display":"Middletown, NY","tHigh":35.0,"tMin":-20.0},{"city":"Middletown","state":"VA","display":"Middletown, VA","tHigh":37.0,"tMin":-15.0},{"city":"Mill Valley","state":"CA","display":"Mill Valley, CA","tHigh":30.0,"tMin":3.0},{"city":"Milpitas","state":"CA","display":"Milpitas, CA","tHigh":36.0,"tMin":0.0},{"city":"Millsboro","state":"DE","display":"Millsboro, DE","tHigh":36.0,"tMin":-11.0},{"city":"Mira Loma","state":"CA","display":"Mira Loma, CA","tHigh":39.0,"tMin":-1.0},{"city":"Mira Mesa","state":"CA","display":"Mira Mesa, CA","tHigh":32.0,"tMin":1.0},{"city":"Mission Veijo","state":"CA","display":"Mission Veijo, CA","tHigh":34.0,"tMin":3.0},{"city":"Modesto","state":"CA","display":"Modesto, CA","tHigh":42.0,"tMin":-2.0},{"city":"Monrovia","state":"CA","display":"Monrovia, CA","tHigh":39.0,"tMin":-1.0},{"city":"Montclair","state":"CA","display":"Montclair, CA","tHigh":39.0,"tMin":-1.0},{"city":"Montebello","state":"CA","display":"Montebello, CA","tHigh":34.0,"tMin":2.0},{"city":"Monterey","state":"CA","display":"Monterey, CA","tHigh":24.0,"tMin":1.0},{"city":"Mooresville","state":"NC","display":"Mooresville, NC","tHigh":37.0,"tMin":-11.0},{"city":"Moorpark","state":"CA","display":"Moorpark, CA","tHigh":28.0,"tMin":1.0},{"city":"Moraga","state":"CA","display":"Moraga, CA","tHigh":29.0,"tMin":1.0},{"city":"Moreno Valley","state":"CA","display":"Moreno Valley, CA","tHigh":40.0,"tMin":-2.0},{"city":"Morgan Hill","state":"CA","display":"Morgan Hill, CA","tHigh":36.0,"tMin":0.0},{"city":"Morrison","state":"CO","display":"Morrison, CO","tHigh":36.0,"tMin":-25.0},{"city":"Morrisville","state":"NC","display":"Morrisville, NC","tHigh":36.0,"tMin":-12.0},{"city":"Mount Dora","state":"FL","display":"Mount Dora, FL","tHigh":36.0,"tMin":1.0},{"city":"Mountain House","state":"CA","display":"Mountain House, CA","tHigh":41.0,"tMin":-3.0},{"city":"Mountain View","state":"CA","display":"Mountain View, CA","tHigh":33.0,"tMin":0.0},{"city":"Murrieta","state":"CA","display":"Murrieta, CA","tHigh":32.0,"tMin":-2.0},{"city":"Napa","state":"CA","display":"Napa, CA","tHigh":35.0,"tMin":-4.0},{"city":"Natomas","state":"CA","display":"Natomas, CA","tHigh":41.0,"tMin":-3.0},{"city":"Newark","state":"CA","display":"Newark, CA","tHigh":33.0,"tMin":0.0},{"city":"Newport Beach","state":"CA","display":"Newport Beach, CA","tHigh":34.0,"tMin":2.0},{"city":"Norco","state":"CA","display":"Norco, CA","tHigh":39.0,"tMin":-1.0},{"city":"Northlake","state":"TX","display":"Northlake, TX","tHigh":40.0,"tMin":-9.0},{"city":"Northridge","state":"CA","display":"Northridge, CA","tHigh":38.0,"tMin":1.0},{"city":"North Las Vegas","state":"NV","display":"North Las Vegas, NV","tHigh":46.0,"tMin":-6.0},{"city":"Norwalk","state":"CA","display":"Norwalk, CA","tHigh":34.0,"tMin":2.0},{"city":"Novato","state":"CA","display":"Novato, CA","tHigh":35.0,"tMin":-4.0},{"city":"Nuevo","state":"CA","display":"Nuevo, CA","tHigh":40.0,"tMin":-2.0},{"city":"Oakland","state":"CA","display":"Oakland, CA","tHigh":29.0,"tMin":1.0},{"city":"Oakley","state":"CA","display":"Oakley, CA","tHigh":41.0,"tMin":-3.0},{"city":"Oceanside","state":"CA","display":"Oceanside, CA","tHigh":28.0,"tMin":4.0},{"city":"Ontario","state":"CA","display":"Ontario, CA","tHigh":39.0,"tMin":-6.0},{"city":"Orange","state":"CA","display":"Orange, CA","tHigh":34.0,"tMin":2.0},{"city":"Orange","state":"VA","display":"Orange, VA","tHigh":37.0,"tMin":-15.0},{"city":"Orcutt","state":"CA","display":"Orcutt, CA","tHigh":29.0,"tMin":-3.0},{"city":"Orem","state":"UT","display":"Orem, UT","tHigh":38.0,"tMin":-15.0},{"city":"Orinda","state":"CA","display":"Orinda, CA","tHigh":29.0,"tMin":1.0},{"city":"Orlando","state":"FL","display":"Orlando, FL","tHigh":35.0,"tMin":1.0},{"city":"Oro Valley","state":"AZ","display":"Oro Valley, AZ","tHigh":42.0,"tMin":-3.0},{"city":"Oroville","state":"CA","display":"Oroville, CA","tHigh":41.0,"tMin":-3.0},{"city":"Osterville","state":"MA","display":"Osterville, MA","tHigh":32.0,"tMin":-16.0},{"city":"Oxnard","state":"CA","display":"Oxnard, CA","tHigh":26.0,"tMin":2.0},{"city":"Pacifica","state":"CA","display":"Pacifica, CA","tHigh":29.0,"tMin":2.0},{"city":"Pacoima","state":"CA","display":"Pacoima, CA","tHigh":38.0,"tMin":1.0},{"city":"Palm Beach Gardens","state":"FL","display":"Palm Beach Gardens, FL","tHigh":34.0,"tMin":3.0},{"city":"Palm Coast","state":"FL","display":"Palm Coast, FL","tHigh":34.0,"tMin":0.0},{"city":"Palm Desert","state":"CA","display":"Palm Desert, CA","tHigh":47.0,"tMin":-5.0},{"city":"Palm Springs","state":"CA","display":"Palm Springs, CA","tHigh":47.0,"tMin":3.0},{"city":"Palmdale","state":"CA","display":"Palmdale, CA","tHigh":42.0,"tMin":-9.0},{"city":"Palo Alto","state":"CA","display":"Palo Alto, CA","tHigh":33.0,"tMin":0.0},{"city":"Panorama","state":"CA","display":"Panorama, CA","tHigh":38.0,"tMin":1.0},{"city":"Parker","state":"CO","display":"Parker, CO","tHigh":36.0,"tMin":-23.0},{"city":"Parkville","state":"MD","display":"Parkville, MD","tHigh":37.0,"tMin":-15.0},{"city":"Pasadena","state":"CA","display":"Pasadena, CA","tHigh":38.0,"tMin":1.0},{"city":"Paso Robles","state":"CA","display":"Paso Robles, CA","tHigh":42.0,"tMin":-6.0},{"city":"Pawcatuck","state":"CT","display":"Pawcatuck, CT","tHigh":34.0,"tMin":-19.0},{"city":"Patterson","state":"CA","display":"Patterson, CA","tHigh":42.0,"tMin":-2.0},{"city":"Pearland","state":"TX","display":"Pearland, TX","tHigh":36.0,"tMin":-3.0},{"city":"Penngrove","state":"CA","display":"Penngrove, CA","tHigh":35.0,"tMin":-4.0},{"city":"Penryn","state":"CA","display":"Penryn, CA","tHigh":41.0,"tMin":-3.0},{"city":"Peoria","state":"AZ","display":"Peoria, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Perris","state":"CA","display":"Perris, CA","tHigh":40.0,"tMin":-2.0},{"city":"Petaluma","state":"CA","display":"Petaluma, CA","tHigh":35.0,"tMin":-4.0},{"city":"Peyton","state":"CO","display":"Peyton, CO","tHigh":35.0,"tMin":-23.0},{"city":"Pflugerville","state":"TX","display":"Pflugerville, TX","tHigh":39.0,"tMin":-5.0},{"city":"Phoenix","state":"AZ","display":"Phoenix, AZ","tHigh":45.0,"tMin":1.0},{"city":"Pico Rivera","state":"CA","display":"Pico Rivera, CA","tHigh":34.0,"tMin":2.0},{"city":"Piru","state":"CA","display":"Piru, CA","tHigh":28.0,"tMin":1.0},{"city":"Placentia","state":"CA","display":"Placentia, CA","tHigh":34.0,"tMin":2.0},{"city":"Placer County","state":"CA","display":"Placer County, CA","tHigh":31.0,"tMin":-8.0},{"city":"Playa del Rey","state":"CA","display":"Playa del Rey, CA","tHigh":28.0,"tMin":4.0},{"city":"Playa Vista","state":"CA","display":"Playa Vista, CA","tHigh":28.0,"tMin":4.0},{"city":"Pleasant Hill","state":"CA","display":"Pleasant Hill, CA","tHigh":29.0,"tMin":1.0},{"city":"Pleasanton","state":"CA","display":"Pleasanton, CA","tHigh":41.0,"tMin":-3.0},{"city":"Plumas Lake","state":"CA","display":"Plumas Lake, CA","tHigh":41.0,"tMin":-3.0},{"city":"Plymouth","state":"CA","display":"Plymouth, CA","tHigh":42.0,"tMin":-3.0},{"city":"Plymouth","state":"MA","display":"Plymouth, MA","tHigh":34.0,"tMin":-18.0},{"city":"Point Richmond","state":"CA","display":"Point Richmond, CA","tHigh":29.0,"tMin":1.0},{"city":"Po'ipu Kaua'i","state":"HI","display":"Po'ipu Kaua'i, HI","tHigh":30.0,"tMin":14.0},{"city":"Pomona","state":"CA","display":"Pomona, CA","tHigh":39.0,"tMin":-1.0},{"city":"Porter Ranch","state":"CA","display":"Porter Ranch, CA","tHigh":39.0,"tMin":1.0},{"city":"Porterville","state":"CA","display":"Porterville, CA","tHigh":41.0,"tMin":-2.0},{"city":"Port Orchard","state":"WA","display":"Port Orchard, WA","tHigh":34.0,"tMin":-8.0},{"city":"Port Townsend","state":"WA","display":"Port Townsend, WA","tHigh":22.0,"tMin":-3.0},{"city":"Pueblo","state":"CO","display":"Pueblo, CO","tHigh":39.0,"tMin":-24.0},{"city":"Queen Creek","state":"AZ","display":"Queen Creek, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Rancho Bernardo","state":"CA","display":"Rancho Bernardo, CA","tHigh":32.0,"tMin":1.0},{"city":"Rancho Cordova","state":"CA","display":"Rancho Cordova, CA","tHigh":42.0,"tMin":-3.0},{"city":"Rancho Cucamonga","state":"CA","display":"Rancho Cucamonga, CA","tHigh":39.0,"tMin":-1.0},{"city":"Rancho Mirage","state":"CA","display":"Rancho Mirage, CA","tHigh":47.0,"tMin":3.0},{"city":"Rancho Mission Viejo","state":"CA","display":"Rancho Mission Viejo, CA","tHigh":34.0,"tMin":3.0},{"city":"Rancho Murieta","state":"CA","display":"Rancho Murieta, CA","tHigh":42.0,"tMin":-3.0},{"city":"Rancho Santa Fe","state":"CA","display":"Rancho Santa Fe, CA","tHigh":28.0,"tMin":4.0},{"city":"Redlands","state":"CA","display":"Redlands, CA","tHigh":41.0,"tMin":-2.0},{"city":"Redwood City","state":"CA","display":"Redwood City, CA","tHigh":33.0,"tMin":0.0},{"city":"Rendondo Beach","state":"CA","display":"Rendondo Beach, CA","tHigh":31.0,"tMin":4.0},{"city":"Reston","state":"VA","display":"Reston , VA","tHigh":36.0,"tMin":-17.0},{"city":"Richmond","state":"CA","display":"Richmond, CA","tHigh":29.0,"tMin":1.0},{"city":"Richmond","state":"TX","display":"Richmond, TX","tHigh":36.0,"tMin":-3.0},{"city":"Rio Rancho","state":"NM","display":"Rio Rancho, NM","tHigh":37.0,"tMin":-12.0},{"city":"Ripon","state":"CA","display":"Ripon, CA","tHigh":41.0,"tMin":-3.0},{"city":"Riverbank","state":"CA","display":"Riverbank, CA","tHigh":42.0,"tMin":-2.0},{"city":"Riverside","state":"CA","display":"Riverside, CA","tHigh":39.0,"tMin":-1.0},{"city":"Rocklin","state":"CA","display":"Rocklin, CA","tHigh":41.0,"tMin":-3.0},{"city":"Rohnert Park","state":"CA","display":"Rohnert Park, CA","tHigh":38.0,"tMin":-3.0},{"city":"Romoland","state":"CA","display":"Romoland, CA","tHigh":40.0,"tMin":-2.0},{"city":"Rosamond","state":"CA","display":"Rosamond, CA","tHigh":42.0,"tMin":-9.0},{"city":"Rosemead","state":"CA","display":"Rosemead, CA","tHigh":34.0,"tMin":2.0},{"city":"Roseville","state":"CA","display":"Roseville, CA","tHigh":41.0,"tMin":-3.0},{"city":"Round Rock","state":"TX","display":"Round Rock, TX","tHigh":38.0,"tMin":-7.0},{"city":"Rowland Heights","state":"CA","display":"Rowland Heights, CA","tHigh":34.0,"tMin":2.0},{"city":"Royce City","state":"TX","display":"Royce City, TX","tHigh":39.0,"tMin":-10.0},{"city":"Sachse","state":"TX","display":"Sachse, TX","tHigh":39.0,"tMin":-10.0},{"city":"Sacramento","state":"CA","display":"Sacramento, CA","tHigh":41.0,"tMin":-3.0},{"city":"Sahuarita","state":"AZ","display":"Sahuarita, AZ","tHigh":43.0,"tMin":-3.0},{"city":"Salem","state":"UT","display":"Salem, UT","tHigh":38.0,"tMin":-15.0},{"city":"San Antonio","state":"TX","display":"San Antonio, TX","tHigh":39.0,"tMin":-6.0},{"city":"San Bernardino","state":"CA","display":"San Bernardino, CA","tHigh":41.0,"tMin":-2.0},{"city":"San Bruno","state":"CA","display":"San Bruno, CA","tHigh":29.0,"tMin":2.0},{"city":"San Carlos","state":"CA","display":"San Carlos, CA","tHigh":33.0,"tMin":0.0},{"city":"San Clemente","state":"CA","display":"San Clemente, CA","tHigh":32.0,"tMin":-2.0},{"city":"San Diego","state":"CA","display":"San Diego, CA","tHigh":29.0,"tMin":5.0},{"city":"San Francisco","state":"CA","display":"San Francisco, CA","tHigh":29.0,"tMin":2.0},{"city":"San Jacinto","state":"CA","display":"San Jacinto, CA","tHigh":40.0,"tMin":-2.0},{"city":"San Jose","state":"CA","display":"San Jose, CA","tHigh":36.0,"tMin":0.0},{"city":"San Juan Bautista","state":"CA","display":"San Juan Bautista, CA","tHigh":29.0,"tMin":-1.0},{"city":"San Juan Capistrano","state":"CA","display":"San Juan Capistrano, CA","tHigh":34.0,"tMin":3.0},{"city":"San Leonardo","state":"CA","display":"San Leonardo, CA","tHigh":33.0,"tMin":1.0},{"city":"San Luis Obispo","state":"CA","display":"San Luis Obispo, CA","tHigh":32.0,"tMin":-2.0},{"city":"San Marcos","state":"CA","display":"San Marcos, CA","tHigh":28.0,"tMin":4.0},{"city":"San Marcos","state":"TX","display":"San Marcos, TX","tHigh":39.0,"tMin":-7.0},{"city":"San Mateo","state":"CA","display":"San Mateo, CA","tHigh":29.0,"tMin":2.0},{"city":"San Pablo","state":"CA","display":"San Pablo, CA","tHigh":29.0,"tMin":1.0},{"city":"San Pedro","state":"CA","display":"San Pedro, CA","tHigh":39.0,"tMin":4.0},{"city":"San Rafael","state":"CA","display":"San Rafael, CA","tHigh":30.0,"tMin":3.0},{"city":"San Ramon","state":"CA","display":"San Ramon, CA","tHigh":41.0,"tMin":-3.0},{"city":"San Tan Valley","state":"AZ","display":"San Tan Valley, AZ","tHigh":44.0,"tMin":-4.0},{"city":"Santa Ana","state":"CA","display":"Santa Ana, CA","tHigh":34.0,"tMin":2.0},{"city":"Santa Barbara","state":"CA","display":"Santa Barbara, CA","tHigh":29.0,"tMin":-1.0},{"city":"Santa Clara","state":"CA","display":"Santa Clara, CA","tHigh":36.0,"tMin":0.0},{"city":"Santa Clarita","state":"CA","display":"Santa Clarita, CA","tHigh":38.0,"tMin":1.0},{"city":"Santa Cruz","state":"CA","display":"Santa Cruz, CA","tHigh":24.0,"tMin":1.0},{"city":"Santa Fe Springs","state":"CA","display":"Santa Fe Springs, CA","tHigh":34.0,"tMin":2.0},{"city":"Santa Maria","state":"CA","display":"Santa Maria, CA","tHigh":29.0,"tMin":-3.0},{"city":"Santa Monica","state":"CA","display":"Santa Monica, CA","tHigh":28.0,"tMin":4.0},{"city":"Santa Paula","state":"CA","display":"Santa Paula, CA","tHigh":28.0,"tMin":1.0},{"city":"Santa Rosa","state":"CA","display":"Santa Rosa, CA","tHigh":38.0,"tMin":-3.0},{"city":"Santee","state":"CA","display":"Santee, CA","tHigh":32.0,"tMin":3.0},{"city":"Saratoga","state":"CA","display":"Saratoga, CA","tHigh":36.0,"tMin":0.0},{"city":"Saratoga Springs","state":"UT","display":"Saratoga Springs, UT","tHigh":38.0,"tMin":-15.0},{"city":"Saugus","state":"CA","display":"Saugus, CA","tHigh":38.0,"tMin":1.0},{"city":"Scotts Valley","state":"CA","display":"Scotts Valley, CA","tHigh":36.0,"tMin":0.0},{"city":"Seal Beach","state":"CA","display":"Seal Beach, CA","tHigh":33.0,"tMin":2.0},{"city":"Shafter","state":"CA","display":"Shafter, CA","tHigh":42.0,"tMin":-2.0},{"city":"Shingle Springs","state":"CA","display":"Shingle Springs, CA","tHigh":42.0,"tMin":-3.0},{"city":"Signal Hill","state":"CA","display":"Signal Hill, CA","tHigh":33.0,"tMin":2.0},{"city":"Silverado","state":"CA","display":"Silverado, CA","tHigh":34.0,"tMin":3.0},{"city":"Simi Valley","state":"CA","display":"Simi Valley, CA","tHigh":38.0,"tMin":1.0},{"city":"Soledad","state":"CA","display":"Soledad, CA","tHigh":29.0,"tMin":-1.0},{"city":"Southbury","state":"CT","display":"Southbury, CT","tHigh":33.0,"tMin":-19.0},{"city":"Stonington","state":"CT","display":"Stonington, CT","tHigh":31.0,"tMin":-14.0},{"city":"South San Franciso","state":"CA","display":"South San Franciso, CA","tHigh":29.0,"tMin":2.0},{"city":"Sparks","state":"NV","display":"Sparks, NV","tHigh":38.0,"tMin":-15.0},{"city":"Spring Valley","state":"CA","display":"Spring Valley, CA","tHigh":35.0,"tMin":-17.0},{"city":"Stafford","state":"VA","display":"Stafford, VA","tHigh":37.0,"tMin":-15.0},{"city":"Stanton","state":"CA","display":"Stanton, CA","tHigh":34.0,"tMin":2.0},{"city":"Star","state":"ID","display":"Star, ID","tHigh":39.0,"tMin":-13.0},{"city":"St. Augustine","state":"FL","display":"St. Augustine, FL","tHigh":34.0,"tMin":0.0},{"city":"St. George","state":"UT","display":"St. George, UT","tHigh":44.0,"tMin":-6.0},{"city":"Stewartson","state":"PA","display":"Stewartson, PA","tHigh":37.0,"tMin":-15.0},{"city":"Stockton","state":"CA","display":"Stockton, CA","tHigh":41.0,"tMin":-3.0},{"city":"Strasburg","state":"CO","display":"Strasburg, CO","tHigh":37.0,"tMin":-23.0},{"city":"Sugar Land","state":"TX","display":"Sugar Land, TX","tHigh":36.0,"tMin":-3.0},{"city":"Sunland","state":"CA","display":"Sunland, CA","tHigh":38.0,"tMin":1.0},{"city":"Sunnyvale","state":"CA","display":"Sunnyvale, CA","tHigh":36.0,"tMin":0.0},{"city":"Surprise","state":"AZ","display":"Surprise, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Sylmar","state":"CA","display":"Sylmar, CA","tHigh":38.0,"tMin":1.0},{"city":"Taylor","state":"TX","display":"Taylor, TX","tHigh":38.0,"tMin":-7.0},{"city":"Tehachapi","state":"CA","display":"Tehachapi, CA","tHigh":43.0,"tMin":-10.0},{"city":"Temecula","state":"CA","display":"Temecula, CA","tHigh":32.0,"tMin":-2.0},{"city":"Tempe","state":"AZ","display":"Tempe, AZ","tHigh":45.0,"tMin":1.0},{"city":"Temple","state":"TX","display":"Temple, TX","tHigh":39.0,"tMin":-7.0},{"city":"Thornton","state":"CO","display":"Thornton, CO","tHigh":36.0,"tMin":-25.0},{"city":"Thousand Oaks","state":"CA","display":"Thousand Oaks, CA","tHigh":28.0,"tMin":1.0},{"city":"Timnath","state":"CO","display":"Timnath, CO","tHigh":38.0,"tMin":-23.0},{"city":"Torrance","state":"CA","display":"Torrance, CA","tHigh":33.0,"tMin":2.0},{"city":"Tracy","state":"CA","display":"Tracy, CA","tHigh":41.0,"tMin":-10.0},{"city":"Tucson","state":"AZ","display":"Tucson, AZ","tHigh":43.0,"tMin":-3.0},{"city":"Tulare","state":"CA","display":"Tulare, CA","tHigh":39.0,"tMin":-3.0},{"city":"Turlock","state":"CA","display":"Turlock, CA","tHigh":40.0,"tMin":-3.0},{"city":"Tustin","state":"CA","display":"Tustin, CA","tHigh":34.0,"tMin":2.0},{"city":"Tyngsborough","state":"MA","display":"Tyngsborough, MA","tHigh":34.0,"tMin":-18.0},{"city":"Union City","state":"CA","display":"Union City, CA","tHigh":33.0,"tMin":1.0},{"city":"Upland","state":"CA","display":"Upland, CA","tHigh":39.0,"tMin":-1.0},{"city":"Vacaville","state":"CA","display":"Vacaville, CA","tHigh":40.0,"tMin":-3.0},{"city":"Vail","state":"AZ","display":"Vail, AZ","tHigh":43.0,"tMin":-3.0},{"city":"Valencia","state":"CA","display":"Valencia, CA","tHigh":38.0,"tMin":1.0},{"city":"Vallejo","state":"CA","display":"Vallejo, CA","tHigh":35.0,"tMin":-4.0},{"city":"Valley Center","state":"CA","display":"Valley Center , CA","tHigh":28.0,"tMin":4.0},{"city":"Van Nuys","state":"CA","display":"Van Nuys, CA","tHigh":38.0,"tMin":1.0},{"city":"Ventura","state":"CA","display":"Ventura, CA","tHigh":28.0,"tMin":1.0},{"city":"Victorville","state":"CA","display":"Victorville, CA","tHigh":42.0,"tMin":-6.0},{"city":"Vineyard","state":"CA","display":"Vineyard, CA","tHigh":41.0,"tMin":-3.0},{"city":"Visalia","state":"CA","display":"Visalia, CA","tHigh":39.0,"tMin":-3.0},{"city":"Vista","state":"CA","display":"Vista, CA","tHigh":28.0,"tMin":4.0},{"city":"Waddell","state":"AZ","display":"Waddell, AZ","tHigh":46.0,"tMin":-1.0},{"city":"Waikaloa (Big Island)","state":"HI","display":"Waikaloa (Big Island), HI","tHigh":31.0,"tMin":14.0},{"city":"Waldorf","state":"MD","display":"Waldorf, MD","tHigh":37.0,"tMin":-15.0},{"city":"Walnut","state":"CA","display":"Walnut, CA","tHigh":39.0,"tMin":-1.0},{"city":"Walnut Creek","state":"CA","display":"Walnut Creek, CA","tHigh":29.0,"tMin":1.0},{"city":"Waterford","state":"CA","display":"Waterford, CA","tHigh":42.0,"tMin":-2.0},{"city":"Waxhaw","state":"NC","display":"Waxhaw, NC","tHigh":37.0,"tMin":-11.0},{"city":"Weddington","state":"NC","display":"Weddington, NC","tHigh":37.0,"tMin":-11.0},{"city":"West Covina","state":"CA","display":"West Covina, CA","tHigh":39.0,"tMin":-1.0},{"city":"West Hill","state":"CA","display":"West Hill,  CA","tHigh":38.0,"tMin":1.0},{"city":"West Rancho Palos Verdes","state":"CA","display":"West Rancho Palos Verdes, CA","tHigh":33.0,"tMin":2.0},{"city":"West Sacramento","state":"CA","display":"West Sacramento, CA","tHigh":41.0,"tMin":-3.0},{"city":"Westlake Village","state":"CA","display":"Westlake Village, CA","tHigh":28.0,"tMin":1.0},{"city":"Westminister","state":"CA","display":"Westminister, CA","tHigh":34.0,"tMin":2.0},{"city":"Wheat Ridge","state":"CO","display":"Wheat Ridge, CO","tHigh":36.0,"tMin":-25.0},{"city":"Whittier","state":"CA","display":"Whittier, CA","tHigh":34.0,"tMin":2.0},{"city":"Wildomar","state":"CA","display":"Wildomar, CA","tHigh":32.0,"tMin":-2.0},{"city":"Williamsburg","state":"VA","display":"Williamsburg, VA","tHigh":37.0,"tMin":-11.0},{"city":"Winchester","state":"CA","display":"Winchester, CA","tHigh":40.0,"tMin":-2.0},{"city":"Winchester","state":"VA","display":"Winchester, VA","tHigh":37.0,"tMin":-15.0},{"city":"Windermere","state":"FL","display":"Windermere, FL","tHigh":35.0,"tMin":1.0},{"city":"Windsor","state":"CA","display":"Windsor, CA","tHigh":38.0,"tMin":-3.0},{"city":"Windsor","state":"CO","display":"Windsor, CO","tHigh":38.0,"tMin":-23.0},{"city":"Winter Garden","state":"FL","display":"Winter Garden, FL","tHigh":35.0,"tMin":1.0},{"city":"Winters","state":"CA","display":"Winters, CA","tHigh":41.0,"tMin":-3.0},{"city":"Woodland","state":"CA","display":"Woodland, CA","tHigh":41.0,"tMin":-3.0},{"city":"Woodland Hills","state":"CA","display":"Woodland Hills, CA","tHigh":38.0,"tMin":1.0},{"city":"Yorba Linda","state":"CA","display":"Yorba Linda, CA","tHigh":34.0,"tMin":2.0},{"city":"York","state":"SC","display":"York, SC","tHigh":37.0,"tMin":-11.0},{"city":"Yuba City","state":"CA","display":"Yuba City, CA","tHigh":41.0,"tMin":-3.0},{"city":"Yucaipa","state":"CA","display":"Yucaipa, CA","tHigh":41.0,"tMin":-2.0},{"city":"Yuma","state":"AZ","display":"Yuma, AZ","tHigh":46.0,"tMin":2.0}];
+let RT_LOCATION = [
+  {"city":"00 WORST CASE","state":"AA","display":"00 WORST CASE, AA","tHigh":47,"tMin":-25},
+  {"city":"Adelanto","state":"CA","display":"Adelanto, CA","tHigh":42,"tMin":-6},
+  {"city":"Agouora Hills","state":"CA","display":"Agouora Hills, CA","tHigh":38,"tMin":1},
+  {"city":"Alameda","state":"CA","display":"Alameda, CA","tHigh":29,"tMin":1},
+  {"city":"Albuquerque","state":"NM","display":"Albuquerque, NM","tHigh":37,"tMin":-12},
+  {"city":"Alhambra","state":"CA","display":"Alhambra, CA","tHigh":38,"tMin":1},
+  {"city":"Altadena","state":"CA","display":"Altadena, CA","tHigh":38,"tMin":1},
+  {"city":"American Canyon","state":"CA","display":"American Canyon, CA","tHigh":35,"tMin":-4},
+  {"city":"Anaheim","state":"CA","display":"Anaheim, CA","tHigh":34,"tMin":2},
+  {"city":"Anderson","state":"CA","display":"Anderson, CA","tHigh":44,"tMin":-4},
+  {"city":"Angels Camp","state":"CA","display":"Angels Camp, CA","tHigh":41,"tMin":-3},
+  {"city":"Antelope","state":"CA","display":"Antelope, CA","tHigh":41,"tMin":-3},
+  {"city":"Antioch","state":"CA","display":"Antioch, CA","tHigh":29,"tMin":1},
+  {"city":"Apex","state":"NC","display":"Apex, NC","tHigh":36,"tMin":-12},
+  {"city":"Apopka","state":"FL","display":"Apopka, FL","tHigh":35,"tMin":1},
+  {"city":"Apple Valley","state":"CA","display":"Apple Valley, CA","tHigh":42,"tMin":-6},
+  {"city":"Arcadia","state":"CA","display":"Arcadia, CA","tHigh":39,"tMin":-1},
+  {"city":"Arvada","state":"CO","display":"Arvada, CO","tHigh":36,"tMin":-25},
+  {"city":"Artesia","state":"CA","display":"Artesia, CA","tHigh":34,"tMin":2},
+  {"city":"Atascadero","state":"CA","display":"Atascadero, CA","tHigh":42,"tMin":-6},
+  {"city":"Aurora","state":"CO","display":"Aurora, CO","tHigh":36,"tMin":-25},
+  {"city":"Austin","state":"TX","display":"Austin, TX","tHigh":39,"tMin":-7},
+  {"city":"Ave Maria","state":"FL","display":"Ave Maria, FL","tHigh":35,"tMin":1},
+  {"city":"Avondale","state":"AZ","display":"Avondale, AZ","tHigh":46,"tMin":-1},
+  {"city":"Azusa","state":"CA","display":"Azusa, CA","tHigh":39,"tMin":-1},
+  {"city":"Bakersfield","state":"CA","display":"Bakersfield, CA","tHigh":42,"tMin":-2},
+  {"city":"Baldwin","state":"CA","display":"Baldwin, CA","tHigh":34,"tMin":2},
+  {"city":"Banning","state":"CA","display":"Banning, CA","tHigh":40,"tMin":0},
+  {"city":"Bealeton","state":"VA","display":"Bealeton, VA","tHigh":36,"tMin":-16},
+  {"city":"Beaumont","state":"CA","display":"Beaumont, CA","tHigh":41,"tMin":-2},
+  {"city":"Bee Cave","state":"TX","display":"Bee Cave, TX","tHigh":39,"tMin":-5},
+  {"city":"Belmont","state":"CA","display":"Belmont, CA","tHigh":29,"tMin":2},
+  {"city":"Bellflower","state":"CA","display":"Bellflower, CA","tHigh":33,"tMin":2},
+  {"city":"Benicia","state":"CA","display":"Benicia, CA","tHigh":35,"tMin":0},
+  {"city":"Berkeley","state":"CA","display":"Berkeley, CA","tHigh":29,"tMin":1},
+  {"city":"Bethel Island","state":"CA","display":"Bethel Island, CA","tHigh":41,"tMin":-3},
+  {"city":"Beverly Hills","state":"CA","display":"Beverly Hills, CA","tHigh":38,"tMin":1},
+  {"city":"Bickford","state":"CA","display":"Bickford, CA","tHigh":41,"tMin":-3},
+  {"city":"Bloomington","state":"CA","display":"Bloomington, CA","tHigh":41,"tMin":-2},
+  {"city":"Boerne","state":"TX","display":"Boerne, TX","tHigh":38,"tMin":4.27},
+  {"city":"Bonney Lake","state":"WA","display":"Bonney Lake, WA","tHigh":34,"tMin":-10},
+  {"city":"Bonsall","state":"CA","display":"Bonsall, CA","tHigh":32,"tMin":-2},
+  {"city":"Boulder","state":"CO","display":"Boulder, CO","tHigh":36,"tMin":-25},
+  {"city":"Boxford","state":"MA","display":"Boxford, MA","tHigh":34,"tMin":-18},
+  {"city":"Brea","state":"CA","display":"Brea, CA","tHigh":34,"tMin":2},
+  {"city":"Bremerton","state":"WA","display":"Bremerton, WA","tHigh":34,"tMin":-8},
+  {"city":"Brentwood","state":"CA","display":"Brentwood, CA","tHigh":41,"tMin":-3},
+  {"city":"Brighton","state":"CO","display":"Brighton, CO","tHigh":37,"tMin":-23},
+  {"city":"Broomfield","state":"CO","display":"Broomfield, CO","tHigh":36,"tMin":-25},
+  {"city":"Buckeye","state":"AZ","display":"Buckeye, AZ","tHigh":46,"tMin":-1},
+  {"city":"Buena Park","state":"CA","display":"Buena Park, CA","tHigh":34,"tMin":2},
+  {"city":"Calimesa","state":"CA","display":"Calimesa, CA","tHigh":41,"tMin":-2},
+  {"city":"Camalot","state":"NJ","display":"Camalot, NJ","tHigh":36,"tMin":-16},
+  {"city":"Camarillo","state":"CA","display":"Camarillo, CA","tHigh":28,"tMin":1},
+  {"city":"Camp Lejeune","state":"NC","display":"Camp Lejeune, NC","tHigh":36,"tMin":-9},
+  {"city":"Campbell","state":"CA","display":"Campbell, CA","tHigh":36,"tMin":0},
+  {"city":"Carlsbad","state":"CA","display":"Carlsbad, CA","tHigh":28,"tMin":4},
+  {"city":"Carlsbad 3","state":"CA","display":"Carlsbad 3, CA","tHigh":28,"tMin":4},
+  {"city":"Carmichael","state":"CA","display":"Carmichael, CA","tHigh":42,"tMin":-3},
+  {"city":"Carpinteria","state":"CA","display":"Carpinteria, CA","tHigh":29,"tMin":-1},
+  {"city":"Carson","state":"CA","display":"Carson, CA","tHigh":33,"tMin":2},
+  {"city":"Cary","state":"NC","display":"Cary, NC","tHigh":36,"tMin":-12},
+  {"city":"Casa Grande","state":"AZ","display":"Casa Grande, AZ","tHigh":44,"tMin":-4},
+  {"city":"Castaic","state":"CA","display":"Castaic, CA","tHigh":35,"tMin":-5},
+  {"city":"Castle Rock","state":"CO","display":"Castle Rock, CO","tHigh":36,"tMin":-23},
+  {"city":"Castro Valley","state":"Ca","display":"Castro Valley, Ca","tHigh":33,"tMin":1},
+  {"city":"Cathedral City","state":"Ca","display":"Cathedral City, Ca","tHigh":47,"tMin":3},
+  {"city":"Cedar Park","state":"TX","display":"Cedar Park, TX","tHigh":39,"tMin":-5},
+  {"city":"Ceres","state":"CA","display":"Ceres, CA","tHigh":42,"tMin":-2},
+  {"city":"Chandler","state":"AZ","display":"Chandler, AZ","tHigh":45,"tMin":1},
+  {"city":"Chapel Hill","state":"NC","display":"Chapel Hill, NC","tHigh":36,"tMin":-12},
+  {"city":"Charlotte","state":"NC","display":"Charlotte, NC","tHigh":37,"tMin":-11},
+  {"city":"Charlotte","state":"TX","display":"Charlotte, TX","tHigh":41,"tMin":-4},
+  {"city":"Chatsworth","state":"CA","display":"Chatsworth, CA","tHigh":38,"tMin":1},
+  {"city":"Chico","state":"CA","display":"Chico, CA","tHigh":44,"tMin":-4},
+  {"city":"Chino","state":"CA","display":"Chino, CA","tHigh":39,"tMin":-1},
+  {"city":"Chino Hills","state":"CA","display":"Chino Hills, CA","tHigh":39,"tMin":-1},
+  {"city":"Chula Vista","state":"CA","display":"Chula Vista, CA","tHigh":31,"tMin":2},
+  {"city":"Cibolo","state":"TX","display":"Cibolo, TX","tHigh":39,"tMin":-6},
+  {"city":"Citrus Heights","state":"CA","display":"Citrus Heights, CA","tHigh":41,"tMin":-3},
+  {"city":"Claremont","state":"CA","display":"Claremont, CA","tHigh":39,"tMin":-1},
+  {"city":"Clayton","state":"CA","display":"Clayton, CA","tHigh":29,"tMin":1},
+  {"city":"Clermont","state":"FL","display":"Clermont, FL","tHigh":35,"tMin":-1},
+  {"city":"Cloverdale","state":"CA","display":"Cloverdale, CA","tHigh":38,"tMin":-3},
+  {"city":"Clovis","state":"CA","display":"Clovis, CA","tHigh":42,"tMin":-2},
+  {"city":"Coachella","state":"CA","display":"Coachella, CA","tHigh":47,"tMin":-5},
+  {"city":"Coalinga","state":"CA","display":"Coalinga, CA","tHigh":41,"tMin":-3},
+  {"city":"Colton","state":"CA","display":"Colton, CA","tHigh":41,"tMin":-2},
+  {"city":"Colorado Springs","state":"CO","display":"Colorado Springs, CO","tHigh":35,"tMin":-23},
+  {"city":"Columbia","state":"TN","display":"Columbia, TN","tHigh":46,"tMin":-1},
+  {"city":"Commerce","state":"C0","display":"Commerce, C0","tHigh":36,"tMin":-25},
+  {"city":"Compton","state":"CA","display":"Compton, CA","tHigh":33,"tMin":2},
+  {"city":"Concord","state":"CA","display":"Concord, CA","tHigh":35,"tMin":-4},
+  {"city":"Converse","state":"TX","display":"Converse, TX","tHigh":39,"tMin":-6},
+  {"city":"Coolidge","state":"AZ","display":"Coolidge, AZ","tHigh":44,"tMin":-4},
+  {"city":"Corona","state":"CA","display":"Corona, CA","tHigh":39,"tMin":-1},
+  {"city":"Costa Mesa","state":"CA","display":"Costa Mesa, CA","tHigh":34,"tMin":2},
+  {"city":"Cotati","state":"CA","display":"Cotati, CA","tHigh":38,"tMin":-3},
+  {"city":"Covina","state":"CA","display":"Covina, CA","tHigh":39,"tMin":-1},
+  {"city":"Cupertino","state":"CA","display":"Cupertino, CA","tHigh":36,"tMin":0},
+  {"city":"Cypress","state":"CA","display":"Cypress, CA","tHigh":34,"tMin":2},
+  {"city":"Dallas","state":"TX","display":"Dallas, TX","tHigh":40,"tMin":-8},
+  {"city":"Daly","state":"CA","display":"Daly, CA","tHigh":29,"tMin":2},
+  {"city":"Danville","state":"CA","display":"Danville, CA","tHigh":41,"tMin":-3},
+  {"city":"Davis","state":"CA","display":"Davis, CA","tHigh":41,"tMin":-3},
+  {"city":"Del Valle","state":"TX","display":"Del Valle, TX","tHigh":39,"tMin":-7},
+  {"city":"Del Mar","state":"CA","display":"Del Mar, CA","tHigh":32,"tMin":1},
+  {"city":"Denver","state":"CO","display":"Denver, CO","tHigh":36,"tMin":-25},
+  {"city":"Desert Hot Springs","state":"CA","display":"Desert Hot Springs, CA","tHigh":47,"tMin":3},
+  {"city":"Dinuba","state":"CA","display":"Dinuba, CA","tHigh":39,"tMin":-3},
+  {"city":"Discovery Bay","state":"CA","display":"Discovery Bay, CA","tHigh":41,"tMin":-3},
+  {"city":"Dix Hills","state":"CA","display":"Dix Hills, CA","tHigh":35,"tMin":-13},
+  {"city":"Dix Hills","state":"NY","display":"Dix Hills, NY","tHigh":34,"tMin":-15},
+  {"city":"Dixon","state":"CA","display":"Dixon, CA","tHigh":40,"tMin":-3},
+  {"city":"Downey","state":"CA","display":"Downey, CA","tHigh":34,"tMin":2},
+  {"city":"Draper","state":"UT","display":"Draper, UT","tHigh":38,"tMin":-15},
+  {"city":"Duarte","state":"CA","display":"Duarte, CA","tHigh":39,"tMin":-1},
+  {"city":"Dublin","state":"CA","display":"Dublin, CA","tHigh":41,"tMin":-3},
+  {"city":"Durham","state":"NC","display":"Durham, NC","tHigh":36,"tMin":-12},
+  {"city":"Eagle Lake","state":"FL","display":"Eagle Lake, FL","tHigh":35,"tMin":1},
+  {"city":"Eagle Mountain","state":"UT","display":"Eagle Mountain, UT","tHigh":38,"tMin":-15},
+  {"city":"East Windsor","state":"NJ","display":"East Windsor, NJ","tHigh":36,"tMin":-16},
+  {"city":"EastVale","state":"CA","display":"EastVale, CA","tHigh":39,"tMin":-1},
+  {"city":"Echo Park","state":"CA","display":"Echo Park, CA","tHigh":38,"tMin":1},
+  {"city":"Egg Harbor Township","state":"NJ","display":"Egg Harbor Township, NJ","tHigh":36,"tMin":-16},
+  {"city":"El Cajon","state":"CA","display":"El Cajon, CA","tHigh":32,"tMin":3},
+  {"city":"El Cerrito","state":"CA","display":"El Cerrito, CA","tHigh":29,"tMin":1},
+  {"city":"El Dorado Hills","state":"CA","display":"El Dorado Hills, CA","tHigh":42,"tMin":-3},
+  {"city":"El Monte","state":"CA","display":"El Monte, CA","tHigh":34,"tMin":2},
+  {"city":"Elk Grove","state":"CA","display":"Elk Grove, CA","tHigh":42,"tMin":-3},
+  {"city":"Encinitas","state":"CA","display":"Encinitas, CA","tHigh":32,"tMin":1},
+  {"city":"Encino","state":"CA","display":"Encino, CA","tHigh":38,"tMin":1},
+  {"city":"Erie","state":"CO","display":"Erie, CO","tHigh":37,"tMin":-23},
+  {"city":"Escondido","state":"CA","display":"Escondido, CA","tHigh":28,"tMin":4},
+  {"city":"Essex","state":"MD","display":"Essex, MD","tHigh":37,"tMin":-15},
+  {"city":"Ewa Beach, Oahu","state":"HI","display":"Ewa Beach, Oahu, HI","tHigh":34,"tMin":13},
+  {"city":"Fair Oaks","state":"CA","display":"Fair Oaks, CA","tHigh":42,"tMin":-3},
+  {"city":"Fair Oaks Ranch","state":"TX","display":"Fair Oaks Ranch, TX","tHigh":38,"tMin":-6},
+  {"city":"Fairfield","state":"CA","display":"Fairfield, CA","tHigh":40,"tMin":-3},
+  {"city":"Fallbrook","state":"CA","display":"Fallbrook, CA","tHigh":32,"tMin":-2},
+  {"city":"Fillmore","state":"CA","display":"Fillmore, CA","tHigh":28,"tMin":1},
+  {"city":"Flintridge","state":"CA","display":"Flintridge, CA","tHigh":38,"tMin":1},
+  {"city":"Florence","state":"CO","display":"Florence, CO","tHigh":39,"tMin":-24},
+  {"city":"Florence","state":"AZ","display":"Florence, AZ","tHigh":44,"tMin":-4},
+  {"city":"Folsom","state":"CA","display":"Folsom, CA","tHigh":42,"tMin":-3},
+  {"city":"Fontana","state":"CA","display":"Fontana, CA","tHigh":41,"tMin":-2},
+  {"city":"Fort Collins","state":"CO","display":"Fort Collins, CO","tHigh":34,"tMin":-23},
+  {"city":"Fort Washington","state":"MD","display":"Fort Washington, MD","tHigh":37,"tMin":-15},
+  {"city":"Fountain Valley","state":"CA","display":"Fountain Valley, CA","tHigh":34,"tMin":2},
+  {"city":"Fowler","state":"CA","display":"Fowler, CA","tHigh":42,"tMin":-2},
+  {"city":"Fremont","state":"CA","display":"Fremont, CA","tHigh":33,"tMin":0},
+  {"city":"French Valley","state":"CA","display":"French Valley, CA","tHigh":32,"tMin":-2},
+  {"city":"Fresno","state":"CA","display":"Fresno, CA","tHigh":42,"tMin":-2},
+  {"city":"Friant","state":"CA","display":"Friant, CA","tHigh":42,"tMin":-2},
+  {"city":"Frisco","state":"TX","display":"Frisco, TX","tHigh":39,"tMin":-10},
+  {"city":"Fullerton","state":"CA","display":"Fullerton, CA","tHigh":34,"tMin":2},
+  {"city":"Galt","state":"CA","display":"Galt, CA","tHigh":41,"tMin":-3},
+  {"city":"Garden Grove","state":"CA","display":"Garden Grove, CA","tHigh":34,"tMin":2},
+  {"city":"Gardena","state":"CA","display":"Gardena, CA","tHigh":31,"tMin":4},
+  {"city":"Georgetown","state":"TX","display":"Georgetown, TX","tHigh":38,"tMin":-7},
+  {"city":"Gilbert","state":"AZ","display":"Gilbert, AZ","tHigh":45,"tMin":1},
+  {"city":"Gilroy","state":"CA","display":"Gilroy, CA","tHigh":36,"tMin":0},
+  {"city":"Glendale","state":"AZ","display":"Glendale, AZ","tHigh":46,"tMin":-1},
+  {"city":"Glendale","state":"CA","display":"Glendale, CA","tHigh":38,"tMin":1},
+  {"city":"Glendora","state":"CA","display":"Glendora, CA","tHigh":39,"tMin":-1},
+  {"city":"Gold Canyon","state":"AZ","display":"Gold Canyon, AZ","tHigh":46,"tMin":1},
+  {"city":"Golden","state":"CO","display":"Golden, CO","tHigh":36,"tMin":-23},
+  {"city":"Goleta","state":"CA","display":"Goleta, CA","tHigh":29,"tMin":-1},
+  {"city":"Goodyear","state":"AZ","display":"Goodyear, AZ","tHigh":46,"tMin":-1},
+  {"city":"Goshen","state":"CA","display":"Goshen, CA","tHigh":39,"tMin":-3},
+  {"city":"Granite Bay","state":"CA","display":"Granite Bay, CA","tHigh":41,"tMin":-3},
+  {"city":"Grass Valley","state":"CA","display":"Grass Valley, CA","tHigh":41,"tMin":-3},
+  {"city":"Greenfield","state":"CA","display":"Greenfield, CA","tHigh":29,"tMin":-1},
+  {"city":"Greenwood Village","state":"CO","display":"Greenwood Village, CO","tHigh":36,"tMin":-23},
+  {"city":"Guelph Ontario","state":"Canada","display":"Guelph Ontario, Canada","tHigh":33,"tMin":-20},
+  {"city":"Haines City","state":"FL","display":"Haines City, FL","tHigh":35,"tMin":-1},
+  {"city":"Hanford","state":"CA","display":"Hanford, CA","tHigh":41,"tMin":-3},
+  {"city":"Harbor","state":"CA","display":"Harbor, CA","tHigh":31,"tMin":4},
+  {"city":"Hayward","state":"CA","display":"Hayward, CA","tHigh":33,"tMin":1},
+  {"city":"Healdsburg","state":"CA","display":"Healdsburg, CA","tHigh":38,"tMin":-3},
+  {"city":"Hemet","state":"CA","display":"Hemet, CA","tHigh":40,"tMin":-2},
+  {"city":"Henderson","state":"NV","display":"Henderson, NV","tHigh":45,"tMin":-4},
+  {"city":"Hercules","state":"CA","display":"Hercules, CA","tHigh":35,"tMin":-4},
+  {"city":"Herriman","state":"UT","display":"Herriman, UT","tHigh":39,"tMin":-16},
+  {"city":"Hesperia","state":"CA","display":"Hesperia, CA","tHigh":42,"tMin":-6},
+  {"city":"Highgrove","state":"CA","display":"Highgrove, CA","tHigh":39,"tMin":-1},
+  {"city":"Highland","state":"CA","display":"Highland, CA","tHigh":41,"tMin":-2},
+  {"city":"Hillsborough","state":"CA","display":"Hillsborough, CA","tHigh":29,"tMin":2},
+  {"city":"Hollister","state":"CA","display":"Hollister, CA","tHigh":29,"tMin":-1},
+  {"city":"Homeland","state":"CA","display":"Homeland, CA","tHigh":40,"tMin":-2},
+  {"city":"Houston","state":"TX","display":"Houston, TX","tHigh":36,"tMin":-3},
+  {"city":"Hughson","state":"CA","display":"Hughson, CA","tHigh":42,"tMin":-2},
+  {"city":"Huntington Beach","state":"CA","display":"Huntington Beach, CA","tHigh":34,"tMin":2},
+  {"city":"Hutto","state":"TX","display":"Hutto, TX","tHigh":38,"tMin":-7},
+  {"city":"Indian Wells","state":"CA","display":"Indian Wells, CA","tHigh":47,"tMin":3},
+  {"city":"Indio","state":"CA","display":"Indio, CA","tHigh":47,"tMin":-5},
+  {"city":"Inglewood","state":"CA","display":"Inglewood, CA","tHigh":28,"tMin":4},
+  {"city":"Irvine","state":"CA","display":"Irvine, CA","tHigh":34,"tMin":2},
+  {"city":"Jackson","state":"NJ","display":"Jackson, NJ","tHigh":36,"tMin":-16},
+  {"city":"Jacksonville","state":"FL","display":"Jacksonville, FL","tHigh":37,"tMin":-6},
+  {"city":"Jarrell","state":"TX","display":"Jarrell, TX","tHigh":38,"tMin":-7},
+  {"city":"Jefferson","state":"CO","display":"Jefferson, CO","tHigh":36,"tMin":-25},
+  {"city":"Jurupa Valley","state":"CA","display":"Jurupa Valley, CA","tHigh":39,"tMin":-1},
+  {"city":"Kapolei (Oahu)","state":"HI","display":"Kapolei (Oahu), HI","tHigh":34,"tMin":13},
+  {"city":"Kehalani, Maui","state":"HI","display":"Kehalani, Maui, HI","tHigh":32,"tMin":13},
+  {"city":"Keller","state":"TX","display":"Keller, TX","tHigh":40,"tMin":-9},
+  {"city":"Kensington","state":"CA","display":"Kensington, CA","tHigh":29,"tMin":1},
+  {"city":"Kenwood","state":"CA","display":"Kenwood, CA","tHigh":38,"tMin":-3},
+  {"city":"Kerman","state":"CA","display":"Kerman, CA","tHigh":42,"tMin":-2},
+  {"city":"King City","state":"CA","display":"King City, CA","tHigh":21,"tMin":3},
+  {"city":"Kyle","state":"TX","display":"Kyle, TX","tHigh":38,"tMin":-5},
+  {"city":"La Habra","state":"CA","display":"La Habra, CA","tHigh":34,"tMin":2},
+  {"city":"La Mesa","state":"CA","display":"La Mesa, CA","tHigh":29,"tMin":5},
+  {"city":"La Quinta","state":"CA","display":"La Quinta, CA","tHigh":47,"tMin":-5},
+  {"city":"La Verne","state":"CA","display":"La Verne, CA","tHigh":39,"tMin":-1},
+  {"city":"Ladera Ranch","state":"CA","display":"Ladera Ranch, CA","tHigh":34,"tMin":3},
+  {"city":"Lafayette","state":"CA","display":"Lafayette, CA","tHigh":29,"tMin":1},
+  {"city":"Laguna Beach","state":"CA","display":"Laguna Beach, CA","tHigh":34,"tMin":2},
+  {"city":"Lake Elsinore","state":"CA","display":"Lake Elsinore, CA","tHigh":40,"tMin":-2},
+  {"city":"Lake Forest","state":"CA","display":"Lake Forest, CA","tHigh":34,"tMin":3},
+  {"city":"Lake Hamilton","state":"FL","display":"Lake Hamilton, FL","tHigh":35,"tMin":-1},
+  {"city":"Lake Point","state":"UT","display":"Lake Point, UT","tHigh":39,"tMin":-16},
+  {"city":"Lakeside","state":"CA","display":"Lakeside, CA","tHigh":32,"tMin":3},
+  {"city":"Lakeway","state":"TX","display":"Lakeway, TX","tHigh":39,"tMin":-5},
+  {"city":"Lakewood","state":"CA","display":"Lakewood, CA","tHigh":33,"tMin":2},
+  {"city":"Lancaster","state":"CA","display":"Lancaster, CA","tHigh":42,"tMin":-9},
+  {"city":"Larkspur","state":"CA","display":"Larkspur, CA","tHigh":30,"tMin":3},
+  {"city":"Las Vegas","state":"NV","display":"Las Vegas, NV","tHigh":45,"tMin":-4},
+  {"city":"Lathrop","state":"CA","display":"Lathrop, CA","tHigh":41,"tMin":-3},
+  {"city":"Laveen","state":"AZ","display":"Laveen, AZ","tHigh":45,"tMin":1},
+  {"city":"Leander","state":"TX","display":"Leander, TX","tHigh":38,"tMin":-7},
+  {"city":"Lemon Grove","state":"CA","display":"Lemon Grove, CA","tHigh":29,"tMin":5},
+  {"city":"Lemoore","state":"CA","display":"Lemoore, CA","tHigh":41,"tMin":-3},
+  {"city":"Leonardtown","state":"MD","display":"Leonardtown, MD","tHigh":36,"tMin":-13},
+  {"city":"Liberty Hill","state":"TX","display":"Liberty Hill, TX","tHigh":38,"tMin":-7},
+  {"city":"Liguna Niguel","state":"CA","display":"Liguna Niguel, CA","tHigh":34,"tMin":3},
+  {"city":"Lincoln","state":"CA","display":"Lincoln, CA","tHigh":41,"tMin":-3},
+  {"city":"Litchfield Park","state":"AZ","display":"Litchfield Park, AZ","tHigh":46,"tMin":-1},
+  {"city":"Littleton","state":"CO","display":"Littleton, CO","tHigh":36,"tMin":-23},
+  {"city":"Live Oak","state":"CA","display":"Live Oak, CA","tHigh":41,"tMin":-3},
+  {"city":"Livermore","state":"CA","display":"Livermore, CA","tHigh":41,"tMin":-3},
+  {"city":"Lodi","state":"CA","display":"Lodi, CA","tHigh":41,"tMin":-3},
+  {"city":"Loma Linda","state":"CA","display":"Loma Linda, CA","tHigh":41,"tMin":-2},
+  {"city":"Lompoc","state":"CA","display":"Lompoc, CA","tHigh":26,"tMin":-2},
+  {"city":"Long Beach","state":"CA","display":"Long Beach, CA","tHigh":33,"tMin":2},
+  {"city":"Longmont","state":"CO","display":"Longmont, CO","tHigh":36,"tMin":-25},
+  {"city":"Los Alamos","state":"CA","display":"Los Alamos, CA","tHigh":26,"tMin":-2},
+  {"city":"Los Altos","state":"CA","display":"Los Altos, CA","tHigh":33,"tMin":0},
+  {"city":"Los Angeles","state":"CA","display":"Los Angeles, CA","tHigh":39,"tMin":4},
+  {"city":"Los Banos","state":"CA","display":"Los Banos, CA","tHigh":40,"tMin":-3},
+  {"city":"Loveland","state":"CO","display":"Loveland, CO","tHigh":38,"tMin":-23},
+  {"city":"Lowry","state":"CO","display":"Lowry, CO","tHigh":36,"tMin":-25},
+  {"city":"Madera","state":"CA","display":"Madera, CA","tHigh":42,"tMin":-2},
+  {"city":"Makakilo (Oahu)","state":"HI","display":"Makakilo (Oahu), HI","tHigh":34,"tMin":13},
+  {"city":"Makena","state":"HI","display":"Makena, HI","tHigh":32,"tMin":13},
+  {"city":"Manalapan","state":"NJ","display":"Manalapan, NJ","tHigh":36,"tMin":-14},
+  {"city":"Manchester","state":"NJ","display":"Manchester, NJ","tHigh":36,"tMin":-16},
+  {"city":"Manhasset","state":"NY","display":"Manhasset, NY","tHigh":36,"tMin":-14},
+  {"city":"Manhatton Beach","state":"CA","display":"Manhatton Beach, CA","tHigh":28,"tMin":4},
+  {"city":"Manor","state":"TX","display":"Manor, TX","tHigh":39,"tMin":-5},
+  {"city":"Manteca","state":"CA","display":"Manteca, CA","tHigh":41,"tMin":-3},
+  {"city":"Marana","state":"AZ","display":"Marana, AZ","tHigh":43,"tMin":-3},
+  {"city":"Maricopa","state":"AZ","display":"Maricopa, AZ","tHigh":44,"tMin":-4},
+  {"city":"Marina","state":"CA","display":"Marina, CA","tHigh":24,"tMin":1},
+  {"city":"Martinez","state":"CA","display":"Martinez, CA","tHigh":35,"tMin":-4},
+  {"city":"Marysville","state":"CA","display":"Marysville, CA","tHigh":41,"tMin":-3},
+  {"city":"Menifee","state":"CA","display":"Menifee, CA","tHigh":40,"tMin":-2},
+  {"city":"Menlo Park","state":"CA","display":"Menlo Park, CA","tHigh":33,"tMin":0},
+  {"city":"Mentone","state":"CA","display":"Mentone, CA","tHigh":41,"tMin":-2},
+  {"city":"Merced","state":"CA","display":"Merced, CA","tHigh":40,"tMin":-3},
+  {"city":"Mesa","state":"AZ","display":"Mesa, AZ","tHigh":45,"tMin":1},
+  {"city":"Mesquite","state":"NV","display":"Mesquite, NV","tHigh":44,"tMin":-6},
+  {"city":"Miami","state":"FL","display":"Miami, FL","tHigh":34,"tMin":5},
+  {"city":"Middletown","state":"NY","display":"Middletown, NY","tHigh":35,"tMin":-20},
+  {"city":"Middletown","state":"VA","display":"Middletown, VA","tHigh":37,"tMin":-15},
+  {"city":"Mill Valley","state":"CA","display":"Mill Valley, CA","tHigh":30,"tMin":3},
+  {"city":"Milpitas","state":"CA","display":"Milpitas, CA","tHigh":36,"tMin":0},
+  {"city":"Millsboro","state":"DE","display":"Millsboro, DE","tHigh":36,"tMin":-11},
+  {"city":"Mira Loma","state":"CA","display":"Mira Loma, CA","tHigh":39,"tMin":-1},
+  {"city":"Mira Mesa","state":"CA","display":"Mira Mesa, CA","tHigh":32,"tMin":1},
+  {"city":"Mission Veijo","state":"CA","display":"Mission Veijo, CA","tHigh":34,"tMin":3},
+  {"city":"Modesto","state":"CA","display":"Modesto, CA","tHigh":42,"tMin":-2},
+  {"city":"Monrovia","state":"CA","display":"Monrovia, CA","tHigh":39,"tMin":-1},
+  {"city":"Montclair","state":"CA","display":"Montclair, CA","tHigh":39,"tMin":-1},
+  {"city":"Montebello","state":"CA","display":"Montebello, CA","tHigh":34,"tMin":2},
+  {"city":"Monterey","state":"CA","display":"Monterey, CA","tHigh":24,"tMin":1},
+  {"city":"Mooresville","state":"NC","display":"Mooresville, NC","tHigh":37,"tMin":-11},
+  {"city":"Moorpark","state":"CA","display":"Moorpark, CA","tHigh":28,"tMin":1},
+  {"city":"Moraga","state":"CA","display":"Moraga, CA","tHigh":29,"tMin":1},
+  {"city":"Moreno Valley","state":"CA","display":"Moreno Valley, CA","tHigh":40,"tMin":-2},
+  {"city":"Morgan Hill","state":"CA","display":"Morgan Hill, CA","tHigh":36,"tMin":0},
+  {"city":"Morrison","state":"CO","display":"Morrison, CO","tHigh":36,"tMin":-25},
+  {"city":"Morrisville","state":"NC","display":"Morrisville, NC","tHigh":36,"tMin":-12},
+  {"city":"Mount Dora","state":"FL","display":"Mount Dora, FL","tHigh":36,"tMin":1},
+  {"city":"Mountain House","state":"CA","display":"Mountain House, CA","tHigh":41,"tMin":-3},
+  {"city":"Mountain View","state":"CA","display":"Mountain View, CA","tHigh":33,"tMin":0},
+  {"city":"Murrieta","state":"CA","display":"Murrieta, CA","tHigh":32,"tMin":-2},
+  {"city":"Napa","state":"CA","display":"Napa, CA","tHigh":35,"tMin":-4},
+  {"city":"Natomas","state":"CA","display":"Natomas, CA","tHigh":41,"tMin":-3},
+  {"city":"Newark","state":"CA","display":"Newark, CA","tHigh":33,"tMin":0},
+  {"city":"Newport Beach","state":"CA","display":"Newport Beach, CA","tHigh":34,"tMin":2},
+  {"city":"Norco","state":"CA","display":"Norco, CA","tHigh":39,"tMin":-1},
+  {"city":"Northlake","state":"TX","display":"Northlake, TX","tHigh":40,"tMin":-9},
+  {"city":"Northridge","state":"CA","display":"Northridge, CA","tHigh":38,"tMin":1},
+  {"city":"North Las Vegas","state":"NV","display":"North Las Vegas, NV","tHigh":46,"tMin":-6},
+  {"city":"Norwalk","state":"CA","display":"Norwalk, CA","tHigh":34,"tMin":2},
+  {"city":"Novato","state":"CA","display":"Novato, CA","tHigh":35,"tMin":-4},
+  {"city":"Nuevo","state":"CA","display":"Nuevo, CA","tHigh":40,"tMin":-2},
+  {"city":"Oakland","state":"CA","display":"Oakland, CA","tHigh":29,"tMin":1},
+  {"city":"Oakley","state":"CA","display":"Oakley, CA","tHigh":41,"tMin":-3},
+  {"city":"Oceanside","state":"CA","display":"Oceanside, CA","tHigh":28,"tMin":4},
+  {"city":"Ontario","state":"CA","display":"Ontario, CA","tHigh":39,"tMin":-6},
+  {"city":"Orange","state":"CA","display":"Orange, CA","tHigh":34,"tMin":2},
+  {"city":"Orange","state":"VA","display":"Orange, VA","tHigh":37,"tMin":-15},
+  {"city":"Orcutt","state":"CA","display":"Orcutt, CA","tHigh":29,"tMin":-3},
+  {"city":"Orem","state":"UT","display":"Orem, UT","tHigh":38,"tMin":-15},
+  {"city":"Orinda","state":"CA","display":"Orinda, CA","tHigh":29,"tMin":1},
+  {"city":"Orlando","state":"FL","display":"Orlando, FL","tHigh":35,"tMin":1},
+  {"city":"Oro Valley","state":"AZ","display":"Oro Valley, AZ","tHigh":42,"tMin":-3},
+  {"city":"Oroville","state":"CA","display":"Oroville, CA","tHigh":41,"tMin":-3},
+  {"city":"Osterville","state":"MA","display":"Osterville, MA","tHigh":32,"tMin":-16},
+  {"city":"Oxnard","state":"CA","display":"Oxnard, CA","tHigh":26,"tMin":2},
+  {"city":"Pacifica","state":"CA","display":"Pacifica, CA","tHigh":29,"tMin":2},
+  {"city":"Pacoima","state":"CA","display":"Pacoima, CA","tHigh":38,"tMin":1},
+  {"city":"Palm Beach Gardens","state":"FL","display":"Palm Beach Gardens, FL","tHigh":34,"tMin":3},
+  {"city":"Palm Coast","state":"FL","display":"Palm Coast, FL","tHigh":34,"tMin":0},
+  {"city":"Palm Desert","state":"CA","display":"Palm Desert, CA","tHigh":47,"tMin":-5},
+  {"city":"Palm Springs","state":"CA","display":"Palm Springs, CA","tHigh":47,"tMin":3},
+  {"city":"Palmdale","state":"CA","display":"Palmdale, CA","tHigh":42,"tMin":-9},
+  {"city":"Palo Alto","state":"CA","display":"Palo Alto, CA","tHigh":33,"tMin":0},
+  {"city":"Panorama","state":"CA","display":"Panorama, CA","tHigh":38,"tMin":1},
+  {"city":"Parker","state":"CO","display":"Parker, CO","tHigh":36,"tMin":-23},
+  {"city":"Parkville","state":"MD","display":"Parkville, MD","tHigh":37,"tMin":-15},
+  {"city":"Pasadena","state":"CA","display":"Pasadena, CA","tHigh":38,"tMin":1},
+  {"city":"Paso Robles","state":"CA","display":"Paso Robles, CA","tHigh":42,"tMin":-6},
+  {"city":"Pawcatuck","state":"CT","display":"Pawcatuck, CT","tHigh":34,"tMin":-19},
+  {"city":"Patterson","state":"CA","display":"Patterson, CA","tHigh":42,"tMin":-2},
+  {"city":"Pearland","state":"TX","display":"Pearland, TX","tHigh":36,"tMin":-3},
+  {"city":"Penngrove","state":"CA","display":"Penngrove, CA","tHigh":35,"tMin":-4},
+  {"city":"Penryn","state":"CA","display":"Penryn, CA","tHigh":41,"tMin":-3},
+  {"city":"Peoria","state":"AZ","display":"Peoria, AZ","tHigh":46,"tMin":-1},
+  {"city":"Perris","state":"CA","display":"Perris, CA","tHigh":40,"tMin":-2},
+  {"city":"Petaluma","state":"CA","display":"Petaluma, CA","tHigh":35,"tMin":-4},
+  {"city":"Peyton","state":"CO","display":"Peyton, CO","tHigh":35,"tMin":-23},
+  {"city":"Pflugerville","state":"TX","display":"Pflugerville, TX","tHigh":39,"tMin":-5},
+  {"city":"Phoenix","state":"AZ","display":"Phoenix, AZ","tHigh":45,"tMin":1},
+  {"city":"Pico Rivera","state":"CA","display":"Pico Rivera, CA","tHigh":34,"tMin":2},
+  {"city":"Piru","state":"CA","display":"Piru, CA","tHigh":28,"tMin":1},
+  {"city":"Placentia","state":"CA","display":"Placentia, CA","tHigh":34,"tMin":2},
+  {"city":"Placer County","state":"CA","display":"Placer County, CA","tHigh":31,"tMin":-8},
+  {"city":"Playa del Rey","state":"CA","display":"Playa del Rey, CA","tHigh":28,"tMin":4},
+  {"city":"Playa Vista","state":"CA","display":"Playa Vista, CA","tHigh":28,"tMin":4},
+  {"city":"Pleasant Hill","state":"CA","display":"Pleasant Hill, CA","tHigh":29,"tMin":1},
+  {"city":"Pleasanton","state":"CA","display":"Pleasanton, CA","tHigh":41,"tMin":-3},
+  {"city":"Plumas Lake","state":"CA","display":"Plumas Lake, CA","tHigh":41,"tMin":-3},
+  {"city":"Plymouth","state":"CA","display":"Plymouth, CA","tHigh":42,"tMin":-3},
+  {"city":"Plymouth","state":"MA","display":"Plymouth, MA","tHigh":34,"tMin":-18},
+  {"city":"Point Richmond","state":"CA","display":"Point Richmond, CA","tHigh":29,"tMin":1},
+  {"city":"Po'ipu Kaua'i","state":"HI","display":"Po'ipu Kaua'i, HI","tHigh":30,"tMin":14},
+  {"city":"Pomona","state":"CA","display":"Pomona, CA","tHigh":39,"tMin":-1},
+  {"city":"Porter Ranch","state":"CA","display":"Porter Ranch, CA","tHigh":39,"tMin":1},
+  {"city":"Porterville","state":"CA","display":"Porterville, CA","tHigh":41,"tMin":-2},
+  {"city":"Port Orchard","state":"WA","display":"Port Orchard, WA","tHigh":34,"tMin":-8},
+  {"city":"Port Townsend","state":"WA","display":"Port Townsend, WA","tHigh":22,"tMin":-3},
+  {"city":"Pueblo","state":"CO","display":"Pueblo, CO","tHigh":39,"tMin":-24},
+  {"city":"Queen Creek","state":"AZ","display":"Queen Creek, AZ","tHigh":44,"tMin":-4},
+  {"city":"Rancho Bernardo","state":"CA","display":"Rancho Bernardo, CA","tHigh":32,"tMin":1},
+  {"city":"Rancho Cordova","state":"CA","display":"Rancho Cordova, CA","tHigh":42,"tMin":-3},
+  {"city":"Rancho Cucamonga","state":"CA","display":"Rancho Cucamonga, CA","tHigh":39,"tMin":-1},
+  {"city":"Rancho Mirage","state":"CA","display":"Rancho Mirage, CA","tHigh":47,"tMin":3},
+  {"city":"Rancho Mission Viejo","state":"CA","display":"Rancho Mission Viejo, CA","tHigh":34,"tMin":3},
+  {"city":"Rancho Murieta","state":"CA","display":"Rancho Murieta, CA","tHigh":42,"tMin":-3},
+  {"city":"Rancho Santa Fe","state":"CA","display":"Rancho Santa Fe, CA","tHigh":28,"tMin":4},
+  {"city":"Redlands","state":"CA","display":"Redlands, CA","tHigh":41,"tMin":-2},
+  {"city":"Redwood City","state":"CA","display":"Redwood City, CA","tHigh":33,"tMin":0},
+  {"city":"Rendondo Beach","state":"CA","display":"Rendondo Beach, CA","tHigh":31,"tMin":4},
+  {"city":"Reston","state":"VA","display":"Reston, VA","tHigh":36,"tMin":-17},
+  {"city":"Richmond","state":"CA","display":"Richmond, CA","tHigh":29,"tMin":1},
+  {"city":"Richmond","state":"TX","display":"Richmond, TX","tHigh":36,"tMin":-3},
+  {"city":"Rio Rancho","state":"NM","display":"Rio Rancho, NM","tHigh":37,"tMin":-12},
+  {"city":"Ripon","state":"CA","display":"Ripon, CA","tHigh":41,"tMin":-3},
+  {"city":"Riverbank","state":"CA","display":"Riverbank, CA","tHigh":42,"tMin":-2},
+  {"city":"Riverside","state":"CA","display":"Riverside, CA","tHigh":39,"tMin":-1},
+  {"city":"Rocklin","state":"CA","display":"Rocklin, CA","tHigh":41,"tMin":-3},
+  {"city":"Rohnert Park","state":"CA","display":"Rohnert Park, CA","tHigh":38,"tMin":-3},
+  {"city":"Romoland","state":"CA","display":"Romoland, CA","tHigh":40,"tMin":-2},
+  {"city":"Rosamond","state":"CA","display":"Rosamond, CA","tHigh":42,"tMin":-9},
+  {"city":"Rosemead","state":"CA","display":"Rosemead, CA","tHigh":34,"tMin":2},
+  {"city":"Roseville","state":"CA","display":"Roseville, CA","tHigh":41,"tMin":-3},
+  {"city":"Round Rock","state":"TX","display":"Round Rock, TX","tHigh":38,"tMin":-7},
+  {"city":"Rowland Heights","state":"CA","display":"Rowland Heights, CA","tHigh":34,"tMin":2},
+  {"city":"Royce City","state":"TX","display":"Royce City, TX","tHigh":39,"tMin":-10},
+  {"city":"Sachse","state":"TX","display":"Sachse, TX","tHigh":39,"tMin":-10},
+  {"city":"Sacramento","state":"CA","display":"Sacramento, CA","tHigh":41,"tMin":-3},
+  {"city":"Sahuarita","state":"AZ","display":"Sahuarita, AZ","tHigh":43,"tMin":-3},
+  {"city":"Salem","state":"UT","display":"Salem, UT","tHigh":38,"tMin":-15},
+  {"city":"San Antonio","state":"TX","display":"San Antonio, TX","tHigh":39,"tMin":-6},
+  {"city":"San Bernardino","state":"CA","display":"San Bernardino, CA","tHigh":41,"tMin":-2},
+  {"city":"San Bruno","state":"CA","display":"San Bruno, CA","tHigh":29,"tMin":2},
+  {"city":"San Carlos","state":"CA","display":"San Carlos, CA","tHigh":33,"tMin":0},
+  {"city":"San Clemente","state":"CA","display":"San Clemente, CA","tHigh":32,"tMin":-2},
+  {"city":"San Diego","state":"CA","display":"San Diego, CA","tHigh":29,"tMin":5},
+  {"city":"San Francisco","state":"CA","display":"San Francisco, CA","tHigh":29,"tMin":2},
+  {"city":"San Jacinto","state":"CA","display":"San Jacinto, CA","tHigh":40,"tMin":-2},
+  {"city":"San Jose","state":"CA","display":"San Jose, CA","tHigh":36,"tMin":0},
+  {"city":"San Juan Bautista","state":"CA","display":"San Juan Bautista, CA","tHigh":29,"tMin":-1},
+  {"city":"San Juan Capistrano","state":"CA","display":"San Juan Capistrano, CA","tHigh":34,"tMin":3},
+  {"city":"San Leonardo","state":"CA","display":"San Leonardo, CA","tHigh":33,"tMin":1},
+  {"city":"San Luis Obispo","state":"CA","display":"San Luis Obispo, CA","tHigh":32,"tMin":-2},
+  {"city":"San Marcos","state":"CA","display":"San Marcos, CA","tHigh":28,"tMin":4},
+  {"city":"San Marcos","state":"TX","display":"San Marcos, TX","tHigh":39,"tMin":-7},
+  {"city":"San Mateo","state":"CA","display":"San Mateo, CA","tHigh":29,"tMin":2},
+  {"city":"San Pablo","state":"CA","display":"San Pablo, CA","tHigh":29,"tMin":1},
+  {"city":"San Pedro","state":"CA","display":"San Pedro, CA","tHigh":39,"tMin":4},
+  {"city":"San Rafael","state":"CA","display":"San Rafael, CA","tHigh":30,"tMin":3},
+  {"city":"San Ramon","state":"CA","display":"San Ramon, CA","tHigh":41,"tMin":-3},
+  {"city":"San Tan Valley","state":"AZ","display":"San Tan Valley, AZ","tHigh":44,"tMin":-4},
+  {"city":"Santa Ana","state":"CA","display":"Santa Ana, CA","tHigh":34,"tMin":2},
+  {"city":"Santa Barbara","state":"CA","display":"Santa Barbara, CA","tHigh":29,"tMin":-1},
+  {"city":"Santa Clara","state":"CA","display":"Santa Clara, CA","tHigh":36,"tMin":0},
+  {"city":"Santa Clarita","state":"CA","display":"Santa Clarita, CA","tHigh":38,"tMin":1},
+  {"city":"Santa Cruz","state":"CA","display":"Santa Cruz, CA","tHigh":24,"tMin":1},
+  {"city":"Santa Fe Springs","state":"CA","display":"Santa Fe Springs, CA","tHigh":34,"tMin":2},
+  {"city":"Santa Maria","state":"CA","display":"Santa Maria, CA","tHigh":29,"tMin":-3},
+  {"city":"Santa Monica","state":"CA","display":"Santa Monica, CA","tHigh":28,"tMin":4},
+  {"city":"Santa Paula","state":"CA","display":"Santa Paula, CA","tHigh":28,"tMin":1},
+  {"city":"Santa Rosa","state":"CA","display":"Santa Rosa, CA","tHigh":38,"tMin":-3},
+  {"city":"Santee","state":"CA","display":"Santee, CA","tHigh":32,"tMin":3},
+  {"city":"Saratoga","state":"CA","display":"Saratoga, CA","tHigh":36,"tMin":0},
+  {"city":"Saratoga Springs","state":"UT","display":"Saratoga Springs, UT","tHigh":38,"tMin":-15},
+  {"city":"Saugus","state":"CA","display":"Saugus, CA","tHigh":38,"tMin":1},
+  {"city":"Scotts Valley","state":"CA","display":"Scotts Valley, CA","tHigh":36,"tMin":0},
+  {"city":"Seal Beach","state":"CA","display":"Seal Beach, CA","tHigh":33,"tMin":2},
+  {"city":"Shafter","state":"CA","display":"Shafter, CA","tHigh":42,"tMin":-2},
+  {"city":"Shingle Springs","state":"CA","display":"Shingle Springs, CA","tHigh":42,"tMin":-3},
+  {"city":"Signal Hill","state":"CA","display":"Signal Hill, CA","tHigh":33,"tMin":2},
+  {"city":"Silverado","state":"CA","display":"Silverado, CA","tHigh":34,"tMin":3},
+  {"city":"Simi Valley","state":"CA","display":"Simi Valley, CA","tHigh":38,"tMin":1},
+  {"city":"Soledad","state":"CA","display":"Soledad, CA","tHigh":29,"tMin":-1},
+  {"city":"Southbury","state":"CT","display":"Southbury, CT","tHigh":33,"tMin":-19},
+  {"city":"Stonington","state":"CT","display":"Stonington, CT","tHigh":31,"tMin":-14},
+  {"city":"South San Franciso","state":"CA","display":"South San Franciso, CA","tHigh":29,"tMin":2},
+  {"city":"Sparks","state":"NV","display":"Sparks, NV","tHigh":38,"tMin":-15},
+  {"city":"Spring Valley","state":"CA","display":"Spring Valley, CA","tHigh":35,"tMin":-17},
+  {"city":"Stafford","state":"VA","display":"Stafford, VA","tHigh":37,"tMin":-15},
+  {"city":"Stanton","state":"CA","display":"Stanton, CA","tHigh":34,"tMin":2},
+  {"city":"Star","state":"ID","display":"Star, ID","tHigh":39,"tMin":-13},
+  {"city":"St. Augustine","state":"FL","display":"St. Augustine, FL","tHigh":34,"tMin":0},
+  {"city":"St. George","state":"UT","display":"St. George, UT","tHigh":44,"tMin":-6},
+  {"city":"Stewartson","state":"PA","display":"Stewartson, PA","tHigh":37,"tMin":-15},
+  {"city":"Stockton","state":"CA","display":"Stockton, CA","tHigh":41,"tMin":-3},
+  {"city":"Strasburg","state":"CO","display":"Strasburg, CO","tHigh":37,"tMin":-23},
+  {"city":"Sugar Land","state":"TX","display":"Sugar Land, TX","tHigh":36,"tMin":-3},
+  {"city":"Sunland","state":"CA","display":"Sunland, CA","tHigh":38,"tMin":1},
+  {"city":"Sunnyvale","state":"CA","display":"Sunnyvale, CA","tHigh":36,"tMin":0},
+  {"city":"Surprise","state":"AZ","display":"Surprise, AZ","tHigh":46,"tMin":-1},
+  {"city":"Sylmar","state":"CA","display":"Sylmar, CA","tHigh":38,"tMin":1},
+  {"city":"Taylor","state":"TX","display":"Taylor, TX","tHigh":38,"tMin":-7},
+  {"city":"Tehachapi","state":"CA","display":"Tehachapi, CA","tHigh":43,"tMin":-10},
+  {"city":"Temecula","state":"CA","display":"Temecula, CA","tHigh":32,"tMin":-2},
+  {"city":"Tempe","state":"AZ","display":"Tempe, AZ","tHigh":45,"tMin":1},
+  {"city":"Temple","state":"TX","display":"Temple, TX","tHigh":39,"tMin":-7},
+  {"city":"Thornton","state":"CO","display":"Thornton, CO","tHigh":36,"tMin":-25},
+  {"city":"Thousand Oaks","state":"CA","display":"Thousand Oaks, CA","tHigh":28,"tMin":1},
+  {"city":"Timnath","state":"CO","display":"Timnath, CO","tHigh":38,"tMin":-23},
+  {"city":"Torrance","state":"CA","display":"Torrance, CA","tHigh":33,"tMin":2},
+  {"city":"Tracy","state":"CA","display":"Tracy, CA","tHigh":41,"tMin":-10},
+  {"city":"Tucson","state":"AZ","display":"Tucson, AZ","tHigh":43,"tMin":-3},
+  {"city":"Tulare","state":"CA","display":"Tulare, CA","tHigh":39,"tMin":-3},
+  {"city":"Turlock","state":"CA","display":"Turlock, CA","tHigh":40,"tMin":-3},
+  {"city":"Tustin","state":"CA","display":"Tustin, CA","tHigh":34,"tMin":2},
+  {"city":"Tyngsborough","state":"MA","display":"Tyngsborough, MA","tHigh":34,"tMin":-18},
+  {"city":"Union City","state":"CA","display":"Union City, CA","tHigh":33,"tMin":1},
+  {"city":"Upland","state":"CA","display":"Upland, CA","tHigh":39,"tMin":-1},
+  {"city":"Vacaville","state":"CA","display":"Vacaville, CA","tHigh":40,"tMin":-3},
+  {"city":"Vail","state":"AZ","display":"Vail, AZ","tHigh":43,"tMin":-3},
+  {"city":"Valencia","state":"CA","display":"Valencia, CA","tHigh":38,"tMin":1},
+  {"city":"Vallejo","state":"CA","display":"Vallejo, CA","tHigh":35,"tMin":-4},
+  {"city":"Valley Center","state":"CA","display":"Valley Center, CA","tHigh":28,"tMin":4},
+  {"city":"Van Nuys","state":"CA","display":"Van Nuys, CA","tHigh":38,"tMin":1},
+  {"city":"Ventura","state":"CA","display":"Ventura, CA","tHigh":28,"tMin":1},
+  {"city":"Victorville","state":"CA","display":"Victorville, CA","tHigh":42,"tMin":-6},
+  {"city":"Vineyard","state":"CA","display":"Vineyard, CA","tHigh":41,"tMin":-3},
+  {"city":"Visalia","state":"CA","display":"Visalia, CA","tHigh":39,"tMin":-3},
+  {"city":"Vista","state":"CA","display":"Vista, CA","tHigh":28,"tMin":4},
+  {"city":"Waddell","state":"AZ","display":"Waddell, AZ","tHigh":46,"tMin":-1},
+  {"city":"Waikaloa (Big Island)","state":"HI","display":"Waikaloa (Big Island), HI","tHigh":31,"tMin":14},
+  {"city":"Waldorf","state":"MD","display":"Waldorf, MD","tHigh":37,"tMin":-15},
+  {"city":"Walnut","state":"CA","display":"Walnut, CA","tHigh":39,"tMin":-1},
+  {"city":"Walnut Creek","state":"CA","display":"Walnut Creek, CA","tHigh":29,"tMin":1},
+  {"city":"Waterford","state":"CA","display":"Waterford, CA","tHigh":42,"tMin":-2},
+  {"city":"Waxhaw","state":"NC","display":"Waxhaw, NC","tHigh":37,"tMin":-11},
+  {"city":"Weddington","state":"NC","display":"Weddington, NC","tHigh":37,"tMin":-11},
+  {"city":"West Covina","state":"CA","display":"West Covina, CA","tHigh":39,"tMin":-1},
+  {"city":"West Hill","state":"CA","display":"West Hill, CA","tHigh":38,"tMin":1},
+  {"city":"West Rancho Palos Verdes","state":"CA","display":"West Rancho Palos Verdes, CA","tHigh":33,"tMin":2},
+  {"city":"West Sacramento","state":"CA","display":"West Sacramento, CA","tHigh":41,"tMin":-3},
+  {"city":"Westlake Village","state":"CA","display":"Westlake Village, CA","tHigh":28,"tMin":1},
+  {"city":"Westminister","state":"CA","display":"Westminister, CA","tHigh":34,"tMin":2},
+  {"city":"Wheat Ridge","state":"CO","display":"Wheat Ridge, CO","tHigh":36,"tMin":-25},
+  {"city":"Whittier","state":"CA","display":"Whittier, CA","tHigh":34,"tMin":2},
+  {"city":"Wildomar","state":"CA","display":"Wildomar, CA","tHigh":32,"tMin":-2},
+  {"city":"Williamsburg","state":"VA","display":"Williamsburg, VA","tHigh":37,"tMin":-11},
+  {"city":"Winchester","state":"CA","display":"Winchester, CA","tHigh":40,"tMin":-2},
+  {"city":"Winchester","state":"VA","display":"Winchester, VA","tHigh":37,"tMin":-15},
+  {"city":"Windermere","state":"FL","display":"Windermere, FL","tHigh":35,"tMin":1},
+  {"city":"Windsor","state":"CA","display":"Windsor, CA","tHigh":38,"tMin":-3},
+  {"city":"Windsor","state":"CO","display":"Windsor, CO","tHigh":38,"tMin":-23},
+  {"city":"Winter Garden","state":"FL","display":"Winter Garden, FL","tHigh":35,"tMin":1},
+  {"city":"Winters","state":"CA","display":"Winters, CA","tHigh":41,"tMin":-3},
+  {"city":"Woodland","state":"CA","display":"Woodland, CA","tHigh":41,"tMin":-3},
+  {"city":"Woodland Hills","state":"CA","display":"Woodland Hills, CA","tHigh":38,"tMin":1},
+  {"city":"Yorba Linda","state":"CA","display":"Yorba Linda, CA","tHigh":34,"tMin":2},
+  {"city":"York","state":"SC","display":"York, SC","tHigh":37,"tMin":-11},
+  {"city":"Yuba City","state":"CA","display":"Yuba City, CA","tHigh":41,"tMin":-3},
+  {"city":"Yucaipa","state":"CA","display":"Yucaipa, CA","tHigh":41,"tMin":-2},
+  {"city":"Yuma","state":"AZ","display":"Yuma, AZ","tHigh":46,"tMin":2}
+];
 
-let RT_AMPACITY = [{"size":"0","a60":0,"a75":0,"a90":0,"ohms":1.98},{"size":"#12","a60":0,"a75":0,"a90":0,"ohms":1.98},{"size":"#10","a60":30,"a75":35,"a90":40,"ohms":1.24},{"size":"#8","a60":40,"a75":50,"a90":55,"ohms":0.778},{"size":"#6","a60":55,"a75":65,"a90":75,"ohms":0.491},{"size":"#4","a60":70,"a75":85,"a90":95,"ohms":0.308},{"size":"#3","a60":85,"a75":100,"a90":115,"ohms":0.245},{"size":"#2","a60":95,"a75":115,"a90":130,"ohms":0.194},{"size":"#1","a60":110,"a75":130,"a90":145,"ohms":0.154},{"size":"#1/0","a60":125,"a75":150,"a90":170,"ohms":0.122},{"size":"#2/0","a60":145,"a75":175,"a90":195,"ohms":0.0967},{"size":"#3/0","a60":165,"a75":200,"a90":225,"ohms":0.0766},{"size":"#4/0","a60":195,"a75":230,"a90":260,"ohms":0.0608},{"size":"250","a60":215,"a75":255,"a90":290,"ohms":0.0515},{"size":"300","a60":240,"a75":285,"a90":320,"ohms":0.0429},{"size":"350","a60":260,"a75":310,"a90":350,"ohms":0.0367},{"size":"400","a60":280,"a75":335,"a90":380,"ohms":0.0321},{"size":"500","a60":320,"a75":380,"a90":430,"ohms":0.0258},{"size":"600","a60":350,"a75":420,"a90":475,"ohms":0.0214},{"size":"700","a60":385,"a75":460,"a90":520,"ohms":0.0184},{"size":"750","a60":400,"a75":475,"a90":535,"ohms":0.0171},{"size":"800","a60":410,"a75":490,"a90":555,"ohms":0.0161},{"size":"900","a60":435,"a75":520,"a90":585,"ohms":0.0143},{"size":"1000","a60":455,"a75":545,"a90":615,"ohms":0.0129}];
+let RT_AMPACITY = [
+  {"size":"0","a60":0,"a75":0,"a90":0,"ohms":1.98},
+  {"size":"#12","a60":0,"a75":0,"a90":0,"ohms":1.98},
+  {"size":"#10","a60":30,"a75":35,"a90":40,"ohms":1.24},
+  {"size":"#8","a60":40,"a75":50,"a90":55,"ohms":0.778},
+  {"size":"#6","a60":55,"a75":65,"a90":75,"ohms":0.491},
+  {"size":"#4","a60":70,"a75":85,"a90":95,"ohms":0.308},
+  {"size":"#3","a60":85,"a75":100,"a90":115,"ohms":0.245},
+  {"size":"#2","a60":95,"a75":115,"a90":130,"ohms":0.194},
+  {"size":"#1","a60":110,"a75":130,"a90":145,"ohms":0.154},
+  {"size":"#1/0","a60":125,"a75":150,"a90":170,"ohms":0.122},
+  {"size":"#2/0","a60":145,"a75":175,"a90":195,"ohms":0.0967},
+  {"size":"#3/0","a60":165,"a75":200,"a90":225,"ohms":0.0766},
+  {"size":"#4/0","a60":195,"a75":230,"a90":260,"ohms":0.0608},
+  {"size":"250","a60":215,"a75":255,"a90":290,"ohms":0.0515},
+  {"size":"300","a60":240,"a75":285,"a90":320,"ohms":0.0429},
+  {"size":"350","a60":260,"a75":310,"a90":350,"ohms":0.0367},
+  {"size":"400","a60":280,"a75":335,"a90":380,"ohms":0.0321},
+  {"size":"500","a60":320,"a75":380,"a90":430,"ohms":0.0258},
+  {"size":"600","a60":350,"a75":420,"a90":475,"ohms":0.0214},
+  {"size":"700","a60":385,"a75":460,"a90":520,"ohms":0.0184},
+  {"size":"750","a60":400,"a75":475,"a90":535,"ohms":0.0171},
+  {"size":"800","a60":410,"a75":490,"a90":555,"ohms":0.0161},
+  {"size":"900","a60":435,"a75":520,"a90":585,"ohms":0.0143},
+  {"size":"1000","a60":455,"a75":545,"a90":615,"ohms":0.0129}
+];
 
-let RT_TEMP_CORR = [{"label":"50\u00b0F (10\u00b0C) or less","tLowC":0.0,"f60":1.29,"f75":1.2,"f90":1.15},{"label":"51-59\u00b0F (11-15\u00b0C)","tLowC":11.0,"f60":1.22,"f75":1.15,"f90":1.12},{"label":"69-77\u00b0F (16-20\u00b0C)","tLowC":16.0,"f60":1.15,"f75":1.11,"f90":1.08},{"label":"78-86\u00b0F (21-25\u00b0C)","tLowC":21.0,"f60":1.08,"f75":1.05,"f90":1.04},{"label":"87-95\u00b0F (26-30\u00b0C)","tLowC":26.0,"f60":1.0,"f75":1.0,"f90":1.0},{"label":"96-104\u00b0F (31-35\u00b0C)","tLowC":31.0,"f60":0.91,"f75":0.94,"f90":0.96},{"label":"105-113\u00b0F (36-40\u00b0C)","tLowC":36.0,"f60":0.82,"f75":0.88,"f90":0.91},{"label":"114-122\u00b0F (41-45\u00b0C)","tLowC":41.0,"f60":0.71,"f75":0.82,"f90":0.87},{"label":"123-131\u00b0F (46-50\u00b0C)","tLowC":46.0,"f60":0.58,"f75":0.75,"f90":0.82},{"label":"132-140\u00b0F (51-55\u00b0C)","tLowC":51.0,"f60":0.41,"f75":0.67,"f90":0.76},{"label":"159-176\u00b0F (56-60\u00b0C)","tLowC":56.0,"f60":null,"f75":0.58,"f90":0.71},{"label":"141-149\u00b0F (61-65\u00b0C)","tLowC":61.0,"f60":null,"f75":0.47,"f90":0.65},{"label":"150-158\u00b0F (66-70\u00b0C)","tLowC":66.0,"f60":null,"f75":0.33,"f90":0.58},{"label":"159-167\u00b0F (71-75\u00b0C)","tLowC":71.0,"f60":null,"f75":null,"f90":0.5},{"label":"168-176\u00b0F (76-80\u00b0C)","tLowC":76.0,"f60":null,"f75":null,"f90":0.41},{"label":"177-185\u00b0F (81-85\u00b0C)","tLowC":81.0,"f60":null,"f75":null,"f90":0.29}];
+let RT_TEMP_CORR = [
+  {"label":"50°F (10°C) or less","tLowC":0,"f60":1.29,"f75":1.2,"f90":1.15},
+  {"label":"51-59°F (11-15°C)","tLowC":11,"f60":1.22,"f75":1.15,"f90":1.12},
+  {"label":"69-77°F (16-20°C)","tLowC":16,"f60":1.15,"f75":1.11,"f90":1.08},
+  {"label":"78-86°F (21-25°C)","tLowC":21,"f60":1.08,"f75":1.05,"f90":1.04},
+  {"label":"87-95°F (26-30°C)","tLowC":26,"f60":1,"f75":1,"f90":1},
+  {"label":"96-104°F (31-35°C)","tLowC":31,"f60":0.91,"f75":0.94,"f90":0.96},
+  {"label":"105-113°F (36-40°C)","tLowC":36,"f60":0.82,"f75":0.88,"f90":0.91},
+  {"label":"114-122°F (41-45°C)","tLowC":41,"f60":0.71,"f75":0.82,"f90":0.87},
+  {"label":"123-131°F (46-50°C)","tLowC":46,"f60":0.58,"f75":0.75,"f90":0.82},
+  {"label":"132-140°F (51-55°C)","tLowC":51,"f60":0.41,"f75":0.67,"f90":0.76},
+  {"label":"159-176°F (56-60°C)","tLowC":56,"f60":null,"f75":0.58,"f90":0.71},
+  {"label":"141-149°F (61-65°C)","tLowC":61,"f60":null,"f75":0.47,"f90":0.65},
+  {"label":"150-158°F (66-70°C)","tLowC":66,"f60":null,"f75":0.33,"f90":0.58},
+  {"label":"159-167°F (71-75°C)","tLowC":71,"f60":null,"f75":null,"f90":0.5},
+  {"label":"168-176°F (76-80°C)","tLowC":76,"f60":null,"f75":null,"f90":0.41},
+  {"label":"177-185°F (81-85°C)","tLowC":81,"f60":null,"f75":null,"f90":0.29}
+];
 
-let RT_HEIGHT_ADDER = [{"height":"0-0.5","adderC":33.0,"adderF":60.0},{"height":"0.5-3.5","adderC":22.0,"adderF":40.0},{"height":"3.5-12","adderC":17.0,"adderF":30.0},{"height":"12-36","adderC":14.0,"adderF":25.0},{"height":"N/A","adderC":0.0,"adderF":0.0}];
+let RT_HEIGHT_ADDER = [
+  {"height":"0-0.5","adderC":33,"adderF":60},
+  {"height":"0.5-3.5","adderC":22,"adderF":40},
+  {"height":"3.5-12","adderC":17,"adderF":30},
+  {"height":"12-36","adderC":14,"adderF":25},
+  {"height":"N/A","adderC":0,"adderF":0}
+];
 
-let RT_FILL_DERATING = [{"conductors":"1 - 3","factor":1.0},{"conductors":"4 - 6","factor":0.8},{"conductors":"7 - 9","factor":0.7},{"conductors":"10 - 20","factor":0.5},{"conductors":"21 - 30","factor":0.45},{"conductors":"31 - 40","factor":0.4},{"conductors":"> 40","factor":0.35}];
+let RT_FILL_DERATING = [
+  {"conductors":"1 - 3","factor":1},
+  {"conductors":"4 - 6","factor":0.8},
+  {"conductors":"7 - 9","factor":0.7},
+  {"conductors":"10 - 20","factor":0.5},
+  {"conductors":"21 - 30","factor":0.45},
+  {"conductors":"31 - 40","factor":0.4},
+  {"conductors":"> 40","factor":0.35}
+];
 
-let RT_EGC = [{"ocpd":15,"wire":"#10"},{"ocpd":20,"wire":"#10"},{"ocpd":60,"wire":"#10"},{"ocpd":100,"wire":"#8"},{"ocpd":200,"wire":"#6"},{"ocpd":300,"wire":"#4"},{"ocpd":400,"wire":"#3"},{"ocpd":500,"wire":"#2"},{"ocpd":600,"wire":"#1"},{"ocpd":800,"wire":"#1/0"},{"ocpd":1000,"wire":"#2/0"},{"ocpd":1200,"wire":"#3/0"},{"ocpd":1600,"wire":"#4/0"},{"ocpd":2000,"wire":"#250"},{"ocpd":2500,"wire":"#350"},{"ocpd":3000,"wire":"#400"},{"ocpd":4000,"wire":"#500"},{"ocpd":5000,"wire":"#700"},{"ocpd":6000,"wire":"#800"}];
+let RT_EGC = [
+  {"ocpd":15,"wire":"#10"},
+  {"ocpd":20,"wire":"#10"},
+  {"ocpd":60,"wire":"#10"},
+  {"ocpd":100,"wire":"#8"},
+  {"ocpd":200,"wire":"#6"},
+  {"ocpd":300,"wire":"#4"},
+  {"ocpd":400,"wire":"#3"},
+  {"ocpd":500,"wire":"#2"},
+  {"ocpd":600,"wire":"#1"},
+  {"ocpd":800,"wire":"#1/0"},
+  {"ocpd":1000,"wire":"#2/0"},
+  {"ocpd":1200,"wire":"#3/0"},
+  {"ocpd":1600,"wire":"#4/0"},
+  {"ocpd":2000,"wire":"#250"},
+  {"ocpd":2500,"wire":"#350"},
+  {"ocpd":3000,"wire":"#400"},
+  {"ocpd":4000,"wire":"#500"},
+  {"ocpd":5000,"wire":"#700"},
+  {"ocpd":6000,"wire":"#800"}
+];
 
-let RT_ESS = [{"config":"5 kWh w/o Backup","battCurrent":16,"ampacity":31.64,"breaker":40,"wire":"#8","egc":"#8","battAcd":30,"pvBattAcd":60},{"config":"10 kWh w/o Backup","battCurrent":32,"ampacity":51.64,"breaker":60,"wire":"#4","egc":"#6","battAcd":60,"pvBattAcd":60},{"config":"15 kWh w/o Backup","battCurrent":48,"ampacity":71.64,"breaker":80,"wire":"#2","egc":"#4","battAcd":60,"pvBattAcd":100},{"config":"20 kWh w/o Backup","battCurrent":64,"ampacity":91.64,"breaker":100,"wire":"#1","egc":"#3","battAcd":100,"pvBattAcd":100},{"config":"10 kWh w/ Backup","battCurrent":32,"ampacity":51.64,"breaker":60,"wire":"#4","egc":"#6","battAcd":60,"pvBattAcd":60},{"config":"15 kWh w/ Backup","battCurrent":48,"ampacity":71.64,"breaker":80,"wire":"#2","egc":"#4","battAcd":60,"pvBattAcd":100},{"config":"20 kWh w/ Backup","battCurrent":64,"ampacity":91.64,"breaker":100,"wire":"#1","egc":"#3","battAcd":100,"pvBattAcd":100}];
+let RT_ESS = [
+  {"config":"5 kWh w/o Backup","battCurrent":16,"ampacity":31.64,"breaker":40,"wire":"#8","egc":"#8","battAcd":30,"pvBattAcd":60},
+  {"config":"10 kWh w/o Backup","battCurrent":32,"ampacity":51.64,"breaker":60,"wire":"#4","egc":"#6","battAcd":60,"pvBattAcd":60},
+  {"config":"15 kWh w/o Backup","battCurrent":48,"ampacity":71.64,"breaker":80,"wire":"#2","egc":"#4","battAcd":60,"pvBattAcd":100},
+  {"config":"20 kWh w/o Backup","battCurrent":64,"ampacity":91.64,"breaker":100,"wire":"#1","egc":"#3","battAcd":100,"pvBattAcd":100},
+  {"config":"10 kWh w/ Backup","battCurrent":32,"ampacity":51.64,"breaker":60,"wire":"#4","egc":"#6","battAcd":60,"pvBattAcd":60},
+  {"config":"15 kWh w/ Backup","battCurrent":48,"ampacity":71.64,"breaker":80,"wire":"#2","egc":"#4","battAcd":60,"pvBattAcd":100},
+  {"config":"20 kWh w/ Backup","battCurrent":64,"ampacity":91.64,"breaker":100,"wire":"#1","egc":"#3","battAcd":100,"pvBattAcd":100}
+];
 
-let RT_BREAKERS = [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
+let RT_BREAKERS = [15,20,25,30,40,50,60,70,80,90,100,110,125,150,175,200];
 
 /**
  * Nominal AC service voltages.
@@ -1554,7 +2165,15 @@ let RT_JURISDICTION = [];
  * for a roof type would put a fastener on a stamped drawing that nobody
  * approved. It fills as you work — see roofRemember().
  */
-let RT_ROOF = [];
+let RT_ROOF = [
+  {"state":"","roofType":"Composite Shingle","attachment":"Pegasus Instaflash 2","attachmentSheet":"Attachment_Instaflash_2.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"S-Tile","attachment":"Pegasus Scissor Mount","attachmentSheet":"Attachment_Pegasus_Scissor_Mount.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"Flat-Tile","attachment":"Pegasus Scissor Mount","attachmentSheet":"Attachment_Pegasus_Scissor_Mount.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"W-Tile","attachment":"Pegasus Scissor Mount","attachmentSheet":"Attachment_Pegasus_Scissor_Mount.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"Standing Seam Metal","attachment":"S-5-U Clamp","attachmentSheet":"Attachment_S-5-U.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"Rolled Comp","attachment":"","attachmentSheet":null,"railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"},
+  {"state":"","roofType":"Ribbed Metal Roof","attachment":"Sunmodo MRB-S","attachmentSheet":"Attachment_MRB-S.pdf","railing":"Pegasus Rail System","railingSheet":"Racking_Pegasus_Rail_System.pdf"}
+];
 
 /**
  * Filename prefix per equipment, and the single source for every spec-sheet
@@ -1565,17 +2184,17 @@ let RT_ROOF = [];
  * datasheets ended up selectable for a battery, so blanks are worth filling in.
  */
 let RT_PREFIX = [
-  {equipment:"Module",                 prefix:"Module_"},
-  {equipment:"Inverter",               prefix:"Inverter_"},
-  {equipment:"Combiner",               prefix:"Combiner_"},
-  {equipment:"Attachment",             prefix:"Attachment_"},
-  {equipment:"Racking",                prefix:"Racking_"},
-  {equipment:"ESS",                    prefix:"ESS_"},
-  {equipment:"Gateway",                prefix:"Gateway_"},
-  {equipment:"Heat Detector",          prefix:"HD_"},
-  {equipment:"Bollard",                prefix:"Bollard_"},
-  {equipment:"System Shutdown Switch", prefix:"SSS_"},
-  {equipment:"EV",                     prefix:"EV_"}
+  {"equipment":"Module","prefix":"Module_"},
+  {"equipment":"Inverter","prefix":"Inverter_"},
+  {"equipment":"Combiner","prefix":"Combiner_"},
+  {"equipment":"Attachment","prefix":"Attachment_"},
+  {"equipment":"Racking","prefix":"Racking_"},
+  {"equipment":"ESS","prefix":"ESS_"},
+  {"equipment":"Gateway","prefix":"Gateway_"},
+  {"equipment":"Heat Detector","prefix":"HD_"},
+  {"equipment":"Bollard","prefix":"Bollard_"},
+  {"equipment":"System Shutdown Switch","prefix":"SSS_"},
+  {"equipment":"EV","prefix":"EV_"}
 ];
 
 const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
@@ -1588,15 +2207,16 @@ const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
 const MI_DEFAULT_VAC = 240;
 
 let RT_MI = [
-  // One model, one row per AC voltage. Identity is (miModel, Vac) — see
-  // keyFields on the RT_MI schema. acSize, Iac, invEff and the branch limits
-  // all differ between the 240 V and 208 V variants of the same part.
-  {miModel:"IQ7XS",         acSize:315, invEff:0.975, minBranch:2, maxBranch:12, Iac:1.31, Vac:240, specSheet:""},
-  {miModel:"IQ7XS",         acSize:315, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.51, Vac:208, specSheet:""},
-  {miModel:"IQ7HS-66-M-US", acSize:384, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.6,  Vac:240, specSheet:""},
-  {miModel:"IQ7HS-66-M-US", acSize:367, invEff:0.97,  minBranch:2, maxBranch:9,  Iac:1.77, Vac:208, specSheet:""},
-  {miModel:"IQ8MC-72-M-US", acSize:320, invEff:0.97,  minBranch:2, maxBranch:12, Iac:1.33, Vac:240, specSheet:""},
-  {miModel:"IQ8MC-72-M-US", acSize:310, invEff:0.97,  minBranch:2, maxBranch:10, Iac:1.49, Vac:208, specSheet:""}
+  {"miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.975,"minBranch":2,"maxBranch":12,"Iac":1.31,"Vac":240,"specSheet":"Inverter_IQ7XS.pdf"},
+  {"miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.51,"Vac":208,"specSheet":"Inverter_IQ7XS.pdf"},
+  {"miModel":"IQ7HS-66-M-US","acSize":384,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.6,"Vac":240,"specSheet":"Inverter_IQ7HS.pdf"},
+  {"miModel":"IQ7HS-66-M-US","acSize":367,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.77,"Vac":208,"specSheet":"Inverter_IQ7HS.pdf"},
+  {"miModel":"IQ8MC-72-M-US","acSize":320,"invEff":0.97,"minBranch":2,"maxBranch":12,"Iac":1.33,"Vac":240,"specSheet":"Inverter_IQ8MC.pdf"},
+  {"miModel":"IQ8MC-72-M-US","acSize":310,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.49,"Vac":208,"specSheet":"Inverter_IQ8MC.pdf"},
+  {"miModel":"IQ8X-80-M-DOM-US","acSize":380,"invEff":0.973,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8X.pdf"},
+  {"miModel":"IQ8X-80-M-DOM-US","acSize":360,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8X.pdf"},
+  {"miModel":"IQ8HC-72-M-DOM-US","acSize":380,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8HC.pdf"},
+  {"miModel":"IQ8HC-72-M-DOM-US","acSize":360,"invEff":0.965,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8HC.pdf"}
 ];
 
 /* Spec sheet database: which PDF in the "Spec Sheets" folder covers which
@@ -1604,29 +2224,20 @@ let RT_MI = [
    right sheets; blank model with always=true is included every time.
    `order` fixes the merge sequence so packages assemble consistently. */
 let SPEC_SHEETS = [
-  // Module, Inverter, Racking and Attachment are NOT here: they are linked on
-  // the equipment tables that own them (PV modules, Microinverters, and Roof,
-  // attachment & railing). Keeping copies here would let two sources disagree
-  // about which datasheet a project uses.
-  {"category":"Combiner","model":"IQ Combiner 5","file":"IQ-Combiner-5-5C-DSH-00007-8.0-EN-US-2025-12-29.pdf","order":25,"always":"false"},
-  // The three approved batteries. 'Type / model' is what the Battery dropdown on
-  // Project Information offers; set each one's PDF on this tab.
-  {"category":"ESS","model":"Powerwall 3","file":"","order":50,"always":"false"},
-  {"category":"ESS","model":"Enphase 5P","file":"","order":50,"always":"false"},
-  {"category":"ESS","model":"Enphase 10C","file":"","order":50,"always":"false"}
+  {"category":"Combiner","model":"IQ Combiner 5","file":"Combiner_IQ_5.pdf","order":25,"always":"false"},
+  {"category":"ESS","model":"Powerwall 3","file":"ESS_Powerwall_3.pdf","order":50,"always":"false"},
+  {"category":"ESS","model":"Enphase 5P","file":"ESS_IQ_Battery_5P.pdf","order":50,"always":"false"},
+  {"category":"ESS","model":"Enphase 10C","file":"ESS_IQ_Battery_10C.pdf","order":50,"always":"false"},
+  {"category":"Combiner","model":"IQ Combiner 6","file":"Combiner_IQ_6.pdf","order":25,"always":"false"}
 ];
 
 let MODULE_DB = [
-  // Electricals taken from the manufacturer datasheet for the exact power
-  // class. Wptc is the CEC PTC rating; it is left null where PTC could not be
-  // confirmed against the CEC PV Module List, because a guessed PTC would
-  // silently corrupt the CEC AC figure. A null Wptc simply shows "-".
-  {name:"Q.PEAK DUO BLK ML-G10.C+ 410", brand:"QCELLS",    Isc:11.11, Voc:45.31, Vmp:38.48, Imp:10.65, Wpeak:410, Wptc:381,   length:74,   width:41.1,  specSheet:""},
-  {name:"Q.TRON BLK M-G2.C+ 430",       brand:"QCELLS",    Isc:13.74, Voc:39.32, Vmp:32.94, Imp:13.05, Wpeak:430, Wptc:null,  length:67.8, width:44.6,  specSheet:""},
-  {name:"JAM54D41 440/MB",              brand:"JA SOLAR",  Isc:13.85, Voc:39.38, Vmp:33.37, Imp:13.18, Wpeak:440, Wptc:null,  length:67.8, width:44.65, specSheet:""},
-  {name:"SEG-440-BTD-BG",               brand:"SEG SOLAR", Isc:14.15, Voc:39.3,  Vmp:32.7,  Imp:13.46, Wpeak:440, Wptc:417.7, length:67.8, width:44.65, specSheet:""},
-  {name:"REC460AA Pure-RX-DC",          brand:"REC",       Isc:8.88,  Voc:65.7,  Vmp:54.9,  Imp:8.38,  Wpeak:460, Wptc:null,  length:68,   width:47.4,  specSheet:""},
-  {name:"REC470AA PURE-RX",             brand:"REC",       Isc:8.95,  Voc:65.7,  Vmp:55.4,  Imp:8.49,  Wpeak:470, Wptc:null,  length:68,   width:47.4,  specSheet:""}
+  {"name":"Q.PEAK DUO BLK ML-G10.C+ 410","brand":"QCELLS","Isc":11.11,"Voc":45.31,"Vmp":38.48,"Imp":10.65,"Wpeak":410,"Wptc":381,"length":74,"width":41.1,"specSheet":""},
+  {"name":"Q.TRON BLK M-G2.C+ 430","brand":"QCELLS","Isc":13.74,"Voc":39.32,"Vmp":32.94,"Imp":13.05,"Wpeak":430,"Wptc":null,"length":67.8,"width":44.6,"specSheet":"Module_Q.TRON BLK M-G2+.pdf"},
+  {"name":"JAM54D41 440/MB","brand":"JA SOLAR","Isc":13.85,"Voc":39.38,"Vmp":33.37,"Imp":13.18,"Wpeak":440,"Wptc":null,"length":67.8,"width":44.65,"specSheet":""},
+  {"name":"SEG-440-BTD-BG","brand":"SEG SOLAR","Isc":14.15,"Voc":39.3,"Vmp":32.7,"Imp":13.46,"Wpeak":440,"Wptc":417.7,"length":67.8,"width":44.65,"specSheet":""},
+  {"name":"REC460AA PURE-RX-DC","brand":"REC","Isc":8.88,"Voc":65.7,"Vmp":54.9,"Imp":8.38,"Wpeak":460,"Wptc":null,"length":68,"width":47.4,"specSheet":"Module_REC PURE-RX.pdf"},
+  {"name":"REC470AA PURE-RX-DC","brand":"REC","Isc":8.95,"Voc":65.7,"Vmp":55.4,"Imp":8.49,"Wpeak":470,"Wptc":null,"length":68,"width":47.4,"specSheet":"Module_REC PURE-RX.pdf"}
 ];
 
 
@@ -4871,8 +5482,61 @@ function specPopulateProjects() {
     : '<option value="">(no projects with a project.json)</option>';
 }
 
+let SPEC_FOLDER_SCANNED_AT = null;
+
+/**
+ * Re-read the Spec Sheets folder and repaint everything built from it.
+ *
+ * The listing used to be taken only at startup, when the folder was picked, and
+ * on the Spec Sheets Reload button — never when the Reference Data tab opened.
+ * So a PDF added while the tool was running stayed invisible there, and the
+ * dropdown said NOT IN FOLDER for a file that was plainly in the folder.
+ *
+ * `quiet` is for the automatic rescan when a view opens; the button passes false
+ * so the designer is told what changed.
+ */
+async function specRescan(quiet) {
+  if (!state.root) {
+    if (!quiet) showMsg("Choose the SPEED folder first.", "err");
+    return;
+  }
+  const before = (SPEC_FOLDER_FILES || []).map(f => f.name).join("\u0000");
+  await specLoadFolder();
+  const after = (SPEC_FOLDER_FILES || []).map(f => f.name).join("\u0000");
+  const changed = before !== after;
+
+  if (typeof rdCurrent !== "undefined" && $("view-reference").classList.contains("active")) {
+    rdRender(); rdValidate(true);
+  }
+  if (SPEC_PROJECT && $("view-spec").classList.contains("active")) specRefreshBuildState();
+  rdRenderScanInfo();
+
+  if (!quiet) {
+    const n = (SPEC_FOLDER_FILES || []).length;
+    showMsg(changed
+      ? `Rescanned ${SPEC_FOLDER}: ${n} PDF(s) \u2014 the list changed.`
+      : `Rescanned ${SPEC_FOLDER}: ${n} PDF(s), nothing new.`, "ok");
+  } else if (changed) {
+    showMsg(`${SPEC_FOLDER} changed \u2014 the file lists have been refreshed.`, "ok");
+  }
+}
+
+/** Say how many PDFs the dropdowns are working from, and when that was read. */
+function rdRenderScanInfo() {
+  const el = $("rd_scanInfo");
+  if (!el) return;
+  if (!state.root) { el.textContent = ""; return; }
+  const n = SPEC_FOLDER_FILES === null ? null : SPEC_FOLDER_FILES.length;
+  el.innerHTML = n === null
+    ? `<span style="color:var(--err)">No ${SPEC_FOLDER} folder.</span>`
+    : `Spec sheet dropdowns are working from <b>${n}</b> PDF(s)` +
+      (SPEC_FOLDER_SCANNED_AT
+        ? `, read at ${SPEC_FOLDER_SCANNED_AT.toLocaleTimeString()}` : "") + ".";
+}
+
 async function specLoadFolder() {
   SPEC_FOLDER_FILES = await specFolderFiles();
+  SPEC_FOLDER_SCANNED_AT = new Date();
   const box = $("specFolderStatus");
   if (!state.root) {
     box.innerHTML = `<span style="color:var(--warn)">Choose the SPEED folder first.</span>`;
@@ -5358,7 +6022,14 @@ async function specInit() {
 /** Views whose content is a wide table rather than prose. */
 const WIDE_VIEWS = new Set(["reference", "files"]);
 
+/** Views whose contents are built from the Spec Sheets listing. */
+const RESCAN_VIEWS = new Set(["reference", "spec"]);
+
 function showView(name) {
+  if (RESCAN_VIEWS.has(name) && state.root && typeof specRescan === "function") {
+    // Fire and forget: the view must not wait on the filesystem to appear.
+    specRescan(true).catch(e => console.warn("spec folder rescan:", e));
+  }
   document.body.classList.toggle("wide-view", WIDE_VIEWS.has(name));
   document.querySelectorAll(".view").forEach(v => {
     v.classList.toggle("active", v.id === "view-" + name);
@@ -5415,21 +6086,34 @@ function rdPopulateSelector() {
 }
 
 /**
- * How wide a reference-table column should be.
+ * Column widths for a reference table, as percentages that always total 100.
  *
- * Percentages rather than pixels so the table still fills the width on the
- * full-screen Reference Data view. Numbers are capped tightly because Isc and
- * Voc are four characters, while a model name or a filename is the whole point
- * of the row and must not be clipped.
+ * Proportional weights rather than fixed percentages. Fixed ones only work for
+ * a wide table: give a two-column table 9% + 11% and the other 80% has to go
+ * somewhere, and the browser hands it to the first column — which is why the
+ * row number column was swallowing half the screen on the narrow tables.
+ *
+ * Weights reflect what a column holds. Isc is four characters; a model name or
+ * a PDF filename is the point of the row and must not be clipped.
  */
-function rdColumnWidth(field, schema) {
-  if (field.type === "specfile") return "22%";
-  if (field.type === "number" || field.type === "int") return "6%";
-  if (Array.isArray(field.choices)) return "9%";
-  // The key columns identify the row, so they get the space.
+function rdColumnWeights(schema) {
   const keys = schema.keyFields || (schema.key ? [schema.key] : []);
-  if (keys.some(k => k === field.name)) return "16%";
-  return "11%";
+  return (schema.fields || []).map(f => {
+    if (f.type === "specfile") return 3.4;
+    if (f.type === "number" || f.type === "int") return 1;
+    if (Array.isArray(f.choices)) return 1.4;
+    return keys.some(k => k === f.name) ? 2.4 : 2;
+  });
+}
+
+/** [rowNumber, ...fields, actions] as percentages summing to 100. */
+function rdColumnWidths(schema) {
+  const NUM = 3.5, ACT = 6.5;                 // the # and Delete columns
+  const w = rdColumnWeights(schema);
+  const total = w.reduce((a, b) => a + b, 0) || 1;
+  const share = 100 - NUM - ACT;
+  return [NUM].concat(w.map(x => x / total * share)).concat([ACT])
+    .map(x => x.toFixed(2) + "%");
 }
 
 function rdRender() {
@@ -5445,16 +6129,17 @@ function rdRender() {
     (RD_DIRTY.has(name)
       ? ` &middot; <strong style="color:var(--warn)">unsaved changes</strong>` : "");
   $("rd_note").innerHTML = schema.note || "";
+  rdRenderScanInfo();
 
   // Header
-  // Width by what the column actually holds. Numbers need very little; a model
-  // name or a PDF filename needs most of the row, and truncating those is what
-  // makes the table unreadable.
+  // Widths total 100%, so nothing is left over for the row-number column to
+  // absorb. table-layout:fixed makes them authoritative rather than advisory.
+  const cw = rdColumnWidths(schema);
   $("rd_head").innerHTML =
-    '<th style="width:40px">#</th>' +
-    schema.fields.map(f =>
-      `<th style="width:${rdColumnWidth(f, schema)}">${f.label || f.name}</th>`).join("") +
-    '<th style="width:74px"></th>';
+    `<th style="width:${cw[0]}">#</th>` +
+    schema.fields.map((f, i) =>
+      `<th style="width:${cw[i + 1]}">${f.label || f.name}</th>`).join("") +
+    `<th style="width:${cw[cw.length - 1]}"></th>`;
 
   // Filter, remembering each row's true index.
   const indexed = rows.map((r, i) => ({ r, i }));
@@ -5511,7 +6196,7 @@ function rdRender() {
             return `<td><select data-i="${i}" data-f="${f.name}"${
               val && !listed ? ' style="border-color:var(--err)"' : ""}>${opts.join("")}</select></td>`;
           }
-          return `<td><input data-i="${i}" data-f="${f.name}" value="${
+          return `<td><input class="${f.type === "number" || f.type === "int" ? "num" : "txt"}" data-i="${i}" data-f="${f.name}" value="${
             val.replace(/"/g, "&quot;")}"></td>`;
         }).join("");
     return `<tr><td class="hint" style="padding-left:8px">${i + 1}</td>${cells}` +
@@ -5605,6 +6290,8 @@ function rdInit() {
   rdValidate(true);
 
   $("rd_search").addEventListener("input", rdRender);
+
+  $("rd_rescan").addEventListener("click", () => specRescan(false));
 
   $("rd_add").addEventListener("click", () => {
     getTable(rdCurrent).push(blankRow(rdCurrent));

@@ -3,6 +3,142 @@
 Bump `APP_VERSION` and `APP_BUILD` in `SPEED.html` with every release, and tag
 the commit. Never encode the version in the filename — see the README.
 
+## 2.22.0 — 2026-08-06
+
+### The shared folder's reference data is now baked in at every release
+
+`tools/bake-reference-data.js` copies the shared SPEED folder's `Reference Data`
+into `SPEED.html`'s built-in tables. It runs on **every** release from now on.
+
+The folder always overrode the built-ins at run time, so anyone with it connected
+was already right. The built-ins were for everyone else — and they had drifted
+months out of date: `IQ7XS` instead of `IQ7XS-96-2-US`, no roof types at all,
+eight city names with a stray space before the comma.
+
+Six tables changed:
+
+| Table | |
+|---|---|
+| `RT_MI` | 6 → **10** rows; adds IQ8X and IQ8HC, corrects IQ7XS to `IQ7XS-96-2-US` |
+| `RT_ROOF` | 0 → **7** roof types, each with its attachment and racking sheets |
+| `SPEC_SHEETS` | combiners and batteries pointed at the PDFs that actually exist |
+| `MODULE_DB` | REC naming corrected, spec sheets linked |
+| `RT_LOCATION` | 8 city names cleaned (`Anderson , CA` → `Anderson, CA`) |
+| `RT_BREAKERS` | 17 → **16** — see below |
+
+Verified after baking: all fourteen built-in tables are byte-identical to the
+shared folder.
+
+### ⚠ 35 A is no longer a standard OCPD rating in the shipped default
+
+`RT_BREAKERS` in the shared folder does not contain **35**, and baking has now
+carried that into the built-ins for everyone. NEC 240.6(A) does list 35 A, so a
+design calling for it will size up to a 40 A breaker.
+
+That is either deliberate — SunPower may not stock 35 A — or an editing slip.
+Either way it is now the default for every designer rather than one folder. To
+restore it, add `35` to `Standard OCPD ratings`, save to folder, and re-bake.
+
+### Safety in the bake
+
+- A table failing `validateTable` is **never** baked. Nothing is written at all —
+  shipping broken reference data to every designer is worse than shipping stale.
+- A dry run prints added / removed / changed rows per table. `--write` is
+  required to apply.
+- A table with no file in the folder keeps its built-in. Absence is not an
+  instruction to empty it.
+
+### Tests now assert properties, not data
+
+Seventeen tests broke on the first bake — every one pinned to a specific model
+name or row count. That is the predictable cost of making the data live, and the
+fix is to test what must always be true rather than what happened to be there:
+
+- `17 standard breaker sizes` → **sorted ascending, all positive**
+- `6 microinverters` → **every model listed at both 240 V and 208 V**
+- `exactly the six approved models` → **non-empty, no duplicate names**
+
+Arithmetic tests now run against a fixed `TEST-MODULE-410` / `TEST-MI` fixture
+appended to the live tables. A conductor calculation is right or wrong regardless
+of which modules are stocked this month, so renaming a module can no longer break
+a maths test.
+
+361 passing.
+
+## 2.21.0 — 2026-08-06
+
+### Fixes: a new PDF stayed invisible until several reloads
+
+The Spec Sheets folder listing was read at startup, when the folder was picked,
+and on the Spec Sheets **Reload** button — **never when the Reference Data tab was
+opened**. Those dropdowns are built from that listing, so a PDF dropped into the
+folder while the tool was running showed as **NOT IN FOLDER** for a file that was
+plainly there.
+
+Now:
+
+- **Opening Reference Data or Spec Sheets rescans the folder**, and repaints
+  whatever is on screen. It runs in the background so the tab still switches
+  instantly, and only speaks up if the list actually changed.
+- **Rescan Spec Sheets** button on the Reference Data tab for an explicit check,
+  which reports whether anything is new.
+- A line under the table says what the dropdowns are working from:
+  *"Spec sheet dropdowns are working from 16 PDF(s), read at 14:32."* So a stale
+  list is visible rather than something to guess at.
+
+### If it still says NOT IN FOLDER after a rescan
+
+Two causes outside the tool, worth knowing apart:
+
+- **OneDrive has not finished syncing.** The Spec Sheets folder is in a
+  Teams-synced library, so a file added on another machine exists in Explorer as
+  a cloud placeholder before it is really there. The tool reads what Windows
+  reports.
+- **The name does not match its prefix.** `Module_REC PURE-RX.pdf` must exist
+  spelled exactly that way, spaces included. Matching ignores case but nothing
+  else.
+
+## 2.20.2 — 2026-08-06
+
+### Column widths, properly this time
+
+2.20.1 gave each column a fixed percentage. That works for a wide table and fails
+badly for a narrow one: give a two-column table 9% + 11% and the remaining 80% has
+to go somewhere, and the browser gives it to the first column. Hence the row
+number column swallowing half the screen on **Spec sheet prefixes**, **Standard
+OCPD ratings**, **Conductor fill derating** and the rest.
+
+Widths are now **proportional weights normalised to exactly 100%**, so there is no
+leftover to absorb:
+
+| Column holds | Weight |
+|---|---|
+| A number | 1 |
+| A fixed set of choices | 1.4 |
+| Text | 2 |
+| A key column | 2.4 |
+| A spec-sheet filename | 3.4 |
+
+Every table sums to 100%, verified by a test. `Standard OCPD ratings` gives its
+single column 90%; `PV modules` gives the model name 13.7%, each number 5.7% and
+the spec sheet 19.4%.
+
+`table-layout: fixed` makes those widths authoritative, so a long filename can no
+longer stretch its own column and squeeze the rest.
+
+### The input is capped, not the column
+
+A one-column table has to fill the row, but a two-digit breaker rating in a
+90%-wide box looks broken. Numeric inputs are capped at 110px while their column
+still spans the table — so the layout is even and the controls are sized to what
+they hold.
+
+### Tests
+
+361 passing, up from 358. Seven on widths, including that every table totals
+exactly 100%, that the row-number column is never above 5% in any table, and that
+a table of only numbers still shares the row evenly rather than leaving a gap.
+
 ## 2.20.1 — 2026-08-06
 
 ### Fixes: the Roof type dropdown was empty even with the table loaded

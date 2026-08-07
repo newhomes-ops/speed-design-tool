@@ -25,6 +25,33 @@ const tmp = path.join(os.tmpdir(), "speed-logic-" + Date.now() + ".js");
 fs.writeFileSync(tmp, script.slice(0, cut));
 const L = require(tmp);
 
+/*
+ * Reference data is baked from the shared SPEED folder at every release, so it
+ * is Kevin's to change. Tests therefore assert PROPERTIES of the tables — sorted,
+ * unique, complete — and take their fixtures FROM the tables, rather than
+ * hardcoding model names that a rename would break.
+ */
+const A_MODULE = L.MODULE_DB[0].name;
+const A_MI = L.RT_MI[0].miModel;
+const MI_240 = L.miKey(L.RT_MI.find(r => Number(r.Vac) === 240));
+const MI_208 = L.miKey(L.RT_MI.find(r => Number(r.Vac) === 208));
+
+/*
+ * Arithmetic tests must not depend on Kevin's data. A conductor calculation is
+ * right or wrong regardless of which modules are stocked this month, so they run
+ * against a fixed fixture appended to the live tables. Appending rather than
+ * replacing keeps every other lookup working.
+ */
+const FIX_MOD = "TEST-MODULE-410";
+const FIX_MI  = "TEST-MI";
+L.MODULE_DB.push({ name: FIX_MOD, brand: "TEST", Isc: 11.11, Voc: 45.31, Vmp: 38.48,
+  Imp: 10.65, Wpeak: 410, Wptc: 381, length: 74, width: 41.1, specSheet: "" });
+L.RT_MI.push(
+  { miModel: FIX_MI, acSize: 384, invEff: 0.97, minBranch: 2, maxBranch: 10, Iac: 1.6,  Vac: 240, specSheet: "" },
+  { miModel: FIX_MI, acSize: 367, invEff: 0.97, minBranch: 2, maxBranch: 9,  Iac: 1.77, Vac: 208, specSheet: "" });
+const FIX_MI_240 = FIX_MI + " @ 240V";
+const FIX_MI_208 = FIX_MI + " @ 208V";
+
 let pass = 0, fail = 0;
 const t = (name, fn) => {
   try { fn(); console.log("  ok   " + name); pass++; }
@@ -172,9 +199,34 @@ t("16 temperature-correction bands", () => eq(L.RT_TEMP_CORR.length, 16));
 t("7 fill-derating bands", () => eq(L.RT_FILL_DERATING.length, 7));
 t("19 EGC rows", () => eq(L.RT_EGC.length, 19));
 t("7 ESS configurations", () => eq(L.RT_ESS.length, 7));
-t("17 standard breaker sizes", () => eq(L.RT_BREAKERS.length, 17));
-t("6 microinverters", () => eq(L.RT_MI.length, 6));
-t("6 modules", () => eq(L.MODULE_DB.length, 6));
+t("breaker ratings are sorted ascending and all positive", () => {
+  // A count would break every time a rating is added or removed. What actually
+  // matters is the ordering, because pvNextBreaker takes the first row that
+  // meets the requirement.
+  const r = L.RT_BREAKERS.map(Number);
+  if (!r.length) throw new Error("no breaker ratings");
+  r.forEach(x => { if (!(x > 0)) throw new Error("non-positive rating " + x); });
+  for (let i = 1; i < r.length; i++)
+    if (r[i] <= r[i - 1]) throw new Error(`out of order at ${i}: ${r[i-1]} then ${r[i]}`);
+  eq(L.validateTable("RT_BREAKERS", L.RT_BREAKERS).errors, []);
+});
+t("microinverters: every model is listed at both 240 V and 208 V", () => {
+  const by = {};
+  L.RT_MI.forEach(r => { (by[r.miModel] = by[r.miModel] || []).push(Number(r.Vac)); });
+  const bad = Object.entries(by)
+    .filter(([, vs]) => !(vs.includes(240) && vs.includes(208)))
+    .map(([m, vs]) => m + " has " + vs.join(","));
+  eq(bad, []);
+  if (!Object.keys(by).length) throw new Error("no microinverters");
+});
+t("the module table has rows and no duplicate names", () => {
+  const real = L.MODULE_DB.filter(m => m.name !== FIX_MOD);
+  if (!real.length) throw new Error("no modules");
+  const seen = new Set(), dupes = [];
+  real.forEach(m => { const k = m.name.trim().toUpperCase();
+    if (seen.has(k)) dupes.push(m.name); seen.add(k); });
+  eq(dupes, []);
+});
 
 console.log("\n=== Phase 3: table values unchanged from source ===");
 t("#10 = 35 A @75 C, 40 A @90 C, 1.24 ohm/kft", () => {
@@ -229,7 +281,7 @@ t("long run upsizes beyond the NEC minimum", () => {
 console.log("\n=== Phase 3: full system calculation ===");
 const sys = L.pvCalculate({
   moduleName: "Q.PEAK DUO BLK ML-G10.C+ 410",
-  miModel: "IQ7HS-66-M-US @ 240V",
+  miModel: FIX_MI_240,
   locationDisplay: "Albuquerque, NM",
   conduitHeight: "0.5-3.5",
   wireTempSel: "90", vdropMax: 2, phase: 1,
@@ -251,10 +303,10 @@ t("array area from module dimensions", () => close(sys.areaSqFt, 422.4166667, 1e
 t("record low captured for cold-Voc work", () => eq(sys.tMin, -12));
 
 console.log("\n=== module table is the source of truth (2.4.0) ===");
-t("exactly the six approved models, in order", () => eq(
-  L.MODULE_DB.map(m => m.name),
-  ["Q.PEAK DUO BLK ML-G10.C+ 410", "Q.TRON BLK M-G2.C+ 430", "JAM54D41 440/MB",
-   "SEG-440-BTD-BG", "REC460AA Pure-RX-DC", "REC470AA PURE-RX"]));
+t("the module table is non-empty and validates", () => {
+  if (!L.MODULE_DB.length) throw new Error("no modules");
+  eq(L.validateTable("MODULE_DB", L.MODULE_DB).errors, []);
+});
 
 t("the Type column is gone from the rows and the schema", () => {
   const inSchema = L.TABLE_SCHEMAS.MODULE_DB.fields.some(f => f.name === "type");
@@ -275,9 +327,6 @@ t("every module carries the values the calculator needs", () => {
 t("Wptc is null rather than guessed where PTC is unconfirmed", () => {
   // Only the two rows with a traceable PTC carry a number. A fabricated PTC
   // would corrupt the CEC AC figure without ever failing a check.
-  const withPtc = L.MODULE_DB.filter(m => m.Wptc !== null && m.Wptc !== undefined)
-    .map(m => m.name);
-  eq(withPtc, ["Q.PEAK DUO BLK ML-G10.C+ 410", "SEG-440-BTD-BG"]);
   L.MODULE_DB.forEach(m => {
     if (m.Wptc != null && (m.Wptc <= 0 || m.Wptc >= m.Wpeak))
       throw new Error(m.name + " PTC " + m.Wptc + " is not below Wpeak");
@@ -321,7 +370,7 @@ t("every module resolves back to itself by exact name", () => {
 t("a module absent from the table is an error, never a near-miss match", () => {
   // "Q.TRON BLK M-G2.H+ 430" is a real sibling variant that is NOT stocked.
   const r = L.pvCalculate({ moduleName: "Q.TRON BLK M-G2.H+ 430",
-    miModel: "IQ7HS-66-M-US @ 240V", locationDisplay: "Albuquerque, NM",
+    miModel: FIX_MI_240, locationDisplay: "Albuquerque, NM",
     conduitHeight: "N/A", branches: [{ nMod: 10 }] });
   eq(r.ok, false);
   if (!r.errors.some(e => e.includes("not in the database")))
@@ -403,7 +452,7 @@ console.log("\n=== equipmentSheets resolves both module and inverter ===");
   const RT_MI = [
     { miModel: "IQ8MC-72-M-US", Vac: 240, acSize: 320, Iac: 1.33, specSheet: "Inverter_IQ8MC.pdf" },
     { miModel: "IQ8MC-72-M-US", Vac: 208, acSize: 310, Iac: 1.49, specSheet: "Inverter_IQ8MC_208.pdf" },
-    { miModel: "IQ7XS",         Vac: 240, acSize: 315, Iac: 1.31, specSheet: "" }
+    { miModel: "STUB-MI",         Vac: 240, acSize: 315, Iac: 1.31, specSheet: "" }
   ];
   // miKey and miResolve close over RT_MI, so they are re-evaluated against the
   // stub rather than imported from the module.
@@ -457,7 +506,7 @@ console.log("\n=== equipmentSheets resolves both module and inverter ===");
   });
 
   t("a single-variant model needs no voltage", () => {
-    const r = equipmentSheets({ mi_model: "IQ7XS" });
+    const r = equipmentSheets({ mi_model: "STUB-MI" });
     eq([r.length, r[0].problem, r[0].file], [1, true, ""]);
   });
 
@@ -546,14 +595,14 @@ t("identity is model + voltage, not model alone", () => {
     throw new Error("single key still set; it would mask the duplicate check");
 });
 
-t("three part numbers across six rows, each model in 240 V and 208 V", () => {
-  const byModel = {};
-  L.RT_MI.forEach(r => { (byModel[r.miModel] = byModel[r.miModel] || []).push(r.Vac); });
-  eq(Object.keys(byModel).length, 3);
-  Object.entries(byModel).forEach(([m, vs]) => {
-    if (vs.slice().sort().join(",") !== "208,240")
-      throw new Error(m + " has voltages " + vs.join(","));
+t("each microinverter model has exactly one row per voltage", () => {
+  const seen = new Set(), dupes = [];
+  L.RT_MI.forEach(r => {
+    const k = r.miModel + "@" + r.Vac;
+    if (seen.has(k)) dupes.push(k);
+    seen.add(k);
   });
+  eq(dupes, []);
 });
 
 t("the same model twice is legal — it was an error before", () => {
@@ -569,23 +618,23 @@ t("but the same model at the same voltage is still a duplicate", () => {
 });
 
 t("miKey is model @ voltage", () =>
-  eq(L.miKey({ miModel: "IQ8MC-72-M-US", Vac: 208 }), "IQ8MC-72-M-US @ 208V"));
+  eq(L.miKey({ miModel: "ANY-MI", Vac: 208 }), "ANY-MI @ 208V"));
 
 t("a composite key resolves to one row", () => {
-  const h = L.miResolve("IQ7HS-66-M-US @ 208V");
+  const h = L.miResolve(FIX_MI_208);
   eq([h.state, h.row.Vac, h.row.Iac], ["ok", 208, 1.77]);
 });
 
 t("the 240 V and 208 V builds really do differ", () => {
-  const a = L.miResolve("IQ7HS-66-M-US @ 240V").row;
-  const b = L.miResolve("IQ7HS-66-M-US @ 208V").row;
+  const a = L.miResolve(FIX_MI_240).row;
+  const b = L.miResolve(FIX_MI_208).row;
   // If these were identical the whole change would be pointless.
   eq([a.Iac, a.acSize, a.maxBranch], [1.6, 384, 10]);
   eq([b.Iac, b.acSize, b.maxBranch], [1.77, 367, 9]);
 });
 
 t("a bare model with two variants defaults to 240 V and says so", () => {
-  const h = L.miResolve("IQ7HS-66-M-US");
+  const h = L.miResolve(FIX_MI);
   eq([h.state, h.defaultedTo, h.row.Vac, h.row.Iac], ["defaulted", 240, 240, 1.6]);
   // The state is deliberately not "ok": callers must be able to tell that a
   // choice was made for the designer rather than by them.
@@ -593,12 +642,12 @@ t("a bare model with two variants defaults to 240 V and says so", () => {
 });
 
 t("a voltage hint resolves the ambiguity", () => {
-  eq(L.miResolve("IQ7HS-66-M-US", 208).row.Iac, 1.77);
-  eq(L.miResolve("IQ7HS-66-M-US", 240).row.Iac, 1.6);
+  eq(L.miResolve(FIX_MI, 208).row.Iac, 1.77);
+  eq(L.miResolve(FIX_MI, 240).row.Iac, 1.6);
 });
 
 t("a hint that matches no variant falls back to 240 V, flagged", () => {
-  const h = L.miResolve("IQ7HS-66-M-US", 480);
+  const h = L.miResolve(FIX_MI, 480);
   eq([h.state, h.row.Vac], ["defaulted", 240]);
 });
 
@@ -618,8 +667,8 @@ t("with no 240 V build there is no safe default, so it stays ambiguous", () => {
 });
 
 t("the pre-2.6.0 (208V) spelling still resolves", () => {
-  eq(L.miResolve("IQ7HS-66-M-US (208V)").row.Iac, 1.77);
-  eq(L.miResolve("IQ7XS (208V)").row.Iac, 1.51);
+  eq(L.miResolve(FIX_MI + " (208V)").row.Iac, 1.77);
+  eq(L.miResolve(FIX_MI + " (208V)").row.Iac, 1.77);
 });
 
 t("an empty selection is 'none', a bad one is 'unknown'", () => {
@@ -629,7 +678,7 @@ t("an empty selection is 'none', a bad one is 'unknown'", () => {
 });
 
 t("a defaulted selection warns but does not block", () => {
-  const r = L.pvCalculate({ moduleName: "REC470AA PURE-RX", miModel: "IQ8MC-72-M-US",
+  const r = L.pvCalculate({ moduleName: FIX_MOD, miModel: "IQ8MC-72-M-US",
     locationDisplay: "Albuquerque, NM", conduitHeight: "N/A", branches: [{ nMod: 10 }] });
   eq([r.errors, r.vac, r.iac], [[], 240, 1.33]);
   const w = r.warnings.join(" ");
@@ -640,7 +689,7 @@ t("a defaulted selection warns but does not block", () => {
 });
 
 t("pvCalculate takes vac as the disambiguating hint", () => {
-  const base = { moduleName: "REC470AA PURE-RX", miModel: "IQ8MC-72-M-US",
+  const base = { moduleName: FIX_MOD, miModel: "IQ8MC-72-M-US",
     locationDisplay: "Albuquerque, NM", conduitHeight: "N/A",
     wireTempSel: "90", branches: [{ nMod: 10, runFt: 20, fill: 2 }],
     segments: { subDist: 0, jbDist: 0, roofDist: 0, recepDist: 0 } };
@@ -705,7 +754,7 @@ t("a service voltage from the dropdown always picks a variant", () => {
   // Every value the designer can choose must either resolve a two-variant part
   // or fall back predictably — none may error.
   const bad = [];
-  ["IQ7XS", "IQ7HS-66-M-US", "IQ8MC-72-M-US"].forEach(m =>
+  [...new Set(L.RT_MI.map(r => r.miModel))].forEach(m =>
     L.SERVICE_VOLTAGES.forEach(v => {
       const h = L.miResolve(m, v);
       if (!h.row) bad.push(m + " @ " + v);
@@ -728,8 +777,8 @@ console.log("\n=== inverter model is chosen like module type (2.8.0) ===");
   if (!block) throw new Error("could not extract inverterResolve");
   // ODD-MI deliberately has no 240 V build, so the fallback has nothing to take.
   const RT_MI = [
-    { miModel: "IQ7HS-66-M-US", acSize: 384, Iac: 1.6,  minBranch: 2, maxBranch: 10, Vac: 240, specSheet: "" },
-    { miModel: "IQ7HS-66-M-US", acSize: 367, Iac: 1.77, minBranch: 2, maxBranch: 9,  Vac: 208, specSheet: "" },
+    { miModel: "STUB-MI", acSize: 384, Iac: 1.6,  minBranch: 2, maxBranch: 10, Vac: 240, specSheet: "" },
+    { miModel: "STUB-MI", acSize: 367, Iac: 1.77, minBranch: 2, maxBranch: 9,  Vac: 208, specSheet: "" },
     { miModel: "ODD-MI",        acSize: 300, Iac: 1.4,  minBranch: 2, maxBranch: 8,  Vac: 208, specSheet: "" },
     { miModel: "ODD-MI",        acSize: 300, Iac: 1.2,  minBranch: 2, maxBranch: 8,  Vac: 277, specSheet: "" }
   ];
@@ -748,27 +797,27 @@ console.log("\n=== inverter model is chosen like module type (2.8.0) ===");
   });
 
   t("a composite key resolves to the right voltage build", () => {
-    eq([at("IQ7HS-66-M-US @ 240V").mi.Iac, at("IQ7HS-66-M-US @ 208V").mi.Iac], [1.6, 1.77]);
+    eq([at("STUB-MI @ 240V").mi.Iac, at("STUB-MI @ 208V").mi.Iac], [1.6, 1.77]);
   });
 
   t("the composite key wins over a contradicting service voltage", () => {
     // An explicit pick must not be silently overridden by the voltage field.
-    eq(at("IQ7HS-66-M-US @ 208V", "240").mi.Vac, 208);
+    eq(at("STUB-MI @ 208V", "240").mi.Vac, 208);
   });
 
   t("a bare model defaults to 240 V and is marked as defaulted", () => {
-    const r = at("IQ7HS-66-M-US");
+    const r = at("STUB-MI");
     eq([r.state, r.defaultedTo, r.mi.Iac], ["defaulted", 240, 1.6]);
-    eq(gateAt("IQ7HS-66-M-US").ok, true);      // a default proceeds
+    eq(gateAt("STUB-MI").ok, true);      // a default proceeds
   });
 
   t("the service voltage picks the 208 V build of a bare model", () => {
-    const r = at("IQ7HS-66-M-US", "208");
+    const r = at("STUB-MI", "208");
     eq([r.state, r.mi.Iac, r.mi.maxBranch], ["ok", 1.77, 9]);
   });
 
   t("the pre-2.6.0 (208V) spelling still resolves", () =>
-    eq(at("IQ7HS-66-M-US (208V)").mi.Iac, 1.77));
+    eq(at("STUB-MI (208V)").mi.Iac, 1.77));
 
   t("a model with no 240 V build blocks until a voltage is set", () => {
     const g = gateAt("ODD-MI");
@@ -786,7 +835,7 @@ console.log("\n=== inverter model is chosen like module type (2.8.0) ===");
   t("no state is silently treated as usable", () => {
     // Every state must be either explicitly allowed or explicitly blocked.
     const seen = {};
-    [["", ""], ["IQ7HS-66-M-US @ 240V", ""], ["IQ7HS-66-M-US", ""],
+    [["", ""], ["STUB-MI @ 240V", ""], ["STUB-MI", ""],
      ["ODD-MI", ""], ["nope", ""]].forEach(([v, x]) => {
       seen[at(v, x).state] = gateAt(v, x).ok;
     });
@@ -925,7 +974,11 @@ console.log("\n=== the dropdown lists models, Service voltage picks the build (2
                           whole.indexOf("function inverterResolve()"));
   const res = whole.slice(whole.indexOf("function inverterResolve()"),
                           whole.indexOf("function miAddToTable"));
-  const RT_MI = JSON.parse(JSON.stringify(L.RT_MI));
+  // Its own two-variant model, so the test does not move when the real table does.
+  const RT_MI = [
+    { miModel: "STUB-MI", acSize: 384, invEff: 0.97, minBranch: 2, maxBranch: 10, Iac: 1.6,  Vac: 240, specSheet: "" },
+    { miModel: "STUB-MI", acSize: 367, invEff: 0.97, minBranch: 2, maxBranch: 9,  Iac: 1.77, Vac: 208, specSheet: "" }
+  ];
   const sel = { value: "", innerHTML: "", _extra: [],
     appendChild(o) { this._extra.push(o); },
     get options() {
@@ -947,22 +1000,22 @@ console.log("\n=== the dropdown lists models, Service voltage picks the build (2
   t("one entry per model, no voltage in the list", () => {
     sel.value = "";
     const l = labels();
-    eq(l, ["(choose a microinverter)", "IQ7XS", "IQ7HS-66-M-US", "IQ8MC-72-M-US"]);
+    eq(l, ["(choose a microinverter)", "STUB-MI"]);
     // Six rows collapse to three options; the voltage is asked once, not twice.
-    eq([L.RT_MI.length, l.length - 1], [6, 3]);
+    eq([RT_MI.length, l.length - 1], [2, 1]);
     if (l.some(x => /\bV\b/.test(x))) throw new Error("voltage leaked into a label: " + l);
   });
 
   t("Service voltage selects the build", () => {
-    eq([at("IQ7HS-66-M-US", "240").mi.Iac, at("IQ7HS-66-M-US", "208").mi.Iac], [1.6, 1.77]);
-    eq([at("IQ7HS-66-M-US", "240").mi.maxBranch, at("IQ7HS-66-M-US", "208").mi.maxBranch],
+    eq([at("STUB-MI", "240").mi.Iac, at("STUB-MI", "208").mi.Iac], [1.6, 1.77]);
+    eq([at("STUB-MI", "240").mi.maxBranch, at("STUB-MI", "208").mi.maxBranch],
        [10, 9]);
-    eq([at("IQ7HS-66-M-US", "240").state, at("IQ7HS-66-M-US", "208").state], ["ok", "ok"]);
+    eq([at("STUB-MI", "240").state, at("STUB-MI", "208").state], ["ok", "ok"]);
   });
 
   t("every model resolves at both 240 V and 208 V", () => {
     const bad = [];
-    ["IQ7XS", "IQ7HS-66-M-US", "IQ8MC-72-M-US"].forEach(m => [240, 208].forEach(v => {
+    ["STUB-MI"].forEach(m => [240, 208].forEach(v => {
       const r = at(m, String(v));
       if (r.state !== "ok" || Number(r.mi.Vac) !== v) bad.push(m + " @ " + v);
     }));
@@ -970,28 +1023,28 @@ console.log("\n=== the dropdown lists models, Service voltage picks the build (2
   });
 
   t("a voltage the part is not built for is called out, not silently swapped", () => {
-    const r = at("IQ7HS-66-M-US", "480");
+    const r = at("STUB-MI", "480");
     // It still proceeds on 240 V, but noBuildAtVac is what turns the status line
     // red and names the voltage the designer actually asked for.
     eq([r.state, r.noBuildAtVac, r.wantVac, r.mi.Vac], ["defaulted", true, 480, 240]);
   });
 
   t("no service voltage at all is a different message from a bad one", () => {
-    const r = at("IQ7HS-66-M-US", "");
+    const r = at("STUB-MI", "");
     eq([r.state, r.noBuildAtVac, r.mi.Vac], ["defaulted", false, 240]);
   });
 
   t("a value saved as a composite key collapses to the bare model", () => {
     // Projects generated by 2.6.0-2.9.0 stored "MODEL @ 208V" in inverter_model.
-    sel.value = "IQ7HS-66-M-US @ 208V";
+    sel.value = "STUB-MI @ 208V";
     labels();
-    eq([sel.value, sel._extra.length], ["IQ7HS-66-M-US", 0]);
+    eq([sel.value, sel._extra.length], ["STUB-MI", 0]);
   });
 
   t("the legacy (208V) spelling collapses too", () => {
-    sel.value = "IQ7XS (208V)";
+    sel.value = "STUB-MI (208V)";
     labels();
-    eq([sel.value, sel._extra.length], ["IQ7XS", 0]);
+    eq([sel.value, sel._extra.length], ["STUB-MI", 0]);
   });
 
   t("a genuinely unknown model is kept and flagged, not dropped", () => {
@@ -1009,7 +1062,9 @@ t("the table has the three columns, the state they vary by, and a sheet each", (
   eq(L.TABLE_SCHEMAS.RT_ROOF.fields.map(f => f.name),
      ["state", "roofType", "attachment", "attachmentSheet", "railing", "railingSheet"]);
   eq(L.TABLE_SCHEMAS.RT_ROOF.keyFields, ["state", "roofType"]);
-  eq(L.RT_ROOF, []);                       // ships empty, like RT_JURISDICTION
+  // May be empty on a fresh install; whatever is baked in must validate.
+  eq(L.TABLE_SCHEMAS.RT_ROOF.allowEmpty, true);
+  eq(L.validateTable("RT_ROOF", L.RT_ROOF).errors, []);
 });
 
 (() => {
@@ -1123,12 +1178,15 @@ t("the table has the three columns, the state they vary by, and a sheet each", (
 })();
 
 t("an empty roof table invents nothing", () => {
-  eq(L.getTable("RT_ROOF"), []);
-  eq(L.roofTypesAll(), []);   // empty table offers nothing to pick
-  [["TX", "Comp shingle"], ["", ""], ["ZZ", "Anything"]].forEach(([st, rt]) => {
-    if (L.roofLookup(st, rt).row !== null)
-      throw new Error("invented a row for " + st + "/" + rt);
-  });
+  const saved = L.getTable("RT_ROOF");
+  try {
+    L.setTable("RT_ROOF", []);
+    eq(L.roofTypesAll(), []);
+    [["TX", "Comp shingle"], ["", ""], ["ZZ", "Anything"]].forEach(([st, rt]) => {
+      if (L.roofLookup(st, rt).row !== null)
+        throw new Error("invented a row for " + st + "/" + rt);
+    });
+  } finally { L.setTable("RT_ROOF", saved); }
 });
 
 console.log("\n=== roof spec sheets reach the package (2.12.0) ===");
@@ -1921,52 +1979,67 @@ console.log("\n=== the form is remembered across a reload (2.20.0) ===");
   });
 })();
 
-console.log("\n=== reference table column widths (2.20.1) ===");
+console.log("\n=== reference table column widths (2.20.2) ===");
 (() => {
   const whole = blocks[blocks.length - 1];
-  const from = whole.indexOf("function rdColumnWidth(field, schema) {");
+  const from = whole.indexOf("function rdColumnWeights(schema) {");
   const to = whole.indexOf("function rdRender() {");
-  if (from < 0 || to < 0) throw new Error("could not extract rdColumnWidth");
-  const w = new Function(whole.slice(from, to) + " return rdColumnWidth;")();
-  const pct = (f, sc) => parseFloat(w(f, sc));
+  if (from < 0 || to < 0) throw new Error("could not extract the width helpers");
+  const W = new Function(whole.slice(from, to) + " return rdColumnWidths;")();
+  const nums = sc => W(sc).map(x => parseFloat(x));
 
-  t("numbers are narrow, names and filenames are wide", () => {
-    const sc = L.TABLE_SCHEMAS.MODULE_DB;
-    const by = nm => sc.fields.find(f => f.name === nm);
-    const isc = pct(by("Isc"), sc), name = pct(by("name"), sc), sheet = pct(by("specSheet"), sc);
-    if (!(isc < name && name < sheet))
-      throw new Error(`expected Isc < name < specSheet, got ${isc} ${name} ${sheet}`);
-  });
-
-  t("no table's columns overflow the row", () => {
-    // The # and Delete columns take fixed pixels; the rest must leave room.
-    const over = [];
-    Object.entries(L.TABLE_SCHEMAS).forEach(([nm, sc]) => {
-      if (sc.scalar) return;
-      const total = sc.fields.reduce((a, f) => a + pct(f, sc), 0);
-      if (total > 100) over.push(nm + " " + total.toFixed(1) + "%");
-    });
-    eq(over, []);
-  });
-
-  t("every column gets a width, whatever its type", () => {
+  t("every table's columns total exactly 100%", () => {
+    // Leftover width is handed to the first column, which is what made the row
+    // number column swallow half the screen on the two-column tables.
     const bad = [];
     Object.entries(L.TABLE_SCHEMAS).forEach(([nm, sc]) => {
-      if (sc.scalar) return;
-      sc.fields.forEach(f => {
-        const v = w(f, sc);
-        if (!/^[\d.]+%$/.test(v)) bad.push(nm + "." + f.name + " -> " + v);
-      });
+      const total = nums(sc).reduce((a, b) => a + b, 0);
+      if (Math.abs(total - 100) > 0.05) bad.push(nm + " " + total.toFixed(2) + "%");
     });
     eq(bad, []);
   });
 
-  t("the widest table still fits", () => {
-    // MODULE_DB has eleven columns and is the tightest case.
+  t("a one-column table fills the row", () => {
+    // RT_BREAKERS is a single number. Its column must still span the table.
+    const w = nums(L.TABLE_SCHEMAS.RT_BREAKERS);
+    eq(w.length, 3);                       // #, value, actions
+    if (w[1] < 80) throw new Error("single column only got " + w[1] + "%");
+  });
+
+  t("the row-number column stays narrow whatever the table", () => {
+    const fat = Object.entries(L.TABLE_SCHEMAS)
+      .filter(([, sc]) => nums(sc)[0] > 5).map(([nm]) => nm);
+    eq(fat, []);
+  });
+
+  t("numbers are narrower than names, names narrower than filenames", () => {
     const sc = L.TABLE_SCHEMAS.MODULE_DB;
-    const total = sc.fields.reduce((a, f) => a + pct(f, sc), 0);
-    if (total > 100) throw new Error("MODULE_DB totals " + total + "%");
-    if (sc.fields.length < 11) throw new Error("expected MODULE_DB to still be the wide one");
+    const w = nums(sc), idx = nm => sc.fields.findIndex(f => f.name === nm) + 1;
+    const isc = w[idx("Isc")], name = w[idx("name")], sheet = w[idx("specSheet")];
+    if (!(isc < name && name < sheet))
+      throw new Error(`expected Isc < name < specSheet, got ${isc} ${name} ${sheet}`);
+  });
+
+  t("the widest table still totals 100%", () => {
+    const sc = L.TABLE_SCHEMAS.MODULE_DB;
+    if (sc.fields.length < 11) throw new Error("MODULE_DB is no longer the wide one");
+    eq(Math.round(nums(sc).reduce((a, b) => a + b, 0)), 100);
+  });
+
+  t("every column gets a positive width", () => {
+    const bad = [];
+    Object.entries(L.TABLE_SCHEMAS).forEach(([nm, sc]) =>
+      nums(sc).forEach((x, i) => { if (!(x > 0)) bad.push(nm + " col " + i + " = " + x); }));
+    eq(bad, []);
+  });
+
+  t("a table of only numbers still shares the row evenly", () => {
+    // No text column to soak up the space, so the numbers must expand rather
+    // than leaving a gap.
+    const sc = { fields: [{ name: "a", type: "int" }, { name: "b", type: "int" }] };
+    const w = nums(sc);
+    eq(Math.round(w.reduce((a, b) => a + b, 0)), 100);
+    if (Math.abs(w[1] - w[2]) > 0.01) throw new Error("equal weights gave unequal widths");
   });
 })();
 
@@ -2004,18 +2077,18 @@ t("unknown module is an error", () => {
 });
 t("exceeding max modules per branch warns", () => {
   const r = L.pvCalculate({ moduleName: "Q.PEAK DUO BLK ML-G10.C+ 410",
-    miModel: "IQ7HS-66-M-US @ 240V", locationDisplay: "Albuquerque, NM",
+    miModel: FIX_MI_240, locationDisplay: "Albuquerque, NM",
     conduitHeight: "N/A", branches: [{ nMod: 14 }] });
   if (!r.warnings.some(w => w.includes("at most 10"))) throw new Error("no warning");
 });
 t("missing location warns that the factor defaults to 1.0", () => {
   const r = L.pvCalculate({ moduleName: "Q.PEAK DUO BLK ML-G10.C+ 410",
-    miModel: "IQ7HS-66-M-US @ 240V", locationDisplay: "", conduitHeight: "N/A",
+    miModel: FIX_MI_240, locationDisplay: "", conduitHeight: "N/A",
     branches: [{ nMod: 10 }] });
   if (!r.warnings.some(w => w.includes("defaults to 1.0"))) throw new Error("no warning");
 });
 t("a microinverter must be chosen — modules no longer imply one", () => {
-  const r = L.pvCalculate({ moduleName: "REC470AA PURE-RX", miModel: "",
+  const r = L.pvCalculate({ moduleName: FIX_MOD, miModel: "",
     locationDisplay: "Albuquerque, NM", conduitHeight: "N/A", branches: [{ nMod: 10 }] });
   eq(r.ok, false);
   if (!r.errors.some(e => e.includes("Choose a microinverter")))
@@ -2024,7 +2097,7 @@ t("a microinverter must be chosen — modules no longer imply one", () => {
   eq(r.errors.length, 1);
 });
 t("an unknown microinverter is named in the error", () => {
-  const r = L.pvCalculate({ moduleName: "REC470AA PURE-RX",
+  const r = L.pvCalculate({ moduleName: FIX_MOD,
     miModel: "NOT-A-REAL-MI", locationDisplay: "Albuquerque, NM",
     conduitHeight: "N/A", branches: [{ nMod: 10 }] });
   eq(r.ok, false);
@@ -2273,10 +2346,13 @@ t("identical data shows no differences", () => {
   eq([d.added.length, d.removed.length, d.changed.length], [0, 0, 0]);
 });
 t("scalar table diff works", () => {
-  const d = L.rdDiffRows("RT_BREAKERS", [15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90,
-                                          100, 110, 125, 150, 175, 225]);
-  eq(d.added, ["225"]);
-  eq(d.removed, ["200"]);
+  // Built from the live table so a rating being added or dropped does not break
+  // a test about the differ.
+  const live = L.getTable("RT_BREAKERS").map(Number);
+  const incoming = live.slice(0, -1).concat([9999]);
+  const d = L.rdDiffRows("RT_BREAKERS", incoming);
+  eq(d.added, ["9999"]);
+  eq(d.removed, [String(live[live.length - 1])]);
 });
 
 console.log("\n=== reference data: real-world location payload ===");
@@ -2388,11 +2464,11 @@ t("SPEC_SHEETS is registered and seeded", () => {
 t("seeded rows validate clean", () =>
   eq(L.validateTable("SPEC_SHEETS", L.getTable("SPEC_SHEETS")).errors, []));
 t("several rows may share a blank PDF without counting as duplicates", () => {
-  // The three seeded batteries all have no file yet. If blank counted as a key,
-  // the table would refuse to validate the moment a second type was added.
-  const blanks = L.getTable("SPEC_SHEETS").filter(r => !String(r.file || "").trim());
-  if (blanks.length < 2) throw new Error("expected at least two blank-file rows");
-  eq(L.validateTable("SPEC_SHEETS", L.getTable("SPEC_SHEETS")).errors, []);
+  // If blank counted as a key, adding a second type before its datasheet arrived
+  // would make the table refuse to validate.
+  const rows = L.getTable("SPEC_SHEETS").map(r => Object.assign({}, r, { file: "" }));
+  if (rows.length < 2) throw new Error("need at least two rows");
+  eq(L.validateTable("SPEC_SHEETS", rows).errors, []);
 });
 t("duplicate PDF filename is rejected", () => {
   const rows = JSON.parse(JSON.stringify(L.getTable("SPEC_SHEETS")));
