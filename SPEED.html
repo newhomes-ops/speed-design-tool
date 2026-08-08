@@ -846,8 +846,20 @@
               <select id="pv_conduit_type"></select>
             </div>
             <div>
-              <label for="pv_poi">PV lands at</label>
+              <label for="pv_landing">PV lands at</label>
+              <input id="pv_landing" readonly tabindex="-1"
+                     style="background:var(--panel); cursor:default">
+              <div id="pv_landing_note" class="hint" style="margin-top:5px"></div>
+            </div>
+            <div>
+              <label for="pv_poi">Combiner or string inverter lands at</label>
               <select id="pv_poi"></select>
+            </div>
+            <div id="pv_gw_wrap" style="display:none">
+              <label for="pv_gw_poi">Gateway lands at</label>
+              <select id="pv_gw_poi"></select>
+              <div class="hint" style="margin-top:5px">A gateway is a pass-through, so
+                it needs its own run onward.</div>
             </div>
             <div>
               <label for="pv_ess_poi">ESS lands at</label>
@@ -1371,7 +1383,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.35.4";
+const APP_VERSION = "2.36.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2448,6 +2460,26 @@ const COUPLINGS = ["AC-coupled", "DC-coupled"];
  */
 const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"];
 
+/*
+ * Where the combiner or the string inverter feeds.
+ *
+ * The array's own landing point is not in this list, because it is not a choice —
+ * branches land in the combiner, strings land at the inverter. This is the next hop:
+ * the panel that equipment feeds.
+ */
+const SYSTEM_POI_POINTS = ["Main Service Panel", "Sub Panel", "Gateway"];
+
+/*
+ * Where a gateway feeds, when one is in the way.
+ *
+ * A gateway is a pass-through, not a destination: whatever lands on it still has to
+ * reach a panel. So choosing Gateway above adds a further run, and this is its end.
+ * The synthetic run's id is deliberately high so it cannot collide with a
+ * reference-table row.
+ */
+const GATEWAY_POI_POINTS = ["Main Service Panel", "Sub Panel"];
+const GATEWAY_RUN_ID = 90;
+
 /**
  * The destinations on offer for a project.
  *
@@ -2455,6 +2487,23 @@ const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"]
  * actually land — and on a Powerwall 3 that inverter is the ESS unit. An AC-coupled
  * job does not, because there is no string inverter to land at.
  */
+/**
+ * Where the array lands — the specific equipment, not a category.
+ *
+ * This is not a choice. Microinverter branches land in the combiner the project
+ * names; DC strings land at the string inverter. Offering main service panel or sub
+ * panel here was wrong, and it let "PV lands at" be set to the combiner while the
+ * combiner's own output run also started there, collapsing the two ends onto one box.
+ */
+function pvLandingPoint(project) {
+  const dc = sameText(projectCoupling(project), "DC-coupled");
+  if (dc) {
+    const inv = projectStringInv(project);
+    return inv ? inv.model : "";
+  }
+  return String((project && project.combiner_type) || "").trim();
+}
+
 function poiPointsFor(project) {
   const dc = sameText(projectCoupling(project), "DC-coupled");
   const inv = projectStringInv(project);
@@ -3546,16 +3595,20 @@ function resolveScheduleRuns(o) {
 
   const runs = kept.map(run => {
     const role = String(run.poiRole || "");
+    // pvPoi is where the SYSTEM lands — the panel the combiner or inverter feeds.
     const pick = role === "pv" ? o.pvPoi : role === "ess" ? o.essPoi : "";
     let from = run.from;
     let to = String(pick || "").trim() || run.to;
-    if (dcMode) {
-      if (run.id === 1) to = INV;              // the array lands at the inverter
-      if (role === "pv") from = INV;            // and its output leaves from there
-      // On a Powerwall 3 the ESS and the inverter are one unit, so an ESS run that
-      // starts at "ESS" starts at the same box.
-      if (role === "ess" && /^ESS$/i.test(String(run.from).trim())) from = INV;
+
+    // The array lands on the equipment, and that equipment's output run starts there.
+    const landing = String(o.landingPoint || "").trim();
+    if (landing) {
+      if (run.id === 1) to = landing.toUpperCase();
+      if (role === "pv") from = landing.toUpperCase();
     }
+    // On a Powerwall 3 the ESS and the inverter are one unit, so an ESS run that
+    // starts at "ESS" starts at the same box.
+    if (dcMode && role === "ess" && /^ESS$/i.test(String(run.from).trim())) from = INV;
     return Object.assign({}, run, { from, to });
   });
 
@@ -3567,6 +3620,27 @@ function resolveScheduleRuns(o) {
    * "POWERWALL 3 to Powerwall 3", which was printed on a real sheet. Where the two
    * ends are the same equipment there is no conductor to size.
    */
+  /*
+   * A gateway needs its own run onward.
+   *
+   * One run is added however many circuits land on the gateway, because they land on
+   * its busbar and leave as one feeder. Its current defaults to the combined output —
+   * the ESS rating on a DC job, where the inverter output is the whole system.
+   */
+  const gwPoi = String(o.gatewayPoi || "").trim() || GATEWAY_POI_POINTS[0];
+  const landsOnGateway = runs.some(r => sameText(r.to, "Gateway"));
+  if (landsOnGateway && !sameText(gwPoi, "Gateway")) {
+    runs.push({
+      id: GATEWAY_RUN_ID, from: "GATEWAY", to: gwPoi,
+      current: dcMode ? "ess" : "total",
+      plumb: "THWN-2", wire: "NM-B", conduit: CONDUIT_DEFAULT,
+      ccc: 3, lengthFt: 10, rooftop: false, ocpd: 0, poiRole: "",
+      synthetic: true
+    });
+    notes.push(`A gateway is in the way, so a further run from the gateway to the ` +
+      `${gwPoi} was added — whatever lands on a gateway still has to reach a panel.`);
+  }
+
   const standing = runs.filter(r => !sameText(r.from, r.to));
   runs.filter(r => sameText(r.from, r.to)).forEach(r =>
     notes.push(`Run ${r.id} starts and ends at ${r.from}, so there is no conductor to ` +
@@ -4123,6 +4197,8 @@ function pvCalculate(input) {
     batteryModel: input.batteryModel || "",
     pvPoi: input.pvPoi || "", essPoi: input.essPoi || "",
     dcMode: isDc,
+    landingPoint: pvLandingPoint(input),
+    gatewayPoi: input.gatewayPoi || "",
     productOffering: input.productOffering || "",
     stringInvName: (projectStringInv(input) || {}).model || "",
     manual: input.scheduleManual || {},
@@ -5924,7 +6000,8 @@ if (typeof module !== "undefined" && module.exports) {
     battElecRow, projectCoupling, COUPLINGS, POI_POINTS,
     get RT_STRING_INV() { return RT_STRING_INV; },
     stringInvRow, projectStringInv, stringInvNames,
-    poiPointsFor, resolveScheduleRuns,
+    poiPointsFor, pvLandingPoint, resolveScheduleRuns, SYSTEM_POI_POINTS,
+    GATEWAY_POI_POINTS, GATEWAY_RUN_ID,
     RD_GROUPS, RD_GROUP_OF, rdGroupOf, rdTablesIn,
     get RT_MCI() { return RT_MCI; },
     mciRow, mciNames,
@@ -7156,7 +7233,15 @@ function wireControls() {
     pvEssPoiNote(); pvSchedInputsRender();
   });
   const ppSel = $("pv_poi");
-  if (ppSel) ppSel.addEventListener("change", pvSchedInputsRender);
+  if (ppSel) ppSel.addEventListener("change", () => {
+    poiPopulate(); pvSchedInputsRender();
+  });
+  const gwSel = $("pv_gw_poi");
+  if (gwSel) gwSel.addEventListener("change", pvSchedInputsRender);
+  const cbSel = $("combiner_type");
+  if (cbSel) cbSel.addEventListener("change", () => {
+    poiPopulate(); pvSchedInputsRender();
+  });
 
   // The trunk cable part number and quantity both hang off this, so a change
   // has to rebuild the purchase order rather than wait for the next upload.
@@ -10557,12 +10642,22 @@ function pvSchedInputsRender() {
     stringInverter: ($("string_inverter") || {}).value || "",
     battery_type: ($("battery_type") || {}).value || ""
   });
+  const formNow = {
+    coupling: ($("coupling") || {}).value || "",
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || "",
+    combiner_type: ($("combiner_type") || {}).value || ""
+  };
   const runsNow = resolveScheduleRuns({
     batteryModel: ($("battery_type") || {}).value || "",
+    landingPoint: pvLandingPoint(formNow),
+    gatewayPoi: ($("pv_gw_poi") || {}).value || "",
     productOffering: ($("product_offering") || {}).value || "",
     dcMode: sameText(coupling, "DC-coupled"),
     stringInvName: inv ? inv.model : "",
     pvPoi: ($("pv_poi") || {}).value || "",
+    combiner_type: ($("combiner_type") || {}).value || "",
+    gatewayPoi: ($("pv_gw_poi") || {}).value || "",
     essPoi: ($("pv_ess_poi") || {}).value || ""
   }).runs;
   body.innerHTML = runsNow.map(r => {
@@ -10747,21 +10842,50 @@ function poiPopulate() {
   const invName = inv ? inv.model : "";
   const points = dc && invName ? [invName].concat(POI_POINTS) : POI_POINTS.slice();
 
-  [["pv_poi", dc && invName ? invName : "IQ Combiner"],
-   ["pv_ess_poi", "Main Service Panel"]].forEach(([id, dflt]) => {
+  // Where the array lands is shown, not chosen — it is the combiner on AC and the
+  // string inverter on DC, and it names the specific one the project selected.
+  const landing = pvLandingPoint({
+    coupling: ($("coupling") || {}).value || "",
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || "",
+    combiner_type: ($("combiner_type") || {}).value || ""
+  });
+  const lbox = $("pv_landing");
+  if (lbox) lbox.value = landing || "(nothing selected)";
+  const lnote = $("pv_landing_note");
+  if (lnote) {
+    lnote.textContent = !landing
+      ? (dc ? "Pick a string inverter — DC strings land there."
+            : "Pick a combiner type — microinverter branches land there.")
+      : (dc ? `String inverter, from ${inv ? "String inverter" : "the battery"}.`
+            : "Combiner type, from Equipment & roof.");
+  }
+
+  // The destination list holds panels only. Offering the combiner here is what let
+  // the combiner's own output run start and end at the combiner.
+  [["pv_poi", "Main Service Panel"], ["pv_ess_poi", "Main Service Panel"]]
+    .forEach(([id, dflt]) => {
     const sel = $(id);
     if (!sel) return;
     const keep = sel.value;
-    sel.innerHTML = points.map(p => {
-      const label = (p === invName && invName)
-        ? `${p} — ESS / string inverter` : p;
-      return `<option value="${p}"${p === dflt ? " selected" : ""}>${label}</option>`;
-    }).join("");
-    // Keep the designer's choice only if it is still on offer; a stale AC-only
-    // choice must not survive a switch to DC.
-    if (keep && points.includes(keep)) sel.value = keep;
+    sel.innerHTML = SYSTEM_POI_POINTS.map(pt =>
+      `<option value="${pt}"${pt === dflt ? " selected" : ""}>${pt}</option>`).join("");
+    if (keep && SYSTEM_POI_POINTS.includes(keep)) sel.value = keep;
     else sel.value = dflt;
   });
+  // The gateway hop only exists when something lands on a gateway.
+  const gw = $("pv_gw_poi");
+  if (gw) {
+    const keep = gw.value;
+    gw.innerHTML = GATEWAY_POI_POINTS.map(pt =>
+      `<option value="${pt}"${pt === GATEWAY_POI_POINTS[0] ? " selected" : ""}>${pt}</option>`).join("");
+    if (keep && GATEWAY_POI_POINTS.includes(keep)) gw.value = keep;
+  }
+  const usesGw = [($("pv_poi") || {}).value, ($("pv_ess_poi") || {}).value]
+    .some(v => sameText(v, "Gateway"));
+  const gwWrap = $("pv_gw_wrap");
+  if (gwWrap) gwWrap.style.display = usesGw ? "" : "none";
+
   pvEssPoiNote();
 }
 
@@ -11123,6 +11247,7 @@ function pvRenderDc(r) {
       (d.modsPerMci !== null && d.modsPerMci !== undefined
         ? `<div><span>${modEscHtml(d.mci.model)}</span><span>${d.modsPerMci} module(s) per ` +
           `interrupter, ${d.mciTotal} total across all strings</span></div>` : "") +
+      `<div><span>Strings land at</span><span>${modEscHtml(d.inverter.model)}</span></div>` +
       `<div><span>Governed by</span><span>${d.governedBy === "MCI chain"
         ? `${d.maxMciPerString} interrupters covering ${d.modsPerMci} each ` +
           `(${d.maxByMciChain}); the inverter would allow ${d.maxByInverter}`
