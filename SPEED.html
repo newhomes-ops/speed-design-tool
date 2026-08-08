@@ -1371,7 +1371,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.35.2";
+const APP_VERSION = "2.35.4";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -3521,10 +3521,23 @@ function resolveScheduleRuns(o) {
       /\bESS\b|BATTERY|POWERWALL/i.test(String(run.from) + " " + String(run.to));
     return hasBattery || !touchesEss;
   });
+  /*
+   * Only say something when the absence is a problem.
+   *
+   * On a Solar Only offering there is no battery by design, so dropping the ESS runs
+   * is the right answer and needs no note — telling the designer to "choose a
+   * battery" contradicts the offering they picked. The note is worth making only when
+   * the offering says there should be one and none is selected.
+   */
   if (!hasBattery && kept.length < RT_SCHEDULE.length) {
-    notes.push(`No battery is selected, so the ${RT_SCHEDULE.length - kept.length} ` +
-      `ESS run(s) were left off the schedule. Choose a Battery on Project ` +
-      `Information to include them.`);
+    const off = (typeof offeringByName === "function")
+      ? offeringByName(o.productOffering) : null;
+    if (!off || off.battery) {
+      notes.push(`No battery is selected, so the ${RT_SCHEDULE.length - kept.length} ` +
+        `ESS run(s) were left off the schedule` +
+        (off ? ` — "${off.name}" includes one, so pick it on Project Information.`
+             : `. Choose a Battery on Project Information to include them.`));
+    }
   }
 
   const invName = String(o.stringInvName || "").trim();
@@ -3546,7 +3559,50 @@ function resolveScheduleRuns(o) {
     return Object.assign({}, run, { from, to });
   });
 
-  return { runs, notes, dcMode, invName };
+  /*
+   * A run from a box to itself is not a run.
+   *
+   * On a DC-coupled job "PV lands at" defaults to the string inverter, and the
+   * inverter's output run also starts there — so the pair collapsed into
+   * "POWERWALL 3 to Powerwall 3", which was printed on a real sheet. Where the two
+   * ends are the same equipment there is no conductor to size.
+   */
+  const standing = runs.filter(r => !sameText(r.from, r.to));
+  runs.filter(r => sameText(r.from, r.to)).forEach(r =>
+    notes.push(`Run ${r.id} starts and ends at ${r.from}, so there is no conductor to ` +
+      `size — it was left off. Give it a different destination if that is wrong.`));
+
+  /*
+   * One conductor, one row.
+   *
+   * A DC-coupled Powerwall 3 inverts the PV and discharges the battery through the
+   * same AC output, so the PV output run and the ESS run are physically the same
+   * conductor. Both were printed, which double-counted a run on the sheet and would
+   * have double-counted it in a takeoff.
+   *
+   * The survivor is the one carrying the most current, since that is what has to be
+   * sized — for a Powerwall 3 that is the inverter's own 48 A rating rather than a
+   * branch total.
+   */
+  const byEnds = new Map();
+  const merged = [];
+  standing.forEach(r => {
+    const key = String(r.from).trim().toLowerCase() + "\u0000" +
+                String(r.to).trim().toLowerCase();
+    if (!byEnds.has(key)) { byEnds.set(key, r); merged.push(r); return; }
+    const kept = byEnds.get(key);
+    const rank = x => String(x.current) === "ess" ? 3
+                    : String(x.current) === "total" ? 2
+                    : String(x.current) === "manual" ? 1 : 0;
+    const winner = rank(r) > rank(kept) ? r : kept;
+    const loser = winner === r ? kept : r;
+    if (winner !== kept) merged.splice(merged.indexOf(kept), 1, r);
+    notes.push(`Runs ${kept.id} and ${r.id} are the same conductor — both go ` +
+      `${r.from} to ${r.to}. On a DC-coupled system the PV and the battery share the ` +
+      `inverter's AC output, so run ${loser.id} was dropped and run ${winner.id} kept.`);
+  });
+
+  return { runs: merged, notes, dcMode, invName };
 }
 
 /**
@@ -4067,6 +4123,7 @@ function pvCalculate(input) {
     batteryModel: input.batteryModel || "",
     pvPoi: input.pvPoi || "", essPoi: input.essPoi || "",
     dcMode: isDc,
+    productOffering: input.productOffering || "",
     stringInvName: (projectStringInv(input) || {}).model || "",
     manual: input.scheduleManual || {},
     branches: branches.length,
@@ -8540,11 +8597,9 @@ async function buildECalcsPdf(o) {
     ? "—" : Number(v).toFixed(d === undefined ? 2 : d);
 
   /* ---- header ------------------------------------------------------------- */
+  // No stamp line: the project number, code year and coupling are all in the
+  // template's own title block, so repeating them here is noise.
   text("ELECTRICAL CALCULATIONS", L, 13, bold);
-  const stamp = `${p.project_number || ""}  ·  ${necCodeYear(r.codeYear) ? "NEC " + necCodeYear(r.codeYear) : ""}` +
-                `  ·  ${r.coupling || "AC-coupled"}`;
-  page.drawText(clip(stamp, W * 0.5, font, 9),
-    { x: R - Math.min(font.widthOfTextAtSize(stamp, 9), W * 0.5), y, size: 9, font, color: muted });
   y -= 5; hline(y, ink); y -= 12;
 
   kvBlock([
@@ -8558,10 +8613,8 @@ async function buildECalcsPdf(o) {
       ? ((r.dc && r.dc.inverter && r.dc.inverter.model) || "")
       : ((r.mi && r.mi.miModel) || p.inverter_model || "")],
     ["Service", `${r.vac || 240} V, ${r.phase === 3 ? "3-phase" : "1-phase"}`],
-    ["Battery (ESS)", p.battery_type || "none"],
-    ["Designer", p.designer || ""],
-    ["Checked by", p.checked_by || ""],
-    ["Date", p.date_drawn || ""]
+    // Designer, checked-by and date live in the title block.
+    ["Battery (ESS)", p.battery_type || "none"]
   ], 4);
 
   /* ---- basis -------------------------------------------------------------- */
@@ -8570,12 +8623,9 @@ async function buildECalcsPdf(o) {
     ["Location", (r.location && r.location.display) || ""],
     ["Design high", `${n(r.tAmb, 1)} °C`],
     ["Record low", `${n(r.tMin, 1)} °C`],
-    ["Rooftop adder", `${n(r.tAdder, 0)} °C (${r.rooftopRegime === "flat"
-      ? "310.15(B)(2)" : "Table 310.15(B)(3)(c)"})`],
+    // Ampacity column and the voltage-drop limit are method, not result.
     ["Ambient used", `${n(r.tUsed, 1)} °C`],
-    ["Temp factor", n(r.tempFactor, 3)],
-    ["Ampacity column", `${r.wireTempSel || 75} °C`],
-    ["Max voltage drop", `${n(r.vdropMax, 1)} %`]
+    ["Temp factor", n(r.tempFactor, 3)]
   ], 4);
 
   /* ---- the array ---------------------------------------------------------- */
@@ -8665,13 +8715,6 @@ async function buildECalcsPdf(o) {
     else lineBuf = trial;
   });
   if (lineBuf) { text(lineBuf, L, 9, font); y -= 11; }
-
-  if (sch.diverged && sch.diverged.length) {
-    y -= 2;
-    text(`Sized one step above the 90 °C method on ${sch.diverged.length} run(s) — ` +
-      `house rule, not an error.`, L, 9, font, muted, W);
-    y -= 11;
-  }
 
   if (y < ECALC_BOX.y0) {
     notes.push(`The content ran ${Math.ceil(ECALC_BOX.y0 - y)} pt past the bottom of ` +
@@ -10516,6 +10559,7 @@ function pvSchedInputsRender() {
   });
   const runsNow = resolveScheduleRuns({
     batteryModel: ($("battery_type") || {}).value || "",
+    productOffering: ($("product_offering") || {}).value || "",
     dcMode: sameText(coupling, "DC-coupled"),
     stringInvName: inv ? inv.model : "",
     pvPoi: ($("pv_poi") || {}).value || "",
@@ -10917,6 +10961,7 @@ function pvReadInput() {
     essPoi: ($("pv_ess_poi") || {}).value || "",
     batteryModel: ($("battery_type") || {}).value || "",
     coupling: ($("coupling") || {}).value || "",
+    productOffering: ($("product_offering") || {}).value || "",
     scheduleManual: pvReadSchedManual(),
     dcMounting: ($("pv_dc_mounting") || {}).value || DC_MOUNTING_DEFAULT,
     dcJumpered: !!(($("pv_dc_jumper") || {}).value),
