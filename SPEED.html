@@ -933,7 +933,7 @@
           </table>
         </fieldset>
 
-        <fieldset>
+        <fieldset id="pv_fs_segments">
           <legend>Voltage-drop segments</legend>
           <table>
             <thead><tr>
@@ -1384,7 +1384,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.44.1";
+const APP_VERSION = "2.45.1";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2451,6 +2451,17 @@ let RT_CONDUIT = [
 /** Conduit types offered, EMT first because it is the default. */
 const CONDUIT_TYPES = ["EMT", "PVC Sch 40", "PVC Sch 80", "RMC", "FMC", "ENT"];
 const CONDUIT_DEFAULT = "EMT";
+
+/*
+ * Trade sizes in order, and the smallest the house will install.
+ *
+ * 1/2 in. is in the Code tables and is never specified here: it is awkward to pull and
+ * leaves no room for a change of mind on site. Chapter 9 fill still decides the size
+ * when it needs more than the minimum.
+ */
+const CONDUIT_TRADES = ["1/2", "3/4", "1", "1-1/4", "1-1/2", "2", "2-1/2", "3",
+                        "3-1/2", "4"];
+const CONDUIT_MIN_TRADE = "3/4";
 
 /*
  * The runs that make up the conductor schedule, in drawing order.
@@ -4037,9 +4048,11 @@ function conduitOptions(o) {
   const col = nTotal <= 1 ? "a1" : nTotal === 2 ? "a31" : "a40";
   const pct = nTotal <= 1 ? 53 : nTotal === 2 ? 31 : 40;
 
+  const floor = CONDUIT_TRADES.indexOf(CONDUIT_MIN_TRADE);
   const types = (o.types && o.types.length ? o.types : CONDUIT_TYPES);
   return types.map(type => {
-    const sizes = RT_CONDUIT.filter(r => sameText(r.type, type));
+    const sizes = RT_CONDUIT.filter(r => sameText(r.type, type) &&
+      CONDUIT_TRADES.indexOf(String(r.trade)) >= floor);
     const hit = sizes.find(r => Number(r[col]) >= area);
     return {
       type,
@@ -4079,10 +4092,9 @@ function pvVD(I, wireSize, distFt, vac, material) {
  */
 function conduitLabel(opt) {
   if (!opt || !opt.trade) return "";
-  const dec = { "1/2": "0.5", "3/4": "0.75", "1": "1", "1-1/4": "1.25",
-                "1-1/2": "1.5", "2": "2", "2-1/2": "2.5", "3": "3",
-                "3-1/2": "3.5", "4": "4" };
-  return `MIN ${dec[opt.trade] || opt.trade}" Dia ${opt.type}`;
+  // Trade sizes are named as fractions on a drawing and in a supply house, so 3/4"
+  // rather than 0.75". The stored value is already the fraction.
+  return `${opt.trade}" ${opt.type}`;
 }
 
 /**
@@ -5292,7 +5304,12 @@ function pvCalculate(input) {
     ? (Number(mod.length) * Number(mod.width) * totalMods) / 144 : 0;
 
   // Voltage-drop segments carrying the combined current.
-  const seg = input.segments || {};
+  /*
+   * The voltage-drop segments belong to the microinverter path — subpanel run, junction
+   * box, roof run, receptacle. A string design has none of them, so on a DC job they are
+   * dropped rather than summed into the total and judged against the limit.
+   */
+  const seg = isDc ? {} : (input.segments || {});
   const segments = [
     { key: "sub",   label: "Subpanel run",  dist: Number(seg.subDist)   || 0, wire: seg.subWire   || "#10", current: iTotal },
     { key: "jb",    label: "Junction box",  dist: Number(seg.jbDist)    || 0, wire: seg.jbWire    || "#10", current: iTotal },
@@ -8438,11 +8455,11 @@ function wireControls() {
   if (ecBtn) ecBtn.addEventListener("click", pvExportECalcs);
   const epSel = $("pv_ess_poi");
   if (epSel) epSel.addEventListener("change", () => {
-    pvEssPoiNote(); pvSchedInputsRender();
+    pvEssPoiNote(); gatewayFieldSync(); pvSchedInputsRender();
   });
   const ppSel = $("pv_poi");
   if (ppSel) ppSel.addEventListener("change", () => {
-    poiPopulate(); pvSchedInputsRender();
+    poiPopulate(); gatewayFieldSync(); pvSchedInputsRender();
   });
   const gwSel = $("pv_gw_poi");
   if (gwSel) gwSel.addEventListener("change", pvSchedInputsRender);
@@ -10253,7 +10270,7 @@ async function buildECalcsPdf(o) {
        ["AMPACITY", "at that size"],
        ["LEN", ""], ["VD", ""],
        ["OCPD", "IOUT × 1.25"], ["EGC", ""],
-       ["CONDUIT", ""], ["FILL", "ch.9"]],
+       ["CONDUIT", ""], ["FILL", ""]],
       [4, 6.5, 6.5, 6.5, 4, 5, 7.5, 7.5, 5.5, 7, 5, 5.5, 5.5, 5, 12, 5],
       ["l", "c", "c", "c", "c", "c", "c", "c", "l", "c", "c", "c", "c", "l", "l", "c"],
       r.branches.map(b => ({
@@ -10303,7 +10320,7 @@ async function buildECalcsPdf(o) {
        ["FILL f", ""], ["BASE", "at term rating"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
        ["OCPD", ""], ["EGC", ""],
-       ["CONDUIT", ""], ["FILL", "ch.9"], ["LEN", ""], ["VD", ""]],
+       ["CONDUIT", ""], ["FILL", ""], ["LEN", ""], ["VD", ""]],
       [2.5, 8.5, 9.5, 11, 10.5, 5.5, 5.5, 5, 4.5, 5, 6.5, 4, 5.5, 5, 10.5, 4.5, 4.5, 5],
       ["l", "l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
        "c", "c", "c"],
@@ -12172,6 +12189,7 @@ function pvSchedInputsRender() {
     stringInverter: ($("string_inverter") || {}).value || "",
     battery_type: ($("battery_type") || {}).value || ""
   });
+  const dcNow = sameText(coupling, "DC-coupled");
   const formNow = {
     coupling: ($("coupling") || {}).value || "",
     stringInverter: ($("string_inverter") || {}).value || "",
@@ -12236,13 +12254,23 @@ function pvReadSchedManual() {
 function pvModeApply() {
   const coupling = projectCoupling({
     coupling: ($("coupling") || {}).value || "",
+    stringInverter: ($("string_inverter") || {}).value || "",
     battery_type: ($("battery_type") || {}).value || ""
   });
   const dc = sameText(coupling, "DC-coupled");
 
-  const fsDc = $("pv_fs_dc"), fsBr = $("pv_fs_branches");
+  /*
+   * Hide every AC-only panel, not just the branch table.
+   *
+   * The voltage-drop segments are microinverter-era — subpanel run, junction box,
+   * receptacle — and on a string design none of them exists. They were also still being
+   * summed into the total voltage drop and judged against the limit, so a DC job was
+   * being assessed partly on conductors it does not have.
+   */
+  const fsDc = $("pv_fs_dc"), fsBr = $("pv_fs_branches"), fsSeg = $("pv_fs_segments");
   if (fsDc) fsDc.style.display = dc ? "" : "none";
   if (fsBr) fsBr.style.display = dc ? "none" : "";
+  if (fsSeg) fsSeg.style.display = dc ? "none" : "";
 
   // The microinverter picker has no meaning on a DC-coupled job. Its wrapper has an
   // id rather than being found with closest(): closest is absent from the stubbed
@@ -12411,12 +12439,27 @@ function poiPopulate() {
       `<option value="${pt}"${pt === GATEWAY_POI_POINTS[0] ? " selected" : ""}>${pt}</option>`).join("");
     if (keep && GATEWAY_POI_POINTS.includes(keep)) gw.value = keep;
   }
-  const usesGw = [($("pv_poi") || {}).value, ($("pv_ess_poi") || {}).value]
-    .some(v => sameText(v, "Gateway"));
-  const gwWrap = $("pv_gw_wrap");
-  if (gwWrap) gwWrap.style.display = usesGw ? "" : "none";
+  gatewayFieldSync();
 
   pvEssPoiNote();
+}
+
+/**
+ * Show "Gateway lands at" only when something actually lands on a gateway.
+ *
+ * On a DC-coupled Powerwall 3 the PV lands at the Powerwall and the Powerwall lands at
+ * the main service panel — no gateway is in the circuit, so asking where a gateway
+ * feeds is asking about equipment the design does not have.
+ *
+ * Kept as its own function because three different selects can change the answer, and
+ * computing it inline in one of them left the field showing.
+ */
+function gatewayFieldSync() {
+  const uses = [($("pv_poi") || {}).value, ($("pv_ess_poi") || {}).value]
+    .some(v => sameText(v, "Gateway"));
+  const wrap = $("pv_gw_wrap");
+  if (wrap) wrap.style.display = uses ? "" : "none";
+  return uses;
 }
 
 /** Say plainly whether the ESS runs are on the schedule at all. */
