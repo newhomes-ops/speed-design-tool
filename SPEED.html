@@ -969,7 +969,7 @@
             <thead><tr>
               <th style="text-align:left">#</th><th style="text-align:left">From</th>
               <th style="text-align:left">To</th><th>Current (A)</th>
-              <th>OCPD (A)</th><th>Length (ft)</th>
+              <th>OCPD (A)</th><th>Length (ft)</th><th>Shared conduit</th>
             </tr></thead><tbody id="pv_sched_inputs_body"></tbody>
           </table></div>
         </fieldset>
@@ -1384,7 +1384,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.46.0";
+const APP_VERSION = "2.47.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2482,9 +2482,9 @@ const CONDUIT_MIN_TRADE = "3/4";
  * battery deletes two rows, a job with a load centre adds one.
  */
 let RT_SCHEDULE = [
-  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":"","atticOption":true},
-  {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv","atticOption":false},
-  {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess","atticOption":false}
+  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":"","atticOption":true,"conduitGroup":""},
+  {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv","atticOption":false,"conduitGroup":""},
+  {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess","atticOption":false,"conduitGroup":""}
 ];
 
 /** Where a schedule run's current comes from. */
@@ -4175,7 +4175,14 @@ function pvSizeRun(o) {
       `${cap} °C for that rating, so this conductor cannot be used on this run.`);
     return { errors, notes };
   }
-  const fillFactor = ct.inConduit ? pvGetFillFactor(ccc) : 1;
+  /*
+   * 310.15(C)(1) counts current-carrying conductors PER RACEWAY, so a run sharing a
+   * conduit with others derates on the total. `sharedCcc` is that total when the
+   * caller has grouped runs; otherwise it is this run's own count.
+   */
+  const cccDerate = Math.max(ccc, Number(o.sharedCcc) || 0);
+  const fillFactor = ct.inConduit ? pvGetFillFactor(cccDerate) : 1;
+  const shared = cccDerate > ccc;
 
   /*
    * NEC 240.4: the conductor must be protected at its ampacity. Where the OCPD is
@@ -4239,8 +4246,10 @@ function pvSizeRun(o) {
       notes.push(`No Chapter 9 Table 5 area for ${row.size} or ${egc}, so conduit fill ` +
                  `was not calculated for this run.`);
     } else {
-      const area = aOne * ccc + aEgc;
-      conduitAll = conduitOptions({ area, ccc, nGround: 1,
+      // A shared conduit has to hold every conductor in it, not just this circuit's.
+      const areaOthers = Number(o.sharedArea) || 0;
+      const area = aOne * ccc + aEgc + areaOthers;
+      conduitAll = conduitOptions({ area, ccc: cccDerate, nGround: 1,
         types: o.conduitTypes && o.conduitTypes.length ? o.conduitTypes : CONDUIT_TYPES });
       conduit = conduitAll.find(c => sameText(c.type, o.conduitType || CONDUIT_DEFAULT)) ||
                 conduitAll[0];
@@ -4270,6 +4279,7 @@ function pvSizeRun(o) {
     ocpdGoverns: !!(givenOcpd && givenOcpd > maxCurrent),
     tempFactor, fillFactor, tUsed, tAmb, adder,
     parallel, cccPerCircuit: cccEach, ccc,
+    cccDerate, shared, conduitGroup: o.conduitGroup || "",
     lengthFt: Number(o.lengthFt) || 0, vd, upsizedForVd,
     openAir: !ct.inConduit,
     conduit, conduitAll,
@@ -4612,7 +4622,9 @@ function resolveScheduleRuns(o) {
     // On a Powerwall 3 the ESS and the inverter are one unit, so an ESS run that
     // starts at "ESS" starts at the same box.
     if (dcMode && role === "ess" && /^ESS$/i.test(String(run.from).trim())) from = INV;
-    return Object.assign({}, run, { from, to });
+    const mm = (o.manual || {})[run.id] || {};
+    return Object.assign({}, run, { from, to },
+      mm.conduitGroup ? { conduitGroup: mm.conduitGroup } : {});
   });
 
   /*
@@ -4728,6 +4740,25 @@ function buildSchedule(o) {
   const fromFor = run => run.from;   // already resolved
   const toFor = run => run.to;       // already resolved
 
+  /*
+   * Conductors sharing a raceway are counted together.
+   *
+   * Grouping is by the label on the run, so the designer says which runs share a
+   * conduit rather than the tool guessing from endpoints — two circuits between the
+   * same two boxes are not necessarily in one pipe.
+   */
+  const groupCcc = {};
+  runs.forEach(run => {
+    const g = String(run.conduitGroup || "").trim();
+    if (!g) return;
+    const par = Math.max(1, Number(run.id) === 1 && String(run.current) === "branch"
+      ? 1 : 1);
+    groupCcc[g] = (groupCcc[g] || 0) + Math.max(1, Number(run.ccc) || 2) * par;
+  });
+  const groupNote = Object.keys(groupCcc).filter(g => groupCcc[g] > 0);
+  groupNote.forEach(g => notes.push(`Conduit "${g}" carries ${groupCcc[g]} ` +
+    `current-carrying conductors in total, so every run in it derates on that count.`));
+
   const build = variant => runs.map(run => {
     const m = manual[run.id] || {};
     const cont = currentFor(run);
@@ -4762,7 +4793,9 @@ function buildSchedule(o) {
       ocpd: Number(m.ocpd) ||
             (String(run.current) === "ess" && Number(o.essOcpd) > 0 ? Number(o.essOcpd) : 0) ||
             Number(run.ocpd) || 0,
-      vdropMax: o.vdropMax, conduitTypes: o.conduitTypes
+      vdropMax: o.vdropMax, conduitTypes: o.conduitTypes,
+      conduitGroup: run.conduitGroup || "",
+      sharedCcc: groupCcc[String(run.conduitGroup || "").trim()] || 0
     });
   });
 
@@ -6819,7 +6852,12 @@ const TABLE_SCHEMAS = {
       // to the combiner, or the strings to the inverter. Downstream of that everything
       // is an exterior run, so offering a second variant there invented a choice the
       // installer does not have.
-      { name: "atticOption", type: "bool", label: "Attic alternative" }
+      { name: "atticOption", type: "bool", label: "Attic alternative" },
+      // Runs sharing a label share a raceway. Their current-carrying conductors are
+      // then counted together for the fill derating factor and for conduit sizing,
+      // which is what 310.15(C)(1) actually asks: the count is per raceway, not per
+      // circuit. Leave blank for a run in its own conduit.
+      { name: "conduitGroup", type: "text", label: "Shared conduit" }
     ]
   },
 
@@ -7199,6 +7237,7 @@ if (typeof module !== "undefined" && module.exports) {
     NEC_ROOFTOP_ADDER_C, NEC_ROOFTOP_FLAT_FROM, NEC_ROOFTOP_BELOW, NEC_ROOFTOP_ABOVE,
     pvMaxAmbient, pvAmpColumn, pvBaseAmp, condTypeRow, condArea, conduitOptions,
     conduitLabel, pvSizeRun, buildSchedule, CONDUIT_TYPES, CONDUIT_DEFAULT,
+    CONDUIT_TRADES, CONDUIT_MIN_TRADE,
     SCHEDULE_CURRENT_SOURCES,
     get RT_CONDUIT() { return RT_CONDUIT; },
     get RT_COND_AREA() { return RT_COND_AREA; },
@@ -10085,6 +10124,10 @@ async function buildECalcsPdf(o) {
   const n = (v, d) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)))
     ? "—" : Number(v).toFixed(d === undefined ? 2 : d);
 
+  /** Equipment names in capitals, as a drawing writes them. */
+  const poiCaps = v => String(v === undefined || v === null ? "" : v)
+    .toUpperCase().replace(/\bSUB\s+PANEL\b/g, "SUBPANEL");
+
   /* ---- title -------------------------------------------------------------- */
   text("ELECTRICAL CALCULATIONS", L, 13, bold);
   y -= 4; hline(y, ink); y -= 13;
@@ -10114,8 +10157,11 @@ async function buildECalcsPdf(o) {
   const dcm = r.isDc && r.dc && r.dc.module ? r.dc : null;
   const mi = r.mi || {};
   const basisChips = [
-    ["LOCATION", String((r.location && r.location.display) || "—")
-      .replace(/\s*·\s*WMO.*$/, "")],
+    // The project address, not the weather station's own label: the reviewer is
+    // looking at a job, and the station is stated on the equipment lines.
+    ["LOCATION", [p.city, p.state, p.zip_code].filter(Boolean).join(", ") ||
+      String((r.location && r.location.display) || "—")
+        .replace(/\s*·\s*WMO.*$/, "")],
     ["AMBIENT USED", `${n(r.tUsed, 1)} °C`],
     ["TEMP FACTOR", n(r.tempFactor, 3)],
     ["SERVICE", `${r.vac || 240} V ${r.phase === 3 ? "3Ø" : "1Ø"}`]
@@ -10159,9 +10205,9 @@ async function buildECalcsPdf(o) {
          `max ${dcm.mci.maxPerString} per string`,
          `covers ${dcm.modsPerMci} module(s)`]
       : ["none selected"]],
-    ["TEMPERATURES", [`cell ${n(dcm.tHot, 1)} °C`,
+    ["CELL TEMP", [`${n(dcm.tHot, 1)} °C`,
       `${n(dcm.tMax, 1)} °C ambient + ${n(dcm.adder, 0)} °C mounting`,
-      `lowest ambient ${n(dcm.tMin, 1)} °C`, station]]
+      `coldest ${n(dcm.tMin, 1)} °C`, station]]
   ] : [
     // On the AC path the module contributes nothing to conductor sizing: every branch is
     // sized from the microinverter's output current.
@@ -10172,18 +10218,36 @@ async function buildECalcsPdf(o) {
     ["MODULE", [(r.module && r.module.name) || "—",
       `${(r.module && r.module.Wpeak) || "—"} W`,
       "not used for conductor sizing"]],
-    ["TEMPERATURES", [`ambient used ${n(r.tUsed, 1)} °C`, station]]
+    ["STATION", [station || "—", `ambient used ${n(r.tUsed, 1)} °C`]]
   ];
 
-  equipLines.forEach(([label, parts]) => {
-    const body = parts.filter(Boolean).join("   ·   ");
-    page.drawText(clip(label, 90, bold, 7.5),
-      { x: L, y, size: 7.5, font: bold, color: muted });
-    page.drawText(clip(body, W - 84, font, 8.5),
-      { x: L + 84, y, size: 8.5, font, color: ink });
-    y -= 11.5;
+  /*
+   * Device, model, then its figures — a small ruled table rather than three lines of
+   * run-together text, so a reviewer can find the interrupter's rating without reading
+   * the module's first.
+   */
+  const EQ_L = 74, EQ_M = 150;
+  page.drawLine({ start: { x: L, y: y + 10 }, end: { x: L + W, y: y + 10 },
+    thickness: 0.8, color: ink });
+  equipLines.forEach(([label, parts], i) => {
+    const clean = parts.filter(Boolean);
+    const model = clean.length ? clean[0] : "";
+    const rest = clean.slice(1).join("   ·   ");
+    page.drawText(clip(label, EQ_L - 4, bold, 7.5),
+      { x: L + 3, y, size: 7.5, font: bold, color: muted });
+    page.drawText(clip(model, EQ_M - 6, bold, 9),
+      { x: L + EQ_L, y, size: 9, font: bold, color: ink });
+    page.drawText(clip(rest, W - EQ_L - EQ_M - 6, font, 8.5),
+      { x: L + EQ_L + EQ_M, y, size: 8.5, font, color: ink });
+    y -= 12.5;
+    page.drawLine({ start: { x: L, y: y + 9 }, end: { x: L + W, y: y + 9 },
+      thickness: i === equipLines.length - 1 ? 0.8 : 0.4,
+      color: i === equipLines.length - 1 ? ink : rule });
   });
-  y -= 5;
+  [L, L + EQ_L, L + EQ_L + EQ_M, L + W].forEach(xv => page.drawLine({
+    start: { x: xv, y: y + 9 }, end: { x: xv, y: y + 10 + equipLines.length * 12.5 },
+    thickness: 0.4, color: rule }));
+  y -= 12;
 
   /**
    * A table whose headers carry the formula under the column name.
@@ -10329,8 +10393,9 @@ async function buildECalcsPdf(o) {
       const first = vi === 0;
       rows.push({
         bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
-        strongCols: [3, 5, 9, 11],
-        cells: [first ? String(x.id) : "", first ? x.from : "", first ? x.to : "", variant,
+        strongCols: [3, 8, 10],
+        cells: [first ? poiCaps(x.from) : "", first ? poiCaps(x.to) : "",
+          first ? "" : "OPTIONAL: ATTIC RUN",
           `${x.wire} ${x.condLabel}`, n(x.contCurrent), n(x.maxCurrent),
           n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
           n(x.baseAmp, 0), n(x.deratedAmp, 1), x.termTemp + "°",
@@ -10345,15 +10410,15 @@ async function buildECalcsPdf(o) {
 
   if (rows.length) {
     ftable("Conductor schedule — exterior run and optional attic run",
-      [["RUN", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
+      [["FROM", ""], ["TO", ""], ["", ""],
        ["CONDUCTOR", "size / type"], ["IOUT", "continuous"],
        ["IMAX", "IOUT × 1.25"], ["TEMP f", ""],
        ["FILL f", ""], ["BASE", "at term"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
        ["OCPD", ""], ["EGC", ""],
        ["CONDUIT", ""], ["FILL", ""], ["LEN", ""], ["VD", ""]],
-      [2.5, 9.5, 10.5, 13, 11, 5.5, 5.5, 4.5, 4.5, 5, 6.5, 4, 5.5, 4.5, 8, 4.5, 4.5, 5],
-      ["l", "l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
+      [10.5, 11.5, 12, 11, 5.5, 5.5, 4.5, 4.5, 5, 6.5, 4, 5.5, 4.5, 8, 4.5, 4.5, 5],
+      ["l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
        "c", "c", "c"],
       rows);
   }
@@ -12251,6 +12316,9 @@ function pvSchedInputsRender() {
            placeholder="${r.ocpd ? r.ocpd : "auto"}" value="${m.ocpd !== undefined ? m.ocpd : ""}"></td>
       <td><input class="sched-len" type="number" step="0.1" min="0" style="width:80px"
            placeholder="${r.lengthFt}" value="${m.lengthFt !== undefined ? m.lengthFt : ""}"></td>
+      <td><input class="sched-grp" type="text" maxlength="6" style="width:80px"
+           placeholder="own pipe"
+           value="${m.conduitGroup !== undefined ? modEscHtml(m.conduitGroup) : modEscHtml(r.conduitGroup || "")}"></td>
     </tr>`;
   }).join("");
 }
@@ -12270,6 +12338,10 @@ function pvReadSchedManual() {
     if (c !== undefined) rec.current = c;
     if (o !== undefined) rec.ocpd = o;
     if (l !== undefined) rec.lengthFt = l;
+    // Runs sharing a label share a raceway, so their conductors derate together.
+    const gEl = tr.querySelector(".sched-grp");
+    const g = gEl ? String(gEl.value).trim() : "";
+    if (g) rec.conduitGroup = g;
     if (Object.keys(rec).length) out[id] = rec;
   });
   return out;
