@@ -1384,7 +1384,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.45.1";
+const APP_VERSION = "2.46.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2524,7 +2524,7 @@ const SYSTEM_POI_POINTS = ["Main Service Panel", "Sub Panel", "Gateway"];
  * The internal keys stay prePlumb / preWire — renaming those would ripple through the
  * engine and the tests for no gain.
  */
-const VARIANT_LABEL = { plumb: "EXTERIOR RUN", wire: "OPTIONAL ATTIC RUN" };
+const VARIANT_LABEL = { plumb: "EXTERIOR RUN", wire: "(OPTIONAL) ATTIC RUN" };
 
 /*
  * Where a gateway feeds, when one is in the way.
@@ -10114,29 +10114,12 @@ async function buildECalcsPdf(o) {
   const dcm = r.isDc && r.dc && r.dc.module ? r.dc : null;
   const mi = r.mi || {};
   const basisChips = [
-    ["LOCATION", (r.location && r.location.display) || "—"],
+    ["LOCATION", String((r.location && r.location.display) || "—")
+      .replace(/\s*·\s*WMO.*$/, "")],
     ["AMBIENT USED", `${n(r.tUsed, 1)} °C`],
     ["TEMP FACTOR", n(r.tempFactor, 3)],
     ["SERVICE", `${r.vac || 240} V ${r.phase === 3 ? "3Ø" : "1Ø"}`]
-  ].concat(dcm ? [
-    // Only the module and inverter figures the string maths actually consumed.
-    ["MODULE Voc", `${n(dcm.module.Voc, 2)} V`],
-    ["MODULE Vmp", `${n(dcm.module.Vmp, 2)} V`],
-    ["MODULE Isc", `${n(dcm.module.Isc, 2)} A`],
-    ["Voc COEFF", `${n(dcm.tkVoc, 3)} %/°C`],
-    ["Pmax COEFF", `${n(dcm.tkVmp, 3)} %/°C`],
-    ["CELL TEMP", `${n(dcm.tHot, 1)} °C`],
-    ["INVERTER MPPT", `${dcm.inverter.vMin}–${dcm.inverter.vMax} V`],
-    ["MPPTs", String(dcm.inverter.mpptCount || "—")]
-  ] : [
-    // On the AC path the module contributes nothing to conductor sizing; the
-    // microinverter's output current is what every branch is sized from.
-    ["MICROINVERTER", String(mi.miModel || "—")],
-    ["Iac PER MODULE", `${n(r.iac, 2)} A`],
-    ["MODULES / BRANCH", `${r.minBranch}–${r.maxBranch}`],
-    ["MODULE", (r.module && r.module.name) || "—"],
-    ["MODULE Wp", `${(r.module && r.module.Wpeak) || "—"} W`]
-  ]);
+  ];
   // Reserve the band's height before drawing it: pdf-lib grows a rectangle upward
   // from y, so drawing at the current baseline covers the heading above.
   y -= 24;
@@ -10149,7 +10132,58 @@ async function buildECalcsPdf(o) {
     if (i) page.drawLine({ start: { x: L + i * cw, y: y - 4 },
       end: { x: L + i * cw, y: y + 22 }, thickness: 0.4, color: rule });
   });
-  y -= 20;
+  y -= 22;
+
+  /*
+   * Equipment, one labelled line per piece of kit, each naming its model.
+   *
+   * Three different sources feed a string calculation — the module, the inverter and the
+   * interrupter — and mixing their figures into one strip made it impossible to tell
+   * which limit belonged to which device. One line each, model first.
+   */
+  const station = (r.location && /WMO/.test(String(r.location.display || "")))
+    ? String(r.location.display).replace(/^.*WMO\s*/, "WMO ") : "";
+  const equipLines = dcm ? [
+    ["MODULE", [dcm.module.name,
+      `Voc ${n(dcm.module.Voc, 2)} V`, `Vmp ${n(dcm.module.Vmp, 2)} V`,
+      `Isc ${n(dcm.module.Isc, 2)} A`,
+      `Voc coeff ${n(dcm.tkVoc, 3)} %/°C`, `Pmax coeff ${n(dcm.tkVmp, 3)} %/°C`,
+      `${dcm.module.Wpeak} W`]],
+    ["INVERTER", [dcm.inverter.model,
+      `MPPT ${dcm.inverter.vMin}–${dcm.inverter.vMax} V`,
+      `${dcm.inverter.mpptCount || "?"} MPPT`,
+      dcm.inverter.impPerMppt ? `${dcm.inverter.impPerMppt} A Imp per MPPT` : "",
+      dcm.inverter.maxDcKw ? `${dcm.inverter.maxDcKw} kW DC max` : ""]],
+    ["INTERRUPTER", dcm.mci
+      ? [dcm.mci.model, `${dcm.mci.vDisconnect} V per device, additive`,
+         `max ${dcm.mci.maxPerString} per string`,
+         `covers ${dcm.modsPerMci} module(s)`]
+      : ["none selected"]],
+    ["TEMPERATURES", [`cell ${n(dcm.tHot, 1)} °C`,
+      `${n(dcm.tMax, 1)} °C ambient + ${n(dcm.adder, 0)} °C mounting`,
+      `lowest ambient ${n(dcm.tMin, 1)} °C`, station]]
+  ] : [
+    // On the AC path the module contributes nothing to conductor sizing: every branch is
+    // sized from the microinverter's output current.
+    ["MICROINVERTER", [String(mi.miModel || "—"),
+      `Iac ${n(r.iac, 2)} A per module`,
+      `${r.minBranch}–${r.maxBranch} modules per branch`,
+      `${r.wireTempSel} °C ampacity column`]],
+    ["MODULE", [(r.module && r.module.name) || "—",
+      `${(r.module && r.module.Wpeak) || "—"} W`,
+      "not used for conductor sizing"]],
+    ["TEMPERATURES", [`ambient used ${n(r.tUsed, 1)} °C`, station]]
+  ];
+
+  equipLines.forEach(([label, parts]) => {
+    const body = parts.filter(Boolean).join("   ·   ");
+    page.drawText(clip(label, 90, bold, 7.5),
+      { x: L, y, size: 7.5, font: bold, color: muted });
+    page.drawText(clip(body, W - 84, font, 8.5),
+      { x: L + 84, y, size: 8.5, font, color: ink });
+    y -= 11.5;
+  });
+  y -= 5;
 
   /**
    * A table whose headers carry the formula under the column name.
@@ -10225,19 +10259,15 @@ async function buildECalcsPdf(o) {
   if (r.isDc && r.dc && r.dc.strings && r.dc.strings.length) {
     const d = r.dc;
     const bad_ = x => x.tooShort || x.tooLong || x.overVoltage || x.belowMppt;
-    text(`${d.inverter.model}` +
-      (d.mci ? `   ·   ${d.mci.model}, ${d.mci.vDisconnect} V per device` : "") +
-      `   ·   lowest ambient ${n(d.tMin, 1)} °C   ·   +${n(d.adder, 0)} °C mounting adder`,
-      L, 8.5, font, inkSoft, W);
-    y -= 13;
+
 
     ftable(`DC strings — allowed ${d.minPerString} to ${d.maxPerString} modules`,
       [["STRING", ""], ["MODULES", ""], ["MPPT", ""],
-       ["Voc COLD", "Voc×(1+(Tmin−25)k)"], ["STRING Voc", "Voc_COLD × MODULES"],
-       ["MAX V", "inverter limit"],
-       ["Vmp HOT", "Vmp×(1+(Tcell−25)k)"], ["STRING Vmp", "Vmp_HOT × MODULES"],
+       ["Voc COLD", "per module"], ["STRING Voc", "Voc_COLD × MODULES"],
+       ["MAX V", "inverter"],
+       ["Vmp HOT", "per module"], ["STRING Vmp", "Vmp_HOT × MODULES"],
        ["MIN V", "MPPT floor"],
-       ["MCIs", "MODULES / per MCI"],
+       ["MCIs", "per string"],
        ["MAX I", "Isc × 1.25"],
        ["ROUND TRIP", "2 × run"], ["RESULT", ""]],
       [6, 6, 4, 7, 8, 6, 7, 8, 6, 5, 6, 7, 8],
@@ -10254,8 +10284,7 @@ async function buildECalcsPdf(o) {
       })));
   } else if (r.branches && r.branches.length) {
     const mi = r.mi || {};
-    text(`${r.wireTempSel} °C ampacity column   ·   ` +
-      `design high ${n(r.tAmb, 1)} °C, record low ${n(r.tMin, 1)} °C` +
+    text(`design high ${n(r.tAmb, 1)} °C, record low ${n(r.tMin, 1)} °C` +
       (r.tAdder ? `, +${n(r.tAdder, 0)} °C rooftop adder` : ""),
       L, 8.5, font, inkSoft, W);
     y -= 13;
@@ -10294,12 +10323,14 @@ async function buildECalcsPdf(o) {
     const pw = atticIds.has(pp.id) ? sch.preWire.find(x => x.id === pp.id) : null;
     const pairs = pw ? [[VARIANT_LABEL.plumb, pp], [VARIANT_LABEL.wire, pw]]
                      : [[VARIANT_LABEL.plumb, pp]];
-    pairs.forEach(([variant, x]) => {
+    pairs.forEach(([variant, x], vi) => {
       if (!x) return;
+      // Only the first row of a pair carries the run number and endpoints.
+      const first = vi === 0;
       rows.push({
         bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
         strongCols: [3, 5, 9, 11],
-        cells: [String(x.id), x.from, x.to, variant,
+        cells: [first ? String(x.id) : "", first ? x.from : "", first ? x.to : "", variant,
           `${x.wire} ${x.condLabel}`, n(x.contCurrent), n(x.maxCurrent),
           n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
           n(x.baseAmp, 0), n(x.deratedAmp, 1), x.termTemp + "°",
@@ -10315,13 +10346,13 @@ async function buildECalcsPdf(o) {
   if (rows.length) {
     ftable("Conductor schedule — exterior run and optional attic run",
       [["RUN", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
-       ["CONDUCTOR", "size and type"], ["IOUT", "continuous"],
+       ["CONDUCTOR", "size / type"], ["IOUT", "continuous"],
        ["IMAX", "IOUT × 1.25"], ["TEMP f", ""],
-       ["FILL f", ""], ["BASE", "at term rating"],
+       ["FILL f", ""], ["BASE", "at term"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
        ["OCPD", ""], ["EGC", ""],
        ["CONDUIT", ""], ["FILL", ""], ["LEN", ""], ["VD", ""]],
-      [2.5, 8.5, 9.5, 11, 10.5, 5.5, 5.5, 5, 4.5, 5, 6.5, 4, 5.5, 5, 10.5, 4.5, 4.5, 5],
+      [2.5, 9.5, 10.5, 13, 11, 5.5, 5.5, 4.5, 4.5, 5, 6.5, 4, 5.5, 4.5, 8, 4.5, 4.5, 5],
       ["l", "l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
        "c", "c", "c"],
       rows);
