@@ -1383,7 +1383,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.37.0";
+const APP_VERSION = "2.39.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -3861,6 +3861,59 @@ function specPrefixFor(field, row) {
   return cat ? categoryPrefix(cat) : "";
 }
 
+function specSheetTitle(fileName) {
+  const f = String(fileName || "").trim();
+  if (!f) return "";
+  const NAME_FIELDS = ["category", "model", "name", "miModel", "roofType",
+                       "attachment", "railing", "equipment", "item", "type"];
+
+  for (const table of Object.keys(TABLE_SCHEMAS)) {
+    const rows = getTable(table);
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const matches = Object.keys(row).some(k => sameText(row[k], f));
+      if (!matches) continue;
+      const parts = NAME_FIELDS.map(k => row[k]).filter(v =>
+        v !== undefined && v !== null && String(v).trim() && !sameText(v, f));
+      if (parts.length) {
+        return [...new Set(parts.map(v => String(v).trim()))]
+          .slice(0, 2).join(" — ").toUpperCase();
+      }
+    }
+  }
+  // Nothing claims it: tidy the filename rather than printing it raw.
+  return f.replace(/\.pdf$/i, "").replace(/^[A-Za-z]+_/, "")
+          .replace(/[_-]+/g, " ").trim().toUpperCase();
+}
+
+const WINANSI_MAP = {
+  "\u03b2": "B", "\u03b3": "y", "\u0394": "delta", "\u03a9": "ohm",
+  "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
+  "\u00b2": "2", "\u00b3": "3", "\u2192": "->", "\u2190": "<-",
+  "\u00d7": "x", "\u00f7": "/"
+};
+
+/** Characters above Latin-1 that WinAnsi does encode, so they may stay. */
+const WINANSI_HIGH_OK = new Set([0x20AC, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020,
+  0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017D, 0x2018, 0x2019, 0x201C,
+  0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x017E,
+  0x0178]);
+
+/** A string safe for a standard PDF font. Unknown high characters are dropped. */
+function winAnsi(v) {
+  let t = String(v === undefined || v === null ? "" : v);
+  Object.keys(WINANSI_MAP).forEach(k => { t = t.split(k).join(WINANSI_MAP[k]); });
+  let out = "";
+  for (const ch of t) {
+    const c = ch.codePointAt(0);
+    if (c <= 0xFF || WINANSI_HIGH_OK.has(c)) out += ch;
+  }
+  return out;
+}
+
+const SPEC_SHEET_PREFIX = "SS";
+
 /** Case- and padding-insensitive comparison for free-text reference columns. */
 const sameText = (a, b) =>
   String(a === undefined || a === null ? "" : a).trim().toLowerCase() ===
@@ -6001,6 +6054,7 @@ if (typeof module !== "undefined" && module.exports) {
     get RT_STRING_INV() { return RT_STRING_INV; },
     stringInvRow, projectStringInv, stringInvNames,
     poiPointsFor, pvLandingPoint, resolveScheduleRuns, SYSTEM_POI_POINTS,
+    specSheetTitle, SPEC_SHEET_PREFIX, winAnsi,
     GATEWAY_POI_POINTS, GATEWAY_RUN_ID,
     RD_GROUPS, RD_GROUP_OF, rdGroupOf, rdTablesIn,
     get RT_MCI() { return RT_MCI; },
@@ -7869,6 +7923,7 @@ function suggestSheets(project) {
 async function buildPackage(opts) {
   const { PDFDocument } = window.PDFLib;
   const { project, plotHandle, plotName, sheets, projectHandle, onStep } = opts;
+  const rootDir = opts.rootDir || (typeof state !== "undefined" ? state.rootHandle : null);
 
   // ---- refuse before writing anything if any input is unusable ----------
   const problems = [];
@@ -7898,6 +7953,33 @@ async function buildPackage(opts) {
   out.setCreator(`SPEED ${APP_VERSION}`);
   out.setProducer(`SPEED ${APP_VERSION}`);
 
+  /*
+   * The title block that spec sheets are framed in. A dedicated spec-sheet template
+   * is preferred; the calculations template is accepted as a fallback but its sheet
+   * name and number are wrong for a datasheet, so that is said out loud rather than
+   * shipped quietly.
+   */
+  const frameNotes = [];
+  let framed = 0, sheetNo = 0;
+  const { StandardFonts } = window.PDFLib;
+  const bandFont = await out.embedFont(StandardFonts.Helvetica);
+  const bandBold = await out.embedFont(StandardFonts.HelveticaBold);
+  let bandLogo = null;
+  try {
+    const png = bomLogoBytes();
+    if (png) bandLogo = await out.embedPng(png);
+  } catch (e) { /* the band reads fine without it */ }
+
+  // "n of m" needs the total up front, so the spec sheets are counted first.
+  let specPageTotal = 0;
+  for (const inp of inputs) {
+    if (inp.role !== "spec sheet") continue;
+    try {
+      const b = await (await inp.handle.getFile()).arrayBuffer();
+      specPageTotal += (await PDFDocument.load(b)).getPageCount();
+    } catch (e) { /* the read below reports it properly */ }
+  }
+
   const merged = [];
   let done = 0;
   for (const inp of inputs) {
@@ -7912,11 +7994,40 @@ async function buildPackage(opts) {
                     `use a PDF feature the merger does not support.`];
       throw e;
     }
-    const pages = await out.copyPages(src, src.getPageIndices());
-    pages.forEach(p => out.addPage(p));
+    /*
+     * Spec sheets get framed in a title block; the CAD plot already has one.
+     *
+     * Framing is skipped silently rather than fatally when no template is in the
+     * folder — an unframed package still beats no package, and the caller is told.
+     */
+    if (inp.role === "spec sheet") {
+      for (let i = 0; i < src.getPageCount(); i++) {
+        const k = await drawAppendixSheet(out, src, i, {
+          font: bandFont, bold: bandBold, logo: bandLogo,
+          title: specSheetTitle(inp.name),
+          customer: project.account_name || "",
+          address: [project.street_address, project.city,
+                    [project.state, project.zip_code].filter(Boolean).join(" ")]
+                    .filter(Boolean).join(", "),
+          projectNumber: project.project_number || "",
+          index: ++sheetNo, total: specPageTotal
+        });
+        if (k < 0.45) {
+          frameNotes.push(`"${inp.name}" page ${i + 1} scaled to ` +
+            `${Math.round(k * 100)}% — small print may not be legible.`);
+        }
+      }
+      framed += src.getPageCount();
+    } else {
+      const pages = await out.copyPages(src, src.getPageIndices());
+      pages.forEach(p => out.addPage(p));
+    }
     merged.push({ name: inp.name, pages: src.getPageCount(), role: inp.role });
   }
 
+  if (framed) {
+    frameNotes.unshift(`${framed} spec-sheet page(s) were framed in a title block.`);
+  }
   const bytes = await out.save();
 
   // ---- verify before writing ------------------------------------------
@@ -7938,7 +8049,8 @@ async function buildPackage(opts) {
   await w.write(bytes);
   await w.close();
 
-  return { filename, pages: expected, bytes: bytes.length, merged, replaced: existed };
+  return { filename, pages: expected, bytes: bytes.length, merged, replaced: existed,
+           framed, frameNotes };
 }
 
 /* ---------------------------------------------------- Spec sheets view */
@@ -8527,32 +8639,135 @@ function bomRefreshBuildState() {
  * and AHJ names all arrive from reference data or a CSV, and one stray character
  * would otherwise cost the whole sheet.
  */
-const WINANSI_MAP = {
-  "\u03b2": "B", "\u03b3": "y", "\u0394": "delta", "\u03a9": "ohm",
-  "\u2264": "<=", "\u2265": ">=", "\u2260": "!=", "\u2248": "~",
-  "\u00b2": "2", "\u00b3": "3", "\u2192": "->", "\u2190": "<-",
-  "\u00d7": "x", "\u00f7": "/"
-};
+const ECALC_TEMPLATE_PATH = ["Templates", "E CALCS TEMPLATE.pdf"];
+const SPEC_FRAME_PATH = ["Templates", "SPEC SHEET TEMPLATE.pdf"];
 
-/** Characters above Latin-1 that WinAnsi does encode, so they may stay. */
-const WINANSI_HIGH_OK = new Set([0x20AC, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020,
-  0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x017D, 0x2018, 0x2019, 0x201C,
-  0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x017E,
-  0x0178]);
-
-/** A string safe for a standard PDF font. Unknown high characters are dropped. */
-function winAnsi(v) {
-  let t = String(v === undefined || v === null ? "" : v);
-  Object.keys(WINANSI_MAP).forEach(k => { t = t.split(k).join(WINANSI_MAP[k]); });
-  let out = "";
-  for (const ch of t) {
-    const c = ch.codePointAt(0);
-    if (c <= 0xFF || WINANSI_HIGH_OK.has(c)) out += ch;
-  }
-  return out;
+/** A template PDF's bytes from the SPEED folder, or null. */
+async function templateBytes(rootDir, parts) {
+  if (!rootDir) return null;
+  try {
+    let cursor = rootDir;
+    const path = parts.slice();
+    const file = path.pop();
+    for (const d of path) cursor = await cursor.getDirectoryHandle(d);
+    const fh = await cursor.getFileHandle(file);
+    return new Uint8Array(await (await fh.getFile()).arrayBuffer());
+  } catch (e) { return null; }
 }
 
-const ECALC_TEMPLATE_PATH = ["Templates", "E CALCS TEMPLATE.pdf"];
+/*
+ * Appendix sheets for the spec sheets.
+ *
+ * AHJs require every sheet numbered and named, and doing that by importing each
+ * datasheet into CAD is work that produces nothing the tool could not generate. So
+ * the cover sheet's index carries one "Appendix" entry and the tool stamps its own
+ * slim band along the bottom of each datasheet: number, title, customer, address and
+ * n of m.
+ *
+ * Deliberately NOT the full title block. Kevin's call, and it keeps the datasheet
+ * legible — the licence and stamp stay on the cover sheet, which is what his AHJs
+ * accept. If one ever wants the stamp on every sheet, this band is where it goes.
+ */
+const SPEC_BAND_H = 54;
+
+/**
+ * What to call a datasheet, from the reference tables rather than its filename.
+ *
+ * Every table is scanned for a row holding this filename, and the row's own naming
+ * fields become the title — so it reads "PV MODULE — REC470AA PURE-RX-DC" instead of
+ * "Module_REC PURE-RX.pdf". Matching generically rather than per-table means a new
+ * table with a spec-sheet column works without being added here.
+ */
+/**
+ * Draw the appendix band and place the datasheet page above it.
+ *
+ * The page is scaled to the space left over, never stretched — a squashed datasheet
+ * would misrepresent the dimension callouts printed on it.
+ */
+async function drawAppendixSheet(out, srcDoc, srcIndex, o) {
+  const { StandardFonts, rgb } = window.PDFLib;
+  const W = 1224, H = 792;
+  const page = out.addPage([W, H]);
+  const font = o.font, bold = o.bold;
+  const ink = rgb(0.06, 0.09, 0.16), muted = rgb(0.42, 0.45, 0.52);
+
+  // The datasheet, in everything above the band.
+  const M = 16;
+  const box = { x0: M, y0: SPEC_BAND_H + 8, x1: W - M, y1: H - M };
+  const emb = await out.embedPage(srcDoc.getPage(srcIndex));
+  const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+  const k = Math.min(bw / emb.width, bh / emb.height);
+  page.drawPage(emb, {
+    x: box.x0 + (bw - emb.width * k) / 2,
+    y: box.y0 + (bh - emb.height * k) / 2,
+    xScale: k, yScale: k
+  });
+
+  // The band.
+  page.drawLine({ start: { x: M, y: SPEC_BAND_H }, end: { x: W - M, y: SPEC_BAND_H },
+    thickness: 1, color: ink });
+
+  let x = M + 2;
+  if (o.logo) {
+    const h = 18;
+    const w = o.logo.width * (h / o.logo.height);
+    page.drawImage(o.logo, { x, y: 24, width: w, height: h });
+    x += w + 14;
+  }
+
+  const clipTo = (t, max, f, size) => {
+    let v = winAnsi(t);
+    while (v.length > 1 && f.widthOfTextAtSize(v, size) > max) v = v.slice(0, -1);
+    return v;
+  };
+
+  // Right-hand end first, so the title knows how much room it has.
+  const numTxt = `${SPEC_SHEET_PREFIX}-${o.index}`;
+  const ofTxt = `SHEET ${o.index} OF ${o.total}`;
+  const numW = bold.widthOfTextAtSize(numTxt, 20);
+  page.drawText(numTxt, { x: W - M - 4 - numW, y: 26, size: 20, font: bold, color: ink });
+  const ofW = font.widthOfTextAtSize(ofTxt, 8);
+  page.drawText(ofTxt, { x: W - M - 4 - ofW, y: 14, size: 8, font, color: muted });
+
+  const projTxt = winAnsi(o.projectNumber || "");
+  if (projTxt) {
+    const pw = bold.widthOfTextAtSize(projTxt, 10);
+    page.drawText(projTxt, { x: W - M - 24 - numW - pw, y: 30, size: 10,
+      font: bold, color: ink });
+  }
+
+  const room = (W - M - 40 - numW - (projTxt ? 90 : 0)) - x;
+  page.drawText(clipTo(o.title, room, bold, 12), { x, y: 30, size: 12, font: bold, color: ink });
+  page.drawText(clipTo([o.customer, o.address].filter(Boolean).join("   ·   "), room, font, 8.5),
+    { x, y: 16, size: 8.5, font, color: muted });
+
+  return k;
+}
+
+/**
+ * Put one page inside a title block, scaled to fit and centred.
+ *
+ * Manufacturer datasheets carry no title block, so on a permit set they are loose
+ * paper. Framing each one turns it into a sheet: the datasheet is placed in the
+ * template's drawable box at the largest scale that fits, leaving the title block
+ * strip clear.
+ *
+ * Aspect ratio is preserved — a squashed datasheet would misrepresent the drawings
+ * and dimension callouts printed on it.
+ */
+async function framePageInto(out, frameDoc, srcDoc, srcIndex, box) {
+  const [sheet] = await out.copyPages(frameDoc, [0]);
+  const page = out.addPage(sheet);
+  const emb = await out.embedPage(srcDoc.getPage(srcIndex));
+  const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
+  const k = Math.min(bw / emb.width, bh / emb.height);
+  page.drawPage(emb, {
+    x: box.x0 + (bw - emb.width * k) / 2,
+    y: box.y0 + (bh - emb.height * k) / 2,
+    xScale: k, yScale: k
+  });
+  return k;
+}
 const ECALC_BOX = { x0: 14.8, y0: 11.1, x1: 993.4, y1: 780.8 };
 const ECALC_PAD = 9;
 
@@ -9365,6 +9580,7 @@ async function specBuild() {
   $("specIssues").innerHTML = "";
   try {
     const result = await buildPackage({
+      rootDir: state.rootHandle,
       project, projectHandle: SPEC_PROJECT.handle,
       plotHandle: SPEC_PLOT.handle, plotName: SPEC_PLOT.name,
       sheets,
@@ -9374,6 +9590,11 @@ async function specBuild() {
       `<div class="msg show ok" style="margin:0"><strong>${result.filename}</strong><br>` +
       `${result.pages} pages, ${(result.bytes / 1048576).toFixed(2)} MB` +
       (result.replaced ? " — replaced the previous package." : "") + `</div>` +
+      // Whether the spec sheets got a title block, and why not when they did not.
+      ((result.frameNotes || []).length
+        ? `<div class="msg show ${result.framed ? "ok" : "warn"}" style="margin:8px 0 0">` +
+          result.frameNotes.map(modEscHtml).join("<br>") + `</div>`
+        : "") +
       `<div class="kv" style="margin-top:10px">` +
       result.merged.map(m =>
         `<div><span>${m.name}</span><span>${m.pages} pages</span></div>`).join("") +
