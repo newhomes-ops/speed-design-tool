@@ -1383,7 +1383,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.39.0";
+const APP_VERSION = "2.40.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -8817,6 +8817,9 @@ async function buildECalcsPdf(o) {
   const rule = rgb(0.72, 0.75, 0.80);
   const bad = rgb(0.70, 0.12, 0.12);
   const head = rgb(0.90, 0.92, 0.95);
+  const navy = rgb(0.086, 0.133, 0.255);      // the interface's header navy
+  const navyMuted = rgb(0.62, 0.68, 0.80);
+  const paper = rgb(1, 1, 1);
 
   const L = ECALC_BOX.x0 + ECALC_PAD;
   const R = ECALC_BOX.x1 - ECALC_PAD;
@@ -8896,235 +8899,199 @@ async function buildECalcsPdf(o) {
   const n = (v, d) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)))
     ? "—" : Number(v).toFixed(d === undefined ? 2 : d);
 
-  /* ---- title, and the basis in one line -----------------------------------
-   * Customer, address, AHJ and utility are all in the template's title block, so
-   * repeating them here only crowded the sheet. The design basis is one line: what a
-   * reviewer needs is the temperatures the derating came from, not a block of them.
-   */
+  /* ---- title -------------------------------------------------------------- */
   text("ELECTRICAL CALCULATIONS", L, 13, bold);
-  y -= 4; hline(y, ink); y -= 11;
-
-  const basis = [
-    (r.location && r.location.display) || "",
-    `design high ${n(r.tAmb, 1)} °C`,
-    `record low ${n(r.tMin, 1)} °C`,
-    r.tAdder ? `+${n(r.tAdder, 0)} °C rooftop = ${n(r.tUsed, 1)} °C` : "",
-    `${r.vac || 240} V ${r.phase === 3 ? "3-phase" : "1-phase"}`,
-    (r.module && r.module.name) || ""
-  ].filter(Boolean).join("   ·   ");
-  text(basis, L, 9, font, muted, W);
-  y -= 15;
+  y -= 4; hline(y, ink); y -= 13;
 
   /*
-   * Two blocks side by side, in the shape Kevin's own calculation sheet uses:
-   * quantities down the side, circuits across the top, and the formula written into
-   * the row label so a reviewer can follow how each value arose. The previous version
-   * asserted answers in a twenty-column table, which was compact and unauditable.
-   */
-  const GAP = 26;
-  const BW = (W - GAP) / 2;
-  const XL = L, XR = L + BW + GAP;
-  const yTop = y;
-
-  /**
-   * One block: a red title bar, a header row of column names, then rows of
-   * label/values. A row with `band` is a grey sub-heading spanning the block.
+   * A middle course between two sheets that were each wrong in one direction.
    *
-   * Returns the y it finished at, so the two columns can be laid out independently.
+   * Kevin's own layout put every quantity on its own row with the formula in the
+   * label. Auditable, but very tall and it repeats the same shared inputs beside
+   * every circuit. The version before this one was a twenty-column table: compact
+   * and impossible to check, because it only asserted answers.
+   *
+   * What the two have in common is the observation that most derivation inputs are
+   * SHARED — ambient, temperature factor, ampacity column, voltage-drop limit — and
+   * only a handful vary per circuit. So the shared basis is stated once, with its
+   * formulas, and the varying quantities go in a compact table whose column headers
+   * carry the formula underneath the name. Derivation stays visible; height does not
+   * multiply by the number of circuits.
    */
-  const specBlock = (x, w, title, heads, rows, yStart) => {
-    let yy = yStart;
-    const labelW = w * 0.52;
-    const colW = heads.length ? (w - labelW) / heads.length : 0;
-
-    page.drawRectangle({ x, y: yy - 2, width: w, height: 13, color: rgb(0.86, 0.20, 0.20) });
-    page.drawText(clip(title.toUpperCase(), w - 6, bold, 8.5),
-      { x: x + 3, y: yy + 1, size: 8.5, font: bold, color: rgb(1, 1, 1) });
-    yy -= 13;
-
-    if (heads.length) {
-      page.drawRectangle({ x, y: yy - 2, width: w, height: 12, color: head });
-      heads.forEach((h, i) => {
-        const t = clip(h, colW - 4, bold, 8);
-        page.drawText(t, { x: x + labelW + i * colW + colW - 3 - bold.widthOfTextAtSize(t, 8),
-          y: yy + 1, size: 8, font: bold, color: ink });
-      });
-      yy -= 12;
-    }
-
-    rows.forEach(row => {
-      if (row.band) {
-        page.drawRectangle({ x, y: yy - 2, width: w, height: 12,
-          color: rgb(0.88, 0.93, 0.88) });
-        page.drawText(clip(row.band.toUpperCase(), w - 6, bold, 8),
-          { x: x + 3, y: yy + 1, size: 8, font: bold, color: rgb(0.12, 0.35, 0.14) });
-        yy -= 12;
-        return;
-      }
-      page.drawText(clip(row.label, labelW - 5, font, 9),
-        { x: x + 3, y: yy + 1, size: 9, font, color: row.strong ? ink : muted });
-      (row.values || []).forEach((v, i) => {
-        const t = clip(v, colW - 5, row.strong ? bold : font, 9);
-        page.drawText(t, {
-          x: x + labelW + i * colW + colW - 3 -
-             (row.strong ? bold : font).widthOfTextAtSize(t, 9),
-          y: yy + 1, size: 9, font: row.strong ? bold : font,
-          color: row.bad ? bad : ink });
-      });
-      yy -= 11.5;
-      page.drawLine({ start: { x, y: yy + 8 }, end: { x: x + w, y: yy + 8 },
-        thickness: 0.4, color: rgb(0.90, 0.91, 0.94) });
-    });
-    return yy - 6;
+  // Label above value, in the interface's own proportions.
+  const chip = (label, value, x, w) => {
+    page.drawText(clip(label, w - 4, bold, 6.5), { x, y: y + 11, size: 6.5, font: bold,
+      color: muted });
+    page.drawText(clip(value, w - 4, bold, 9.5), { x, y, size: 9.5, font: bold, color: ink });
   };
 
-  /* ---- left block: the array ---------------------------------------------- */
-  let yLeft;
+  const basisChips = [
+    ["LOCATION", (r.location && r.location.display) || "—"],
+    ["DESIGN HIGH", `${n(r.tAmb, 1)} °C`],
+    ["RECORD LOW", `${n(r.tMin, 1)} °C`],
+    ["ROOFTOP ADDER", r.tAdder ? `+${n(r.tAdder, 0)} °C` : "none"],
+    ["AMBIENT USED", `${n(r.tUsed, 1)} °C`],
+    ["TEMP FACTOR  310.15(B)(1)", n(r.tempFactor, 3)],
+    ["AMPACITY COLUMN", `${r.wireTempSel || 75} °C`],
+    ["VD LIMIT", `${n(r.vdropMax, 1)} %`],
+    ["SERVICE", `${r.vac || 240} V ${r.phase === 3 ? "3Ø" : "1Ø"}`]
+  ];
+  page.drawRectangle({ x: L, y: y - 5, width: W, height: 28,
+    color: rgb(0.955, 0.965, 0.98) });
+  page.drawLine({ start: { x: L, y: y - 5 }, end: { x: L, y: y + 23 },
+    thickness: 2.5, color: navy });
+  const cw = W / basisChips.length;
+  basisChips.forEach((c, i) => chip(c[0], c[1], L + 4 + i * cw, cw));
+  y -= 34;
+
+  /**
+   * A table whose headers carry the formula under the column name.
+   *
+   * `heads` entries are [name, formula]. The formula line is what makes the numbers
+   * checkable without a row per quantity.
+   */
+  const ftable = (title, heads, weights, align, rows) => {
+    y -= 2;
+    page.drawRectangle({ x: L, y: y - 1, width: 2.5, height: 10, color: navy });
+    page.drawText(clip(title.toUpperCase(), W - 10, bold, 9.5),
+      { x: L + 6, y, size: 9.5, font: bold, color: navy });
+    y -= 15;
+
+    const total = weights.reduce((a, b) => a + b, 0);
+    const xs = []; let acc = L;
+    weights.forEach(w => { xs.push(acc); acc += (w / total) * W; });
+    const widths = weights.map(w => (w / total) * W);
+
+    // The navy header band the interface uses, so the sheet and the screen look like
+    // one tool rather than two.
+    page.drawRectangle({ x: L, y: y - 1, width: W, height: 21, color: navy });
+    heads.forEach((h, i) => {
+      const nm = clip(h[0], widths[i] - 3, bold, 7.5);
+      const fm = h[1] ? clip(h[1], widths[i] - 3, font, 6.5) : "";
+      const xn = (align[i] === "r")
+        ? xs[i] + widths[i] - 2 - bold.widthOfTextAtSize(nm, 7.5) : xs[i] + 1;
+      page.drawText(nm, { x: xn, y: y + 11, size: 7.5, font: bold, color: paper });
+      if (fm) {
+        const xf = (align[i] === "r")
+          ? xs[i] + widths[i] - 2 - font.widthOfTextAtSize(fm, 6.5) : xs[i] + 1;
+        page.drawText(fm, { x: xf, y: y + 3, size: 6.5, font, color: navyMuted });
+      }
+    });
+    y -= 12;
+
+    rows.forEach((row, ri) => {
+      if (ri % 2 === 1) {
+        page.drawRectangle({ x: L, y: y - 2.5, width: W, height: 11.5,
+          color: rgb(0.972, 0.977, 0.985) });
+      }
+      row.cells.forEach((c, i) => {
+        const f = row.strongCols && row.strongCols.includes(i) ? bold : font;
+        const t = clip(c, widths[i] - 3, f, 9);
+        const x = (align[i] === "r")
+          ? xs[i] + widths[i] - 2 - f.widthOfTextAtSize(t, 9) : xs[i] + 1;
+        page.drawText(t, { x, y, size: 9, font: f, color: row.bad ? bad : ink });
+      });
+      y -= 11.5;
+    });
+    hline(y + 8, rule);
+    y -= 6;
+  };
+
+  /* ---- the array ---------------------------------------------------------- */
   if (r.isDc && r.dc && r.dc.strings && r.dc.strings.length) {
     const d = r.dc;
-    const S = d.strings;
-    const bad_ = s => s.tooShort || s.tooLong || s.overVoltage || s.belowMppt;
-    yLeft = specBlock(XL, BW, `DC strings — ${d.inverter.model}`,
-      S.map(x => `STRING #${x.index}`), [
-      { label: "MODULES IN SERIES", values: S.map(x => String(x.nMod)), strong: true,
-        bad: S.some(bad_) },
-      { label: "MPPT INPUT", values: S.map(x => String(x.mppt)) },
-      { band: "cold-weather voltage — NEC 690.7" },
-      { label: `Voc AT STC (V/MODULE)`, values: S.map(() => n(d.module.Voc, 2)) },
-      { label: `Voc TEMP COEFF (%/°C)`, values: S.map(() => n(d.tkVoc, 3)) },
-      { label: `LOWEST AMBIENT (°C)`, values: S.map(() => n(d.tMin, 1)) },
-      { label: `Voc_COLD = Voc × (1 + (Tmin − 25) × k)`,
-        values: S.map(() => n(d.vocMax, 3)) },
-      { label: "STRING Voc = Voc_COLD × MODULES",
-        values: S.map(x => n(x.vocCold, 1)), strong: true,
-        bad: S.some(x => x.overVoltage) },
-      { label: `INVERTER MAX INPUT (V)`, values: S.map(() => String(d.inverter.vMax)) },
-      { label: "MAX MODULES = Vmax / Voc_COLD",
-        values: S.map(() => String(d.maxByInverter)), strong: true },
-      { band: "hot-weather voltage — MPPT floor" },
-      { label: "Vmp AT STC (V/MODULE)", values: S.map(() => n(d.module.Vmp, 2)) },
-      { label: "Vmp TEMP COEFF (%/°C)", values: S.map(() => n(d.tkVmp, 3)) },
-      { label: `CELL TEMP = Tmax + ${n(d.adder, 0)} MOUNTING (°C)`,
-        values: S.map(() => n(d.tHot, 1)) },
-      { label: "Vmp_HOT = Vmp × (1 + (Tcell − 25) × k)",
-        values: S.map(() => n(d.vmpMin, 3)) },
-      { label: "STRING Vmp = Vmp_HOT × MODULES",
-        values: S.map(x => n(x.vmpHot, 1)), strong: true },
-      { label: `INVERTER MIN MPPT (V)`, values: S.map(() => String(d.inverter.vMin)) },
-      { label: "MIN MODULES = Vmin / Vmp_HOT",
-        values: S.map(() => String(d.minPerString)), strong: true },
-      { band: "rapid shutdown" },
-      { label: d.mci ? `${d.mci.model} DISCONNECT (V)` : "INTERRUPTER",
-        values: S.map(() => d.mci ? String(d.mci.vDisconnect) : "none") },
-      { label: "MODULES PER MCI = Vmci / Voc_COLD",
-        values: S.map(() => d.modsPerMci === null ? "—" : String(d.modsPerMci)) },
-      { label: "MCIs = MODULES / PER MCI (round up)",
-        values: S.map(x => x.mciCount === null ? "—" : String(x.mciCount)),
-        strong: true },
-      { band: "dc circuit" },
-      { label: "Isc AT STC (A)", values: S.map(() => n(d.module.Isc, 2)) },
-      { label: "MAX CURRENT = Isc × 1.25 — 690.8(A)(1)",
-        values: S.map(x => n(x.maxCurrent, 2)), strong: true },
-      { label: "ROUND-TRIP LENGTH (FT)", values: S.map(x => String(x.runFt * 2)) },
-      { label: "RESULT", strong: true,
-        values: S.map(x => bad_(x)
-          ? (x.tooLong ? "TOO LONG" : x.tooShort ? "TOO SHORT"
-            : x.overVoltage ? "OVER V" : "BELOW MPPT") : "OK"),
-        bad: S.some(bad_) }
-    ], yTop);
-  } else {
-    const B = r.branches || [];
-    yLeft = specBlock(XL, BW, "AC branch circuit",
-      B.map(b => `CIRCUIT #${b.index}`), [
-      { label: "MODULES PER BRANCH CIRCUIT", values: B.map(b => String(b.nMod)),
-        strong: true },
-      { label: "VOLTAGE", values: B.map(() => `${r.vac} V`) },
-      { label: "BRANCH CURRENT: IOUT = Iac × MODULES",
-        values: B.map(b => n(b.iBranch) + " A"), strong: true },
-      { label: "MIN WIRE AMPACITY: IMAX = IOUT × 1.25",
-        values: B.map(b => n(b.iMinAmp) + " A") },
-      { band: "conductor de-rating" },
-      { label: "MAXIMUM AMBIENT TEMPERATURE",
-        values: B.map(() => n(r.tUsed, 0) + " °C") },
-      { label: "TEMPERATURE DE-RATING COEFFICIENT",
-        values: B.map(() => n(r.tempFactor, 2)) },
-      { label: "CURRENT-CARRYING CONDUCTORS",
-        values: B.map(b => String(b.fill)) },
-      { label: "FILL DE-RATING COEFFICIENT",
-        values: B.map(b => n(b.fillFactor, 2)) },
-      { label: "IWIRE_MIN = IOUT / TEMP_COEFF / FILL_COEFF",
-        values: B.map(b => n(b.iWireMin) + " A") },
-      { label: "GOVERNING CURRENT — NEC 690.8(B)",
-        values: B.map(b => n(b.reqAmps) + " A"), strong: true },
-      { label: `WIRE SIZE FROM ${r.wireTempSel} °C COLUMN`,
-        values: B.map(b => b.wireNEC) },
-      { label: "WIRE AMPACITY AT THAT SIZE",
-        values: B.map(b => pvBaseAmp(b.wireNEC, r.wireTempSel) + " A") },
-      { band: "voltage drop" },
-      { label: "RUN LENGTH (FT)", values: B.map(b => String(b.runFt)) },
-      { label: `VOLTAGE DROP (LIMIT ${n(r.vdropMax, 1)} %)`,
-        values: B.map(b => n(b.vdBranch, 3) + " %"),
-        bad: B.some(b => b.vdBranch > r.vdropMax) },
-      { label: "SIZE ADJUSTED FOR VOLTAGE DROP",
-        values: B.map(b => b.wire), strong: true },
-      { band: "overcurrent protection" },
-      { label: "MINIMUM OCPD = IOUT × 1.25",
-        values: B.map(b => n(b.iMinAmp) + " A") },
-      { label: "OCPD SIZE — NEC 240.6(A)",
-        values: B.map(b => `${b.ocpd} A, 2P`), strong: true },
-      { label: "EGC — NEC 250.122", values: B.map(b => b.egc) },
-      { label: "CONDUIT", values: B.map(b => b.conduit || "—") },
-      { label: "CONDUIT FILL",
-        values: B.map(b => b.conduitFillPct == null ? "N/A" : n(b.conduitFillPct, 1) + " %") }
-    ], yTop);
+    const bad_ = x => x.tooShort || x.tooLong || x.overVoltage || x.belowMppt;
+    text(`Module Voc ${n(d.module.Voc, 2)} V, Vmp ${n(d.module.Vmp, 2)} V, ` +
+      `Isc ${n(d.module.Isc, 2)} A   ·   temp coeff ${n(d.tkVoc, 3)} / ${n(d.tkVmp, 3)} %/°C` +
+      `   ·   cell temp ${n(d.tHot, 1)} °C (+${n(d.adder, 0)} mounting)   ·   ` +
+      `${d.inverter.model} ${d.inverter.vMin}–${d.inverter.vMax} V` +
+      (d.mci ? `   ·   ${d.mci.model} ${d.mci.vDisconnect} V/device` : ""),
+      L, 8.5, font, muted, W);
+    y -= 13;
+
+    ftable(`DC strings — allowed ${d.minPerString} to ${d.maxPerString} modules`,
+      [["STRING", ""], ["MODULES", ""], ["MPPT", ""],
+       ["Voc COLD", "Voc×(1+(Tmin−25)k)"], ["STRING Voc", "Voc_COLD × MODULES"],
+       ["MAX V", "inverter limit"],
+       ["Vmp HOT", "Vmp×(1+(Tcell−25)k)"], ["STRING Vmp", "Vmp_HOT × MODULES"],
+       ["MIN V", "MPPT floor"],
+       ["MCIs", "MODULES / per MCI"], ["MAX I", "Isc × 1.25"],
+       ["ROUND TRIP", "2 × run"], ["RESULT", ""]],
+      [6, 6, 4, 7, 8, 6, 7, 8, 6, 5, 6, 7, 8],
+      ["l", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "l"],
+      d.strings.map(x => ({
+        bad: bad_(x), strongCols: [1, 4, 7, 12],
+        cells: [`#${x.index}`, String(x.nMod), String(x.mppt),
+          n(d.vocMax, 2), n(x.vocCold, 1), String(d.inverter.vMax),
+          n(d.vmpMin, 2), n(x.vmpHot, 1), String(d.inverter.vMin),
+          x.mciCount === null ? "—" : String(x.mciCount),
+          n(x.maxCurrent, 2), `${x.runFt * 2} ft`,
+          bad_(x) ? (x.tooLong ? "TOO LONG" : x.tooShort ? "TOO SHORT"
+            : x.overVoltage ? "OVER V" : "BELOW MPPT") : "OK"]
+      })));
+  } else if (r.branches && r.branches.length) {
+    const mi = r.mi || {};
+    text(`Microinverter ${mi.miModel || ""}   ·   Iac ${n(r.iac, 2)} A at ${r.vac} V` +
+      `   ·   ${r.minBranch}–${r.maxBranch} modules per branch`, L, 8.5, font, muted, W);
+    y -= 13;
+
+    ftable("AC branch circuits",
+      [["CKT", ""], ["MODULES", ""], ["IOUT", "Iac × modules"],
+       ["IMAX", "IOUT × 1.25"], ["CCC", ""], ["FILL f", "310.15(C)(1)"],
+       ["IWIRE_MIN", "IOUT / TF / FF"], ["GOVERNING", "690.8(B)"],
+       ["WIRE", `${r.wireTempSel} °C col`], ["AMPACITY", "at that size"],
+       ["LEN", ""], ["VD", `limit ${n(r.vdropMax, 1)}%`],
+       ["OCPD", "240.6(A)"], ["EGC", "250.122"], ["CONDUIT", "ch.9 fill"]],
+      [4, 6, 6, 6, 4, 5, 7, 7, 5, 7, 5, 5, 5, 5, 13],
+      ["l", "r", "r", "r", "r", "r", "r", "r", "l", "r", "r", "r", "r", "l", "l"],
+      r.branches.map(b => ({
+        bad: b.vdBranch > r.vdropMax,
+        strongCols: [2, 7, 8, 12],
+        cells: [`#${b.index}`, String(b.nMod), n(b.iBranch), n(b.iMinAmp),
+          String(b.fill), n(b.fillFactor, 2), n(b.iWireMin), n(b.reqAmps),
+          b.wire, pvBaseAmp(b.wire, r.wireTempSel) + " A",
+          `${b.runFt} ft`, n(b.vdBranch, 3) + "%", `${b.ocpd} A`, b.egc,
+          (b.conduit || "—") +
+            (b.conduitFillPct == null ? "" : `  ${n(b.conduitFillPct, 1)}%`)]
+      })));
   }
 
-  /* ---- right block: every run downstream, both variants ------------------- */
+  /* ---- downstream, both variants in one table ----------------------------- */
   const sch = r.schedule || { prePlumb: [], preWire: [], note: "", diverged: [] };
-  let yRight = yTop;
-  const downstream = sch.prePlumb.filter(x => x.id !== 1);
-
-  downstream.forEach(pp => {
-    const pw = sch.preWire.find(x => x.id === pp.id) || pp;
-    const pair = [pp, pw];
-    const title = `${pp.from} to ${pp.to}`;
-    yRight = specBlock(XR, BW, title, ["PRE-PLUMB", "PRE-WIRE"], [
-      { label: "CONDUCTOR TYPE", values: pair.map(x => x.condLabel), strong: true },
-      { label: "MATERIAL", values: pair.map(x => x.material) },
-      { label: "PARALLEL CIRCUITS", values: pair.map(x => String(x.parallel)) },
-      { label: "CURRENT-CARRYING CONDUCTORS", values: pair.map(x => String(x.ccc)) },
-      { label: "CONTINUOUS CURRENT: IOUT", values: pair.map(x => n(x.contCurrent) + " A"),
-        strong: true },
-      { label: "IMAX = IOUT × 1.25", values: pair.map(x => n(x.maxCurrent) + " A") },
-      { band: "conductor de-rating" },
-      { label: "AMBIENT USED (°C)", values: pair.map(x => n(x.tUsed, 0)) },
-      { label: "TEMPERATURE DE-RATING COEFFICIENT",
-        values: pair.map(x => n(x.tempFactor, 2)) },
-      { label: "FILL DE-RATING COEFFICIENT",
-        values: pair.map(x => x.openAir ? "N/A" : n(x.fillFactor, 2)) },
-      { label: "TERMINATION RATING", values: pair.map(x => x.termTemp + " °C") },
-      { label: "WIRE SIZE SELECTED", values: pair.map(x => x.wire), strong: true },
-      { label: "BASE AMPACITY AT THAT SIZE", values: pair.map(x => n(x.baseAmp, 0) + " A") },
-      { label: "DERATED = BASE × TEMP × FILL",
-        values: pair.map(x => n(x.deratedAmp, 1) + " A"),
-        bad: pair.some(x => x.deratedAmp < x.mustCarry) },
-      { band: "voltage drop" },
-      { label: "RUN LENGTH (FT)", values: pair.map(x => String(x.lengthFt)) },
-      { label: `VOLTAGE DROP (LIMIT ${n(r.vdropMax, 1)} %)`,
-        values: pair.map(x => n(x.vd, 2) + " %"),
-        bad: pair.some(x => x.vd > r.vdropMax) },
-      { band: "overcurrent protection" },
-      { label: "OCPD SIZE", values: pair.map(x => x.ocpd ? `${x.ocpd} A, 2P` : "N/A"),
-        strong: true },
-      { label: "EGC — NEC 250.122", values: pair.map(x => x.egc) },
-      { label: "CONDUIT", values: pair.map(x => x.conduitText || "—") },
-      { label: "CONDUIT FILL",
-        values: pair.map(x => (x.openAir || !x.conduit || x.conduit.fillPct == null)
-          ? "N/A" : n(x.conduit.fillPct, 1) + " %") }
-    ], yRight);
+  const rows = [];
+  sch.prePlumb.filter(x => x.id !== 1).forEach(pp => {
+    const pw = sch.preWire.find(x => x.id === pp.id);
+    [["PRE-PLUMB", pp], ["PRE-WIRE", pw]].forEach(([variant, x]) => {
+      if (!x) return;
+      rows.push({
+        bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
+        strongCols: [3, 5, 9, 11],
+        cells: [String(x.id), x.from, x.to, variant,
+          `${x.wire} ${x.condLabel}`, n(x.contCurrent), n(x.maxCurrent),
+          n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
+          n(x.baseAmp, 0), n(x.deratedAmp, 1), x.termTemp + "°",
+          x.ocpd ? `${x.ocpd} A` : "N/A", x.egc,
+          (x.conduitText || "—") +
+            ((x.openAir || !x.conduit || x.conduit.fillPct == null)
+              ? "" : `  ${n(x.conduit.fillPct, 1)}%`),
+          `${x.lengthFt} ft`, n(x.vd, 2) + "%"]
+      });
+    });
   });
 
-  y = Math.min(yLeft, yRight) - 4;
+  if (rows.length) {
+    ftable("Conductor schedule — pre-plumb and pre-wire",
+      [["ID", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
+       ["CONDUCTOR", "size and type"], ["IOUT", "continuous"],
+       ["IMAX", "IOUT × 1.25"], ["TEMP f", "310.15(B)(1)"],
+       ["FILL f", "310.15(C)(1)"], ["BASE", "at term rating"],
+       ["DERATED", "BASE × TF × FF"], ["TERM", ""],
+       ["OCPD", "240.4 / 240.6"], ["EGC", "250.122"],
+       ["CONDUIT", "ch.9 fill"], ["LEN", ""], ["VD", `limit ${n(r.vdropMax, 1)}%`]],
+      [2.5, 9, 10, 7, 11, 5.5, 5.5, 5, 4.5, 5, 6, 4, 5, 4.5, 13, 4.5, 5],
+      ["l", "l", "l", "l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "l", "l", "r", "r"],
+      rows);
+  }
 
   /* ---- notes -------------------------------------------------------------- */
   y -= 4;
