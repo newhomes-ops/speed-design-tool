@@ -1384,7 +1384,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.44.0";
+const APP_VERSION = "2.44.1";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -9839,7 +9839,7 @@ const SPEC_BAND_H = 54;
  * would misrepresent the dimension callouts printed on it.
  */
 async function drawAppendixSheet(out, srcDoc, srcIndex, o) {
-  const { StandardFonts, rgb } = window.PDFLib;
+  const { StandardFonts, rgb, degrees } = window.PDFLib;
   const W = 1224, H = 792;
   const page = out.addPage([W, H]);
   const font = o.font, bold = o.bold;
@@ -9848,14 +9848,36 @@ async function drawAppendixSheet(out, srcDoc, srcIndex, o) {
   // The datasheet, in everything above the band.
   const M = 16;
   const box = { x0: M, y0: SPEC_BAND_H + 8, x1: W - M, y1: H - M };
+  /*
+   * A source page's /Rotate flag has to be applied by hand.
+   *
+   * embedPage() gives the raw content and ignores the page's rotation, so a datasheet
+   * stored portrait with /Rotate 90 — which every viewer shows as landscape — came out
+   * on its side. pdfplumber reports the rotated size, which is why measuring it said
+   * 1224 x 792 and embedding it behaved as 792 x 1224.
+   *
+   * So: swap the dimensions when the rotation is a quarter turn, scale against the
+   * dimensions as DISPLAYED, then rotate the content back and shift the origin to
+   * compensate — a rotation about the draw origin moves the box off it.
+   */
   const emb = await out.embedPage(srcDoc.getPage(srcIndex));
+  const rot = (((srcDoc.getPage(srcIndex).getRotation().angle || 0) % 360) + 360) % 360;
+  const quarter = rot === 90 || rot === 270;
+  const sw = quarter ? emb.height : emb.width;
+  const sh = quarter ? emb.width : emb.height;
+
   const bw = box.x1 - box.x0, bh = box.y1 - box.y0;
-  const k = Math.min(bw / emb.width, bh / emb.height);
-  page.drawPage(emb, {
-    x: box.x0 + (bw - emb.width * k) / 2,
-    y: box.y0 + (bh - emb.height * k) / 2,
-    xScale: k, yScale: k
-  });
+  const k = Math.min(bw / sw, bh / sh);
+  const px = box.x0 + (bw - sw * k) / 2;
+  const py = box.y0 + (bh - sh * k) / 2;
+
+  let dx = px, dy = py;
+  if (rot === 90)       { dy = py + sh * k; }
+  else if (rot === 180) { dx = px + sw * k; dy = py + sh * k; }
+  else if (rot === 270) { dx = px + sw * k; }
+
+  page.drawPage(emb, { x: dx, y: dy, xScale: k, yScale: k,
+                       rotate: degrees(rot ? -rot : 0) });
 
   // The band.
   page.drawLine({ start: { x: M, y: SPEC_BAND_H }, end: { x: W - M, y: SPEC_BAND_H },
@@ -9876,21 +9898,13 @@ async function drawAppendixSheet(out, srcDoc, srcIndex, o) {
   };
 
   // Right-hand end first, so the title knows how much room it has.
+  // Just the sheet number: the project number and the sheet count are already on the
+  // cover sheet and its index, and repeating them crowded the band.
   const numTxt = `${SPEC_SHEET_PREFIX}-${o.index}`;
-  const ofTxt = `SHEET ${o.index} OF ${o.total}`;
   const numW = bold.widthOfTextAtSize(numTxt, 20);
-  page.drawText(numTxt, { x: W - M - 4 - numW, y: 26, size: 20, font: bold, color: ink });
-  const ofW = font.widthOfTextAtSize(ofTxt, 8);
-  page.drawText(ofTxt, { x: W - M - 4 - ofW, y: 14, size: 8, font, color: muted });
+  page.drawText(numTxt, { x: W - M - 4 - numW, y: 22, size: 20, font: bold, color: ink });
 
-  const projTxt = winAnsi(o.projectNumber || "");
-  if (projTxt) {
-    const pw = bold.widthOfTextAtSize(projTxt, 10);
-    page.drawText(projTxt, { x: W - M - 24 - numW - pw, y: 30, size: 10,
-      font: bold, color: ink });
-  }
-
-  const room = (W - M - 40 - numW - (projTxt ? 90 : 0)) - x;
+  const room = (W - M - 30 - numW) - x;
   page.drawText(clipTo(o.title, room, bold, 12), { x, y: 30, size: 12, font: bold, color: ink });
   page.drawText(clipTo([o.customer, o.address].filter(Boolean).join("   ·   "), room, font, 8.5),
     { x, y: 16, size: 8.5, font, color: muted });
