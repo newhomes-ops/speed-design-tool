@@ -1027,11 +1027,11 @@
             <tbody></tbody></table></div>
         </div>
 
-        <h4 style="margin:18px 0 4px">Conductor schedule — pre-plumb</h4>
+        <h4 style="margin:18px 0 4px">Conductor schedule — exterior run</h4>
         <div class="hint" style="margin-bottom:6px">THWN-2 copper in conduit.</div>
         <div style="overflow-x:auto"><table id="pv_sched_plumb" class="sched"><thead></thead><tbody></tbody></table></div>
 
-        <h4 style="margin:18px 0 4px">Conductor schedule — pre-wire</h4>
+        <h4 style="margin:18px 0 4px">Conductor schedule — optional attic run</h4>
         <div class="hint" style="margin-bottom:6px">Romex NM-B in free air, SER-AL on the service feeder.</div>
         <div style="overflow-x:auto"><table id="pv_sched_wire" class="sched"><thead></thead><tbody></tbody></table></div>
 
@@ -1383,7 +1383,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.40.0";
+const APP_VERSION = "2.41.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2468,6 +2468,19 @@ const POI_POINTS = ["IQ Combiner", "Gateway", "Sub Panel", "Main Service Panel"]
  * the panel that equipment feeds.
  */
 const SYSTEM_POI_POINTS = ["Main Service Panel", "Sub Panel", "Gateway"];
+
+/*
+ * What the two conductor variants are called on a drawing.
+ *
+ * "Pre-plumb" and "pre-wire" describe when the work happens, which tells a plan
+ * reviewer nothing. Naming them by WHERE the conductor runs explains why one is
+ * THWN-2 in conduit and the other is NM-B in free air, and "optional" matches the
+ * note: Romex MAY be used as an alternative where local code permits.
+ *
+ * The internal keys stay prePlumb / preWire — renaming those would ripple through the
+ * engine and the tests for no gain.
+ */
+const VARIANT_LABEL = { plumb: "EXTERIOR RUN", wire: "OPTIONAL ATTIC RUN" };
 
 /*
  * Where a gateway feeds, when one is in the way.
@@ -5648,8 +5661,9 @@ const TABLE_SCHEMAS = {
     note: "The runs that make up the conductor schedule, in drawing order. " +
           "'Current' says where each run's continuous current comes from: branch " +
           "is one microinverter branch, total is every branch combined, ess is " +
-          "the battery's AC output, manual is typed in. 'Pre-plumb' and " +
-          "'Pre-wire' are the conductor type in each variant. Tick 'Rooftop' only " +
+          "the battery's AC output, manual is typed in. 'Exterior run' and " +
+          "'Optional attic run' are the conductor type in each variant. Tick " +
+          "'Rooftop' only " +
           "for runs exposed to sunlight on the roof — those are the only ones the " +
           "310.15(B)(2) adder touches. A job with no battery deletes the ESS rows.",
     key: "id",
@@ -5659,8 +5673,8 @@ const TABLE_SCHEMAS = {
       { name: "to",       type: "text", required: true, label: "To" },
       { name: "current",  type: "text", required: true, label: "Current from",
         choices: SCHEDULE_CURRENT_SOURCES },
-      { name: "plumb",    type: "text", required: true, label: "Pre-plumb conductor" },
-      { name: "wire",     type: "text", required: true, label: "Pre-wire conductor" },
+      { name: "plumb",    type: "text", required: true, label: "Exterior run conductor" },
+      { name: "wire",     type: "text", required: true, label: "Attic run conductor" },
       { name: "conduit",  type: "text", label: "Conduit", choices: ["", ...CONDUIT_TYPES] },
       { name: "ccc",      type: "int", required: true, label: "CCC per circuit" },
       { name: "lengthFt", type: "number", label: "Default length (ft)" },
@@ -8936,13 +8950,19 @@ async function buildECalcsPdf(o) {
     ["VD LIMIT", `${n(r.vdropMax, 1)} %`],
     ["SERVICE", `${r.vac || 240} V ${r.phase === 3 ? "3Ø" : "1Ø"}`]
   ];
-  page.drawRectangle({ x: L, y: y - 5, width: W, height: 28,
-    color: rgb(0.955, 0.965, 0.98) });
-  page.drawLine({ start: { x: L, y: y - 5 }, end: { x: L, y: y + 23 },
-    thickness: 2.5, color: navy });
+  // Reserve the band's height before drawing it: pdf-lib grows a rectangle upward
+  // from y, so drawing at the current baseline covers the heading above.
+  y -= 24;
+  page.drawRectangle({ x: L, y: y - 4, width: W, height: 26, color: rgb(1, 1, 1) });
+  page.drawRectangle({ x: L, y: y - 4, width: W, height: 26,
+    borderColor: ink, borderWidth: 0.6, color: undefined });
   const cw = W / basisChips.length;
-  basisChips.forEach((c, i) => chip(c[0], c[1], L + 4 + i * cw, cw));
-  y -= 34;
+  basisChips.forEach((c, i) => {
+    chip(c[0], c[1], L + 5 + i * cw, cw - 6);
+    if (i) page.drawLine({ start: { x: L + i * cw, y: y - 4 },
+      end: { x: L + i * cw, y: y + 22 }, thickness: 0.4, color: rule });
+  });
+  y -= 20;
 
   /**
    * A table whose headers carry the formula under the column name.
@@ -8951,50 +8971,58 @@ async function buildECalcsPdf(o) {
    * checkable without a row per quantity.
    */
   const ftable = (title, heads, weights, align, rows) => {
-    y -= 2;
-    page.drawRectangle({ x: L, y: y - 1, width: 2.5, height: 10, color: navy });
-    page.drawText(clip(title.toUpperCase(), W - 10, bold, 9.5),
-      { x: L + 6, y, size: 9.5, font: bold, color: navy });
-    y -= 15;
+    y -= 4;
+    page.drawText(clip(title.toUpperCase(), W, bold, 9.5),
+      { x: L, y, size: 9.5, font: bold, color: ink });
+    // Enough clearance that the header band below cannot reach the title.
+    y -= 27;
 
     const total = weights.reduce((a, b) => a + b, 0);
     const xs = []; let acc = L;
     weights.forEach(w => { xs.push(acc); acc += (w / total) * W; });
     const widths = weights.map(w => (w / total) * W);
 
-    // The navy header band the interface uses, so the sheet and the screen look like
-    // one tool rather than two.
-    page.drawRectangle({ x: L, y: y - 1, width: W, height: 21, color: navy });
+    const PAD = 4;   // keeps a right-aligned column clear of the next left-aligned one
+    page.drawLine({ start: { x: L, y: y + 20 }, end: { x: L + W, y: y + 20 },
+      thickness: 0.8, color: ink });
     heads.forEach((h, i) => {
-      const nm = clip(h[0], widths[i] - 3, bold, 7.5);
-      const fm = h[1] ? clip(h[1], widths[i] - 3, font, 6.5) : "";
+      const nm = clip(h[0], widths[i] - PAD * 2, bold, 7.5);
+      const fm = h[1] ? clip(h[1], widths[i] - PAD * 2, font, 6.5) : "";
       const xn = (align[i] === "r")
-        ? xs[i] + widths[i] - 2 - bold.widthOfTextAtSize(nm, 7.5) : xs[i] + 1;
-      page.drawText(nm, { x: xn, y: y + 11, size: 7.5, font: bold, color: paper });
+        ? xs[i] + widths[i] - PAD - bold.widthOfTextAtSize(nm, 7.5) : xs[i] + PAD;
+      page.drawText(nm, { x: xn, y: y + 11, size: 7.5, font: bold, color: ink });
       if (fm) {
         const xf = (align[i] === "r")
-          ? xs[i] + widths[i] - 2 - font.widthOfTextAtSize(fm, 6.5) : xs[i] + 1;
-        page.drawText(fm, { x: xf, y: y + 3, size: 6.5, font, color: navyMuted });
+          ? xs[i] + widths[i] - PAD - font.widthOfTextAtSize(fm, 6.5) : xs[i] + PAD;
+        page.drawText(fm, { x: xf, y: y + 3, size: 6.5, font, color: muted });
       }
     });
-    y -= 12;
+    y -= 2;
+    page.drawLine({ start: { x: L, y: y + 1 }, end: { x: L + W, y: y + 1 },
+      thickness: 0.8, color: ink });
+    y -= 10;
+    const gridTop = y + 11;
 
-    rows.forEach((row, ri) => {
-      if (ri % 2 === 1) {
-        page.drawRectangle({ x: L, y: y - 2.5, width: W, height: 11.5,
-          color: rgb(0.972, 0.977, 0.985) });
-      }
+    rows.forEach(row => {
       row.cells.forEach((c, i) => {
         const f = row.strongCols && row.strongCols.includes(i) ? bold : font;
-        const t = clip(c, widths[i] - 3, f, 9);
+        const t = clip(c, widths[i] - PAD * 2, f, 9);
         const x = (align[i] === "r")
-          ? xs[i] + widths[i] - 2 - f.widthOfTextAtSize(t, 9) : xs[i] + 1;
+          ? xs[i] + widths[i] - PAD - f.widthOfTextAtSize(t, 9) : xs[i] + PAD;
         page.drawText(t, { x, y, size: 9, font: f, color: row.bad ? bad : ink });
       });
-      y -= 11.5;
+      y -= 12;
+      page.drawLine({ start: { x: L, y: y + 8.5 }, end: { x: L + W, y: y + 8.5 },
+        thickness: 0.4, color: rule });
     });
-    hline(y + 8, rule);
-    y -= 6;
+    // Vertical rules, so a value cannot be read against the wrong column.
+    const gridBot = y + 8.5;
+    xs.concat([L + W]).forEach(xv => page.drawLine({
+      start: { x: xv, y: gridTop }, end: { x: xv, y: gridBot },
+      thickness: 0.4, color: rule }));
+    page.drawLine({ start: { x: L, y: gridBot }, end: { x: L + W, y: gridBot },
+      thickness: 0.8, color: ink });
+    y -= 8;
   };
 
   /* ---- the array ---------------------------------------------------------- */
@@ -9041,9 +9069,9 @@ async function buildECalcsPdf(o) {
        ["IWIRE_MIN", "IOUT / TF / FF"], ["GOVERNING", "690.8(B)"],
        ["WIRE", `${r.wireTempSel} °C col`], ["AMPACITY", "at that size"],
        ["LEN", ""], ["VD", `limit ${n(r.vdropMax, 1)}%`],
-       ["OCPD", "240.6(A)"], ["EGC", "250.122"], ["CONDUIT", "ch.9 fill"]],
-      [4, 6, 6, 6, 4, 5, 7, 7, 5, 7, 5, 5, 5, 5, 13],
-      ["l", "r", "r", "r", "r", "r", "r", "r", "l", "r", "r", "r", "r", "l", "l"],
+       ["OCPD", "240.6(A)"], ["EGC", "250.122"], ["CONDUIT", ""], ["FILL", "ch.9"]],
+      [4, 6.5, 6.5, 6.5, 4, 5, 7.5, 7.5, 5.5, 7, 5, 5.5, 5.5, 5, 12, 5],
+      ["l", "r", "r", "r", "r", "r", "r", "r", "l", "r", "r", "r", "r", "l", "l", "r"],
       r.branches.map(b => ({
         bad: b.vdBranch > r.vdropMax,
         strongCols: [2, 7, 8, 12],
@@ -9051,8 +9079,8 @@ async function buildECalcsPdf(o) {
           String(b.fill), n(b.fillFactor, 2), n(b.iWireMin), n(b.reqAmps),
           b.wire, pvBaseAmp(b.wire, r.wireTempSel) + " A",
           `${b.runFt} ft`, n(b.vdBranch, 3) + "%", `${b.ocpd} A`, b.egc,
-          (b.conduit || "—") +
-            (b.conduitFillPct == null ? "" : `  ${n(b.conduitFillPct, 1)}%`)]
+          b.conduit || "—",
+          b.conduitFillPct == null ? "N/A" : n(b.conduitFillPct, 1) + "%"]
       })));
   }
 
@@ -9061,7 +9089,7 @@ async function buildECalcsPdf(o) {
   const rows = [];
   sch.prePlumb.filter(x => x.id !== 1).forEach(pp => {
     const pw = sch.preWire.find(x => x.id === pp.id);
-    [["PRE-PLUMB", pp], ["PRE-WIRE", pw]].forEach(([variant, x]) => {
+    [[VARIANT_LABEL.plumb, pp], [VARIANT_LABEL.wire, pw]].forEach(([variant, x]) => {
       if (!x) return;
       rows.push({
         bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
@@ -9071,25 +9099,27 @@ async function buildECalcsPdf(o) {
           n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
           n(x.baseAmp, 0), n(x.deratedAmp, 1), x.termTemp + "°",
           x.ocpd ? `${x.ocpd} A` : "N/A", x.egc,
-          (x.conduitText || "—") +
-            ((x.openAir || !x.conduit || x.conduit.fillPct == null)
-              ? "" : `  ${n(x.conduit.fillPct, 1)}%`),
+          x.conduitText || "—",
+          (x.openAir || !x.conduit || x.conduit.fillPct == null)
+            ? "N/A" : n(x.conduit.fillPct, 1) + "%",
           `${x.lengthFt} ft`, n(x.vd, 2) + "%"]
       });
     });
   });
 
   if (rows.length) {
-    ftable("Conductor schedule — pre-plumb and pre-wire",
+    ftable("Conductor schedule — exterior run and optional attic run",
       [["ID", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
        ["CONDUCTOR", "size and type"], ["IOUT", "continuous"],
        ["IMAX", "IOUT × 1.25"], ["TEMP f", "310.15(B)(1)"],
        ["FILL f", "310.15(C)(1)"], ["BASE", "at term rating"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
        ["OCPD", "240.4 / 240.6"], ["EGC", "250.122"],
-       ["CONDUIT", "ch.9 fill"], ["LEN", ""], ["VD", `limit ${n(r.vdropMax, 1)}%`]],
-      [2.5, 9, 10, 7, 11, 5.5, 5.5, 5, 4.5, 5, 6, 4, 5, 4.5, 13, 4.5, 5],
-      ["l", "l", "l", "l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "l", "l", "r", "r"],
+       ["CONDUIT", ""], ["FILL", "ch.9"], ["LEN", ""],
+       ["VD", `limit ${n(r.vdropMax, 1)}%`]],
+      [2.5, 8.5, 9.5, 11, 10.5, 5.5, 5.5, 5, 4.5, 5, 6.5, 4, 5.5, 5, 10.5, 4.5, 4.5, 5],
+      ["l", "l", "l", "l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "l", "l",
+       "r", "r", "r"],
       rows);
   }
 
