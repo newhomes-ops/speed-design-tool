@@ -1384,7 +1384,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.42.0";
+const APP_VERSION = "2.44.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2323,6 +2323,38 @@ let RT_HEIGHT_ADDER = [
  * stale RT_HEIGHT_ADDER.json cannot quietly reapply the old graduated adders to a
  * 2020 project — which would understate conductor temperature and undersize wire.
  */
+/*
+ * Article numbers by code cycle.
+ *
+ * The citations printed on a calculation sheet have to match the code the permit is
+ * issued under. Several were renumbered in the 2020 reorganisation of Article 310, so
+ * a sheet stamped NEC 2017 that cites 310.15(C)(1) is citing an article that does not
+ * exist in the code it claims to follow.
+ *
+ * Only the entries that actually moved are listed per era; the rest are stable and
+ * carry one value.
+ */
+const NEC_CITE = {
+  ampacityTable: [[2020, "Table 310.16"], [2011, "310.15(B)(16)"], [0, "Table 310.16"]],
+  ambientCorr:   [[2020, "310.15(B)(1)"], [2014, "310.15(B)(2)(a)"], [0, "310.16"]],
+  fillAdjust:    [[2020, "310.15(C)(1)"], [0, "310.15(B)(3)(a)"]],
+  rooftop:       [[2020, "310.15(B)(2)"], [2017, "310.15(B)(3)(c)"], [0, "310.15(B)(3)(c)"]],
+  pvSizing:      [[0, "690.8(B)"]],
+  pvMaxCurrent:  [[0, "690.8(A)(1)"]],
+  ocpd:          [[0, "240.6(A)"]],
+  ocpdProtect:   [[0, "240.4"]],
+  egc:           [[0, "250.122"]]
+};
+
+/** The article number for a rule under a given code year. */
+function necCite(key, codeYear) {
+  const rows = NEC_CITE[key];
+  if (!rows) return "";
+  const y = necCodeYear(codeYear) || 2023;   // unknown reads as current
+  for (const [from, cite] of rows) if (y >= from) return cite;
+  return rows[rows.length - 1][1];
+}
+
 const NEC_ROOFTOP_ADDER_C = 33;          // 60 °F
 const NEC_ROOFTOP_FLAT_FROM = 2017;      // first code year using the flat rule
 const NEC_ROOFTOP_BELOW = "below 7/8 in.";
@@ -2439,9 +2471,9 @@ const CONDUIT_DEFAULT = "EMT";
  * battery deletes two rows, a job with a load centre adds one.
  */
 let RT_SCHEDULE = [
-  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"PV WIRE","wire":"PV WIRE","conduit":"","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":""},
-  {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv"},
-  {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess"}
+  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":"","atticOption":true},
+  {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv","atticOption":false},
+  {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess","atticOption":false}
 ];
 
 /** Where a schedule run's current comes from. */
@@ -6764,7 +6796,13 @@ const TABLE_SCHEMAS = {
       { name: "rooftop",  type: "bool", label: "Rooftop" },
       { name: "ocpd",     type: "int", label: "OCPD (0 = size it)" },
       { name: "poiRole",  type: "text", label: "POI controlled by",
-        choices: ["", "pv", "ess"] }
+        choices: ["", "pv", "ess"] },
+      // The Romex alternative only exists where the conductor could plausibly go
+      // through the attic instead of down an exterior wall — the array or junction box
+      // to the combiner, or the strings to the inverter. Downstream of that everything
+      // is an exterior run, so offering a second variant there invented a choice the
+      // installer does not have.
+      { name: "atticOption", type: "bool", label: "Attic alternative" }
     ]
   },
 
@@ -7140,6 +7178,7 @@ if (typeof module !== "undefined" && module.exports) {
     bomCountArrays, acCableRow, acTerminatorRow, MODULE_ORIENTATIONS,
     BOM_CABLE_SLACK_PNS, get RT_ENPHASE_AC() { return RT_ENPHASE_AC; },
     necCodeYear, necRooftopRegime, necRooftopHeights, pvHeightKeyValid,
+    necCite, NEC_CITE,
     NEC_ROOFTOP_ADDER_C, NEC_ROOFTOP_FLAT_FROM, NEC_ROOFTOP_BELOW, NEC_ROOFTOP_ABOVE,
     pvMaxAmbient, pvAmpColumn, pvBaseAmp, condTypeRow, condArea, conduitOptions,
     conduitLabel, pvSizeRun, buildSchedule, CONDUIT_TYPES, CONDUIT_DEFAULT,
@@ -9927,7 +9966,8 @@ async function buildECalcsPdf(o) {
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const ink = rgb(0.06, 0.09, 0.16);
+  const ink = rgb(0, 0, 0);          // black, not near-black: it prints grey otherwise
+  const inkSoft = rgb(0.20, 0.22, 0.28);
   const muted = rgb(0.42, 0.45, 0.52);
   const rule = rgb(0.72, 0.75, 0.80);
   const bad = rgb(0.70, 0.12, 0.12);
@@ -10040,17 +10080,32 @@ async function buildECalcsPdf(o) {
     page.drawText(clip(value, w - 4, bold, 9.5), { x, y, size: 9.5, font: bold, color: ink });
   };
 
+  const dcm = r.isDc && r.dc && r.dc.module ? r.dc : null;
+  const mi = r.mi || {};
   const basisChips = [
     ["LOCATION", (r.location && r.location.display) || "—"],
-    ["DESIGN HIGH", `${n(r.tAmb, 1)} °C`],
-    ["RECORD LOW", `${n(r.tMin, 1)} °C`],
-    ["ROOFTOP ADDER", r.tAdder ? `+${n(r.tAdder, 0)} °C` : "none"],
     ["AMBIENT USED", `${n(r.tUsed, 1)} °C`],
-    ["TEMP FACTOR  310.15(B)(1)", n(r.tempFactor, 3)],
-    ["AMPACITY COLUMN", `${r.wireTempSel || 75} °C`],
-    ["VD LIMIT", `${n(r.vdropMax, 1)} %`],
+    ["TEMP FACTOR", n(r.tempFactor, 3)],
     ["SERVICE", `${r.vac || 240} V ${r.phase === 3 ? "3Ø" : "1Ø"}`]
-  ];
+  ].concat(dcm ? [
+    // Only the module and inverter figures the string maths actually consumed.
+    ["MODULE Voc", `${n(dcm.module.Voc, 2)} V`],
+    ["MODULE Vmp", `${n(dcm.module.Vmp, 2)} V`],
+    ["MODULE Isc", `${n(dcm.module.Isc, 2)} A`],
+    ["Voc COEFF", `${n(dcm.tkVoc, 3)} %/°C`],
+    ["Pmax COEFF", `${n(dcm.tkVmp, 3)} %/°C`],
+    ["CELL TEMP", `${n(dcm.tHot, 1)} °C`],
+    ["INVERTER MPPT", `${dcm.inverter.vMin}–${dcm.inverter.vMax} V`],
+    ["MPPTs", String(dcm.inverter.mpptCount || "—")]
+  ] : [
+    // On the AC path the module contributes nothing to conductor sizing; the
+    // microinverter's output current is what every branch is sized from.
+    ["MICROINVERTER", String(mi.miModel || "—")],
+    ["Iac PER MODULE", `${n(r.iac, 2)} A`],
+    ["MODULES / BRANCH", `${r.minBranch}–${r.maxBranch}`],
+    ["MODULE", (r.module && r.module.name) || "—"],
+    ["MODULE Wp", `${(r.module && r.module.Wpeak) || "—"} W`]
+  ]);
   // Reserve the band's height before drawing it: pdf-lib grows a rectangle upward
   // from y, so drawing at the current baseline covers the heading above.
   y -= 24;
@@ -10089,12 +10144,18 @@ async function buildECalcsPdf(o) {
     heads.forEach((h, i) => {
       const nm = clip(h[0], widths[i] - PAD * 2, bold, 7.5);
       const fm = h[1] ? clip(h[1], widths[i] - PAD * 2, font, 6.5) : "";
-      const xn = (align[i] === "r")
-        ? xs[i] + widths[i] - PAD - bold.widthOfTextAtSize(nm, 7.5) : xs[i] + PAD;
+      const xn = align[i] === "r"
+        ? xs[i] + widths[i] - PAD - bold.widthOfTextAtSize(nm, 7.5)
+        : align[i] === "c"
+          ? xs[i] + (widths[i] - bold.widthOfTextAtSize(nm, 7.5)) / 2
+          : xs[i] + PAD;
       page.drawText(nm, { x: xn, y: y + 11, size: 7.5, font: bold, color: ink });
       if (fm) {
-        const xf = (align[i] === "r")
-          ? xs[i] + widths[i] - PAD - font.widthOfTextAtSize(fm, 6.5) : xs[i] + PAD;
+        const xf = align[i] === "r"
+          ? xs[i] + widths[i] - PAD - font.widthOfTextAtSize(fm, 6.5)
+          : align[i] === "c"
+            ? xs[i] + (widths[i] - font.widthOfTextAtSize(fm, 6.5)) / 2
+            : xs[i] + PAD;
         page.drawText(fm, { x: xf, y: y + 3, size: 6.5, font, color: muted });
       }
     });
@@ -10108,8 +10169,11 @@ async function buildECalcsPdf(o) {
       row.cells.forEach((c, i) => {
         const f = row.strongCols && row.strongCols.includes(i) ? bold : font;
         const t = clip(c, widths[i] - PAD * 2, f, 9);
-        const x = (align[i] === "r")
-          ? xs[i] + widths[i] - PAD - f.widthOfTextAtSize(t, 9) : xs[i] + PAD;
+        const x = align[i] === "r"
+          ? xs[i] + widths[i] - PAD - f.widthOfTextAtSize(t, 9)
+          : align[i] === "c"
+            ? xs[i] + (widths[i] - f.widthOfTextAtSize(t, 9)) / 2
+            : xs[i] + PAD;
         page.drawText(t, { x, y, size: 9, font: f, color: row.bad ? bad : ink });
       });
       y -= 12;
@@ -10130,12 +10194,10 @@ async function buildECalcsPdf(o) {
   if (r.isDc && r.dc && r.dc.strings && r.dc.strings.length) {
     const d = r.dc;
     const bad_ = x => x.tooShort || x.tooLong || x.overVoltage || x.belowMppt;
-    text(`Module Voc ${n(d.module.Voc, 2)} V, Vmp ${n(d.module.Vmp, 2)} V, ` +
-      `Isc ${n(d.module.Isc, 2)} A   ·   temp coeff ${n(d.tkVoc, 3)} / ${n(d.tkVmp, 3)} %/°C` +
-      `   ·   cell temp ${n(d.tHot, 1)} °C (+${n(d.adder, 0)} mounting)   ·   ` +
-      `${d.inverter.model} ${d.inverter.vMin}–${d.inverter.vMax} V` +
-      (d.mci ? `   ·   ${d.mci.model} ${d.mci.vDisconnect} V/device` : ""),
-      L, 8.5, font, muted, W);
+    text(`${d.inverter.model}` +
+      (d.mci ? `   ·   ${d.mci.model}, ${d.mci.vDisconnect} V per device` : "") +
+      `   ·   lowest ambient ${n(d.tMin, 1)} °C   ·   +${n(d.adder, 0)} °C mounting adder`,
+      L, 8.5, font, inkSoft, W);
     y -= 13;
 
     ftable(`DC strings — allowed ${d.minPerString} to ${d.maxPerString} modules`,
@@ -10144,10 +10206,11 @@ async function buildECalcsPdf(o) {
        ["MAX V", "inverter limit"],
        ["Vmp HOT", "Vmp×(1+(Tcell−25)k)"], ["STRING Vmp", "Vmp_HOT × MODULES"],
        ["MIN V", "MPPT floor"],
-       ["MCIs", "MODULES / per MCI"], ["MAX I", "Isc × 1.25"],
+       ["MCIs", "MODULES / per MCI"],
+       ["MAX I", "Isc × 1.25"],
        ["ROUND TRIP", "2 × run"], ["RESULT", ""]],
       [6, 6, 4, 7, 8, 6, 7, 8, 6, 5, 6, 7, 8],
-      ["l", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "l"],
+      ["l", "c", "c", "c", "c", "c", "c", "c", "c", "c", "c", "c", "l"],
       d.strings.map(x => ({
         bad: bad_(x), strongCols: [1, 4, 7, 12],
         cells: [`#${x.index}`, String(x.nMod), String(x.mppt),
@@ -10160,19 +10223,25 @@ async function buildECalcsPdf(o) {
       })));
   } else if (r.branches && r.branches.length) {
     const mi = r.mi || {};
-    text(`Microinverter ${mi.miModel || ""}   ·   Iac ${n(r.iac, 2)} A at ${r.vac} V` +
-      `   ·   ${r.minBranch}–${r.maxBranch} modules per branch`, L, 8.5, font, muted, W);
+    text(`${r.wireTempSel} °C ampacity column   ·   ` +
+      `design high ${n(r.tAmb, 1)} °C, record low ${n(r.tMin, 1)} °C` +
+      (r.tAdder ? `, +${n(r.tAdder, 0)} °C rooftop adder` : ""),
+      L, 8.5, font, inkSoft, W);
     y -= 13;
 
     ftable("AC branch circuits",
       [["CKT", ""], ["MODULES", ""], ["IOUT", "Iac × modules"],
-       ["IMAX", "IOUT × 1.25"], ["CCC", ""], ["FILL f", "310.15(C)(1)"],
-       ["IWIRE_MIN", "IOUT / TF / FF"], ["GOVERNING", "690.8(B)"],
-       ["WIRE", `${r.wireTempSel} °C col`], ["AMPACITY", "at that size"],
-       ["LEN", ""], ["VD", `limit ${n(r.vdropMax, 1)}%`],
-       ["OCPD", "240.6(A)"], ["EGC", "250.122"], ["CONDUIT", ""], ["FILL", "ch.9"]],
+       ["IMAX", "IOUT × 1.25"], ["CCC", ""],
+       ["FILL f", ""],
+       ["IWIRE_MIN", "IOUT / TF / FF"],
+       ["GOVERNING", "larger of the two"],
+       ["WIRE", `${r.wireTempSel} °C col`],
+       ["AMPACITY", "at that size"],
+       ["LEN", ""], ["VD", ""],
+       ["OCPD", "IOUT × 1.25"], ["EGC", ""],
+       ["CONDUIT", ""], ["FILL", "ch.9"]],
       [4, 6.5, 6.5, 6.5, 4, 5, 7.5, 7.5, 5.5, 7, 5, 5.5, 5.5, 5, 12, 5],
-      ["l", "r", "r", "r", "r", "r", "r", "r", "l", "r", "r", "r", "r", "l", "l", "r"],
+      ["l", "c", "c", "c", "c", "c", "c", "c", "l", "c", "c", "c", "c", "l", "l", "c"],
       r.branches.map(b => ({
         bad: b.vdBranch > r.vdropMax,
         strongCols: [2, 7, 8, 12],
@@ -10188,9 +10257,13 @@ async function buildECalcsPdf(o) {
   /* ---- downstream, both variants in one table ----------------------------- */
   const sch = r.schedule || { prePlumb: [], preWire: [], note: "", diverged: [] };
   const rows = [];
-  sch.prePlumb.filter(x => x.id !== 1).forEach(pp => {
-    const pw = sch.preWire.find(x => x.id === pp.id);
-    [[VARIANT_LABEL.plumb, pp], [VARIANT_LABEL.wire, pw]].forEach(([variant, x]) => {
+  // Only a run with an attic alternative gets two rows; the rest are exterior only.
+  const atticIds = new Set(RT_SCHEDULE.filter(x => x.atticOption).map(x => x.id));
+  sch.prePlumb.forEach(pp => {
+    const pw = atticIds.has(pp.id) ? sch.preWire.find(x => x.id === pp.id) : null;
+    const pairs = pw ? [[VARIANT_LABEL.plumb, pp], [VARIANT_LABEL.wire, pw]]
+                     : [[VARIANT_LABEL.plumb, pp]];
+    pairs.forEach(([variant, x]) => {
       if (!x) return;
       rows.push({
         bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
@@ -10210,17 +10283,16 @@ async function buildECalcsPdf(o) {
 
   if (rows.length) {
     ftable("Conductor schedule — exterior run and optional attic run",
-      [["ID", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
+      [["RUN", ""], ["FROM", ""], ["TO", ""], ["VARIANT", ""],
        ["CONDUCTOR", "size and type"], ["IOUT", "continuous"],
-       ["IMAX", "IOUT × 1.25"], ["TEMP f", "310.15(B)(1)"],
-       ["FILL f", "310.15(C)(1)"], ["BASE", "at term rating"],
+       ["IMAX", "IOUT × 1.25"], ["TEMP f", ""],
+       ["FILL f", ""], ["BASE", "at term rating"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
-       ["OCPD", "240.4 / 240.6"], ["EGC", "250.122"],
-       ["CONDUIT", ""], ["FILL", "ch.9"], ["LEN", ""],
-       ["VD", `limit ${n(r.vdropMax, 1)}%`]],
+       ["OCPD", ""], ["EGC", ""],
+       ["CONDUIT", ""], ["FILL", "ch.9"], ["LEN", ""], ["VD", ""]],
       [2.5, 8.5, 9.5, 11, 10.5, 5.5, 5.5, 5, 4.5, 5, 6.5, 4, 5.5, 5, 10.5, 4.5, 4.5, 5],
-      ["l", "l", "l", "l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "l", "l",
-       "r", "r", "r"],
+      ["l", "l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
+       "c", "c", "c"],
       rows);
   }
 
