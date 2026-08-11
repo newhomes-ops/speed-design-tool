@@ -1404,7 +1404,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.52.1";
+const APP_VERSION = "2.52.2";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2643,11 +2643,19 @@ const ESS_UNIT_BASE = 300;
  * middle of it. Nudge these if the line sits a row high or low.
  */
 const SPEC_INDEX_STAMP = {
+  // Measured against the E-1..E-4 rows: the number column starts at about 27 pt and the
+  // title column at about 66 pt, with roughly 10.5 pt between rows.
   xNumFrac:   27 / 1224,
-  xTitleFrac: 67 / 1224,
-  yFrac:     116 / 792,
-  size: 7.5,
-  maxWidthFrac: (269 - 67) / 1224
+  // Pushed right of the index's own title column: "SS-1~SS-5" is nine characters where
+  // "E-1" is three, and at 66 pt the two ran together.
+  xTitleFrac: 82 / 1224,
+  // Two rows higher than the first attempt, which sat below the box on the panel edge.
+  yFrac:     137 / 792,
+  // The index entries are regular weight, not bold — the first attempt was noticeably
+  // heavier than the lines above it.
+  bold: false,
+  size: 8,
+  maxWidthFrac: (330 - 82) / 1224
 };
 
 /*
@@ -9507,7 +9515,8 @@ async function buildPackage(opts) {
     // Shrink rather than overrun: the index box is a fixed width and text running out of
     // it would land on the drawing.
     let fit = size;
-    while (fit > 5 && bandBold.widthOfTextAtSize(title, fit) > room) fit -= 0.25;
+    const measure = SPEC_INDEX_STAMP.bold ? bandBold : bandFont;
+    while (fit > 5 && measure.widthOfTextAtSize(title, fit) > room) fit -= 0.25;
     if (fit < size) {
       frameNotes.push(`The appendix line was set at ${fit} pt to fit the sheet index.`);
     }
@@ -9515,10 +9524,11 @@ async function buildPackage(opts) {
     const dy = SPEC_INDEX_STAMP.yFrac * chh;
     const pNum = toPage(SPEC_INDEX_STAMP.xNumFrac * cw, dy);
     const pTitle = toPage(SPEC_INDEX_STAMP.xTitleFrac * cw, dy);
+    const idxFont = SPEC_INDEX_STAMP.bold ? bandBold : bandFont;
     coverPage.drawText(winAnsi(label), {
-      x: pNum.x, y: pNum.y, size: fit, font: bandBold, rotate: degrees(rot) });
+      x: pNum.x, y: pNum.y, size: fit, font: idxFont, rotate: degrees(rot) });
     coverPage.drawText(winAnsi(title), {
-      x: pTitle.x, y: pTitle.y, size: fit, font: bandBold, rotate: degrees(rot) });
+      x: pTitle.x, y: pTitle.y, size: fit, font: idxFont, rotate: degrees(rot) });
     frameNotes.push(`Cover sheet index now lists ${label} — ${title}.`);
   } else if (specPageTotal > 0) {
     frameNotes.push(`No cover sheet was found in the CAD plot, so the appendix was not ` +
