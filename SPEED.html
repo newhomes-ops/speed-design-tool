@@ -678,6 +678,16 @@
             <div><label for="string_inverter">String inverter</label>
               <select id="string_inverter"></select>
               <div id="string_inverter_note" class="hint" style="margin-top:5px"></div></div>
+            <div><label for="battery_qty">Battery qty</label>
+              <input id="battery_qty" type="number" min="0" step="1" value="1">
+              <div id="battery_qty_note" class="hint" style="margin-top:5px"></div></div>
+            <div><label for="battery_breaker">Battery breakers</label>
+              <select id="battery_breaker">
+                <option value="">From the battery</option>
+                <option value="each">One breaker per unit</option>
+                <option value="shared">One shared breaker</option>
+              </select>
+              <div id="battery_breaker_note" class="hint" style="margin-top:5px"></div></div>
             <div><label for="coupling">Coupling</label>
               <select id="coupling"></select>
               <div id="coupling_note" class="hint" style="margin-top:5px"></div></div>
@@ -892,6 +902,16 @@
               <label for="pv_dc_mci">Mid-circuit interrupter</label>
               <select id="pv_dc_mci"></select>
               <div id="pv_dc_mci_note" class="hint" style="margin-top:5px"></div>
+            </div>
+            <div>
+              <label for="pv_circ_conduit">Circuits out of the junction box</label>
+              <select id="pv_circ_conduit">
+                <option value="">All in one conduit</option>
+                <option value="1">One conduit per circuit</option>
+              </select>
+              <div class="hint" style="margin-top:5px">Nothing combines at the junction
+                box, so one conduit carries every circuit's conductors and derates on
+                the total.</div>
             </div>
             <div>
               <label for="pv_dc_jumper">MPPT jumper fitted</label>
@@ -1384,7 +1404,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.47.0";
+const APP_VERSION = "2.49.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1460,6 +1480,7 @@ const FORM_FIELDS = [
   "product_offering","module_type",
   "combiner_type","battery_type","financier","loan_type","phone",
   "module_quantity","inverter_model","roof_type","module_orientation","coupling",
+  "battery_qty","battery_breaker",
   "string_inverter",
   "roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
@@ -1475,7 +1496,8 @@ const FIELD_LABELS = {
   utility_name:"Utility", module_type:"Module type",
   product_offering:"Product offering", combiner_type:"Combiner type",
   financier:"Financier", loan_type:"Loan type", phone:"Phone",
-  battery_type:"Battery (ESS)", coupling:"Coupling", string_inverter:"String inverter",
+  battery_type:"Battery (ESS)", battery_qty:"Battery qty",
+  battery_breaker:"Battery breakers", coupling:"Coupling", string_inverter:"String inverter",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -2464,6 +2486,16 @@ const CONDUIT_TRADES = ["1/2", "3/4", "1", "1-1/4", "1-1/2", "2", "2-1/2", "3",
 const CONDUIT_MIN_TRADE = "3/4";
 
 /*
+ * The conduit labels a run may be assigned to.
+ *
+ * A fixed list rather than free text: sharing depends on two runs carrying exactly the
+ * same label, and a typo would silently put them in separate pipes with the wrong
+ * derating. Blank means the run has its own conduit.
+ */
+const CONDUIT_GROUPS = ["Conduit A", "Conduit B", "Conduit C", "Conduit D",
+                        "Conduit E", "Conduit F"];
+
+/*
  * The runs that make up the conductor schedule, in drawing order.
  *
  * `current` says where the run's continuous current comes from:
@@ -2482,7 +2514,7 @@ const CONDUIT_MIN_TRADE = "3/4";
  * battery deletes two rows, a job with a load centre adds one.
  */
 let RT_SCHEDULE = [
-  {"id":1,"from":"ARRAY","to":"IQ COMBINER","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":"","atticOption":true,"conduitGroup":""},
+  {"id":1,"from":"JUNCTION BOX","to":"IQ COMBINER","current":"branch","plumb":"THWN-2","wire":"NM-B","conduit":"EMT","ccc":2,"lengthFt":33,"rooftop":true,"ocpd":0,"poiRole":"","atticOption":true,"conduitGroup":"","cccFrom":"circuits"},
   {"id":2,"from":"IQ COMBINER","to":"MAIN SERVICE PANEL","current":"total","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":2,"lengthFt":40,"rooftop":false,"ocpd":0,"poiRole":"pv","atticOption":false,"conduitGroup":""},
   {"id":3,"from":"ESS","to":"MAIN SERVICE PANEL","current":"ess","plumb":"THWN-2","wire":"THWN-2","conduit":"EMT","ccc":3,"lengthFt":20,"rooftop":false,"ocpd":0,"poiRole":"ess","atticOption":false,"conduitGroup":""}
 ];
@@ -2586,10 +2618,18 @@ function poiPointsFor(project) {
  * datasheet, and a guessed current would size a feeder.
  */
 let RT_BATTERY = [
-  {"model":"Powerwall 3","coupling":"DC-coupled","acAmps":48,"ocpd":60,"stringInverter":"Powerwall 3"},
-  {"model":"Enphase 5P","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":""},
-  {"model":"Enphase 10C","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":""}
+  {"model":"Powerwall 3","coupling":"DC-coupled","acAmps":48,"ocpd":60,"stringInverter":"Powerwall 3","perUnitBreaker":true},
+  {"model":"Enphase 5P","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":"","perUnitBreaker":false},
+  {"model":"Enphase 10C","coupling":"AC-coupled","acAmps":null,"ocpd":null,"stringInverter":"","perUnitBreaker":false}
 ];
+
+/*
+ * Where the per-unit runs start in the id space.
+ *
+ * Well clear of the reference table's own ids so an expanded run can never collide with
+ * a row, and clear of the synthetic gateway run.
+ */
+const ESS_UNIT_BASE = 300;
 
 /*
  * String inverters, and the DC limits a string is sized against.
@@ -4580,6 +4620,7 @@ function resolveScheduleRuns(o) {
 
   const kept = RT_SCHEDULE.filter(run => {
     const touchesEss = String(run.current) === "ess" ||
+      String(run.current) === "essUnit" ||
       /\bESS\b|BATTERY|POWERWALL/i.test(String(run.from) + " " + String(run.to));
     return hasBattery || !touchesEss;
   });
@@ -4642,6 +4683,35 @@ function resolveScheduleRuns(o) {
    * its busbar and leave as one feeder. Its current defaults to the combined output —
    * the ESS rating on a DC job, where the inverter output is the whole system.
    */
+  /*
+   * One run per battery, or one shared run.
+   *
+   * A Powerwall 3 is its own inverter and takes a dedicated breaker, so two units are two
+   * runs and two breakers — combining them onto one feeder would understate the breaker
+   * count on the drawing and oversize a conductor nothing that big is connected to.
+   * Enphase IQ Batteries may share one, so they stay a single run carrying the sum.
+   */
+  const essQty = Math.max(1, Number(o.batteryQty) || 1);
+  const perUnit = !!o.essPerUnitBreaker && essQty > 1;
+  if (perUnit) {
+    const idx = runs.findIndex(r => String(r.current) === "ess");
+    if (idx >= 0) {
+      const base = runs[idx];
+      const copies = [];
+      for (let i = 0; i < essQty; i++) {
+        copies.push(Object.assign({}, base, {
+          id: ESS_UNIT_BASE + i + 1,
+          from: `${base.from} #${i + 1}`,
+          current: "essUnit",
+          ocpd: Number(o.essUnitOcpd) || base.ocpd || 0
+        }));
+      }
+      runs.splice(idx, 1, ...copies);
+      notes.push(`${essQty} × ${o.batteryModel || "battery"} each take their own breaker, ` +
+        `so there are ${essQty} runs rather than one shared feeder.`);
+    }
+  }
+
   const gwPoi = String(o.gatewayPoi || "").trim() || GATEWAY_POI_POINTS[0];
   const landsOnGateway = runs.some(r => sameText(r.to, "Gateway"));
   if (landsOnGateway && !sameText(gwPoi, "Gateway")) {
@@ -4721,6 +4791,7 @@ function buildSchedule(o) {
         : Number(o.branchCurrent) || 0;
       case "total":  return Number(o.totalCurrent) || 0;
       case "ess":    return Number(o.essCurrent) || 0;
+      case "essUnit": return Number(o.essUnitCurrent) || 0;
       default:       return Number((manual[run.id] || {}).current) || 0;
     }
   };
@@ -4759,6 +4830,23 @@ function buildSchedule(o) {
   groupNote.forEach(g => notes.push(`Conduit "${g}" carries ${groupCcc[g]} ` +
     `current-carrying conductors in total, so every run in it derates on that count.`));
 
+  /*
+   * How many conductors leave the junction box.
+   *
+   * Nothing combines there, so it is two per circuit — unless each circuit is pulled in
+   * its own conduit, in which case a run carries only its own pair and derates on that.
+   */
+  const circuits = Math.max(1, Number(o.circuitCount) || 1);
+  const perCircuit = 2;
+  const cccFromCircuits = o.circuitsOwnConduit ? perCircuit : circuits * perCircuit;
+  if (circuits > 1) {
+    notes.push(o.circuitsOwnConduit
+      ? `${circuits} circuits, each in its own conduit, so each derates on ` +
+        `${perCircuit} conductors.`
+      : `${circuits} circuits share one conduit out of the junction box, so that run ` +
+        `derates on ${cccFromCircuits} conductors.`);
+  }
+
   const build = variant => runs.map(run => {
     const m = manual[run.id] || {};
     const cont = currentFor(run);
@@ -4784,7 +4872,9 @@ function buildSchedule(o) {
       contCurrent: cont, condType,
       conduitType: condTypeRow(condType) && condTypeRow(condType).inConduit
         ? (run.conduit || CONDUIT_DEFAULT) : "",
-      parallel, cccPerCircuit: run.ccc,
+      parallel,
+      cccPerCircuit: String(run.cccFrom) === "circuits"
+        ? cccFromCircuits : run.ccc,
       lengthFt: m.lengthFt !== undefined && m.lengthFt !== "" ? m.lengthFt : run.lengthFt,
       vac: o.vac, tAmb: o.tAmb, rooftop: !!run.rooftop,
       heightKey: o.heightKey, codeYear: o.codeYear,
@@ -4792,6 +4882,8 @@ function buildSchedule(o) {
       // manufacturer specifies it, and under 240.4 it governs the conductor.
       ocpd: Number(m.ocpd) ||
             (String(run.current) === "ess" && Number(o.essOcpd) > 0 ? Number(o.essOcpd) : 0) ||
+            (String(run.current) === "essUnit" && Number(o.essUnitOcpd) > 0
+              ? Number(o.essUnitOcpd) : 0) ||
             Number(run.ocpd) || 0,
       vdropMax: o.vdropMax, conduitTypes: o.conduitTypes,
       conduitGroup: run.conduitGroup || "",
@@ -5384,16 +5476,44 @@ function pvCalculate(input) {
 
   // The battery supplies its own current and breaker; a typed value still wins,
   // because the reference table cannot know about a derated configuration.
+  /*
+   * Battery quantity.
+   *
+   * Units in parallel share one point of interconnection, so the conductor to it carries
+   * the sum of their outputs. Their own breaker does not multiply — each unit keeps its
+   * own — so the OCPD on the shared feeder is sized from the combined current instead.
+   */
   const battRow = battElecRow(input.batteryModel);
+  const battQty = Math.max(0, Number(input.batteryQty) || (battRow ? 1 : 0));
   const schedule = buildSchedule({
     branchCurrent: worstBranch ? worstBranch.iBranch : 0,
     totalCurrent: isDc && dc ? (Number((dc.battery || dc.inverter || {}).acAmps) || 0) : iTotal,
     dcStringCurrent: isDc && dc ? Number(dc.maxCurrentPerString) || 0 : 0,
-    essCurrent: Number(input.essCurrent) || (battRow ? Number(battRow.acAmps) || 0 : 0),
-    essOcpd: battRow ? Number(battRow.ocpd) || 0 : 0,
+    /*
+     * Two ways to wire several batteries, and the equipment decides which.
+     *
+     * Per unit: each run carries one unit's output and its own breaker, which is what a
+     * Powerwall 3 requires. Shared: one run carries the sum, and the single-unit breaker
+     * does NOT apply to it — the feeder is sized from the combined current instead.
+     */
+    essPerUnitBreaker: input.essPerUnitBreaker !== undefined
+      ? !!input.essPerUnitBreaker
+      : !!(battRow && battRow.perUnitBreaker),
+    essUnitCurrent: battRow ? Number(battRow.acAmps) || 0 : 0,
+    essUnitOcpd: battRow ? Number(battRow.ocpd) || 0 : 0,
+    essCurrent: Number(input.essCurrent) ||
+      (battRow ? (Number(battRow.acAmps) || 0) * battQty : 0),
+    essOcpd: (battRow && battQty === 1) ? Number(battRow.ocpd) || 0 : 0,
+    batteryQty: battQty,
     batteryModel: input.batteryModel || "",
     pvPoi: input.pvPoi || "", essPoi: input.essPoi || "",
     dcMode: isDc,
+    // Every string on a DC job, every branch on an AC one: nothing combines at the
+    // junction box, so the run leaving it carries them all.
+    circuitCount: isDc
+      ? (input.dcStrings || []).filter(x => Number(x.nMod) > 0).length
+      : branches.length,
+    circuitsOwnConduit: !!input.circuitsOwnConduit,
     landingPoint: pvLandingPoint(input),
     gatewayPoi: input.gatewayPoi || "",
     productOffering: input.productOffering || "",
@@ -6713,7 +6833,16 @@ const TABLE_SCHEMAS = {
         choices: COUPLINGS },
       { name: "acAmps",      type: "number", nullable: true, label: "AC output (A)" },
       { name: "ocpd",        type: "int", nullable: true, label: "OCPD (A)" },
-      { name: "stringInverter", type: "text", label: "String inverter it embeds" }
+      { name: "stringInverter", type: "text", label: "String inverter it embeds" },
+      /*
+       * Whether each unit needs its own breaker.
+       *
+       * A Powerwall 3 does — each unit is its own inverter and Tesla requires a dedicated
+       * breaker per unit. Enphase IQ Batteries may be combined onto one. This is a
+       * property of the equipment, not a preference, which is why it lives here; the
+       * project can still override it for an unusual install.
+       */
+      { name: "perUnitBreaker", type: "bool", label: "Breaker per unit" }
     ]
   },
 
@@ -6857,7 +6986,18 @@ const TABLE_SCHEMAS = {
       // then counted together for the fill derating factor and for conduit sizing,
       // which is what 310.15(C)(1) actually asks: the count is per raceway, not per
       // circuit. Leave blank for a run in its own conduit.
-      { name: "conduitGroup", type: "text", label: "Shared conduit" }
+      { name: "conduitGroup", type: "text", label: "Shared conduit",
+        choices: ["", ...CONDUIT_GROUPS] },
+      /*
+       * "circuits" means the run's conductor count comes from the branch or string
+       * table rather than this row.
+       *
+       * The array-to-junction-box conductors are not combined at the junction box, so
+       * the run leaving it carries every circuit's conductors. Hard-coding 2 there
+       * derated a six-conductor pull as though it were two.
+       */
+      { name: "cccFrom", type: "text", label: "Conductor count from",
+        choices: ["", "circuits"] }
     ]
   },
 
@@ -7237,14 +7377,14 @@ if (typeof module !== "undefined" && module.exports) {
     NEC_ROOFTOP_ADDER_C, NEC_ROOFTOP_FLAT_FROM, NEC_ROOFTOP_BELOW, NEC_ROOFTOP_ABOVE,
     pvMaxAmbient, pvAmpColumn, pvBaseAmp, condTypeRow, condArea, conduitOptions,
     conduitLabel, pvSizeRun, buildSchedule, CONDUIT_TYPES, CONDUIT_DEFAULT,
-    CONDUIT_TRADES, CONDUIT_MIN_TRADE,
+    CONDUIT_TRADES, CONDUIT_MIN_TRADE, CONDUIT_GROUPS,
     SCHEDULE_CURRENT_SOURCES,
     get RT_CONDUIT() { return RT_CONDUIT; },
     get RT_COND_AREA() { return RT_COND_AREA; },
     get RT_COND_TYPE() { return RT_COND_TYPE; },
     get RT_SCHEDULE() { return RT_SCHEDULE; },
     get RT_BATTERY() { return RT_BATTERY; },
-    battElecRow, projectCoupling, COUPLINGS, POI_POINTS,
+    battElecRow, projectCoupling, COUPLINGS, POI_POINTS, ESS_UNIT_BASE,
     get RT_STRING_INV() { return RT_STRING_INV; },
     stringInvRow, projectStringInv, stringInvNames,
     poiPointsFor, pvLandingPoint, resolveScheduleRuns, SYSTEM_POI_POINTS,
@@ -8478,6 +8618,13 @@ function wireControls() {
   if (btSel) btSel.addEventListener("change", () => {
     stringInvPopulate(); couplingPopulate(); poiPopulate(); pvModeApply();
     pvSchedInputsRender();
+  });
+  // Quantity and the breaker rule both change how many runs there are.
+  ["battery_qty", "battery_breaker"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => {
+      pvEssPoiNote(); pvSchedInputsRender();
+    });
   });
   const cpSel = $("coupling");
   if (cpSel) cpSel.addEventListener("change", () => {
@@ -12292,8 +12439,20 @@ function pvSchedInputsRender() {
     battery_type: ($("battery_type") || {}).value || "",
     combiner_type: ($("combiner_type") || {}).value || ""
   };
+  const bRow = battElecRow(($("battery_type") || {}).value);
+  const bPick = ($("battery_breaker") || {}).value || "";
   const runsNow = resolveScheduleRuns({
+    batteryQty: Number(($("battery_qty") || {}).value) || 1,
+    essPerUnitBreaker: bPick === "each" ? true : bPick === "shared" ? false
+      : !!(bRow && bRow.perUnitBreaker),
+    essUnitOcpd: bRow ? Number(bRow.ocpd) || 0 : 0,
     batteryModel: ($("battery_type") || {}).value || "",
+    batteryQty: Number(($("battery_qty") || {}).value) || 0,
+    // Blank means take the equipment's own requirement.
+    essPerUnitBreaker: (() => {
+      const v = ($("battery_breaker") || {}).value || "";
+      return v === "each" ? true : v === "shared" ? false : undefined;
+    })(),
     landingPoint: pvLandingPoint(formNow),
     gatewayPoi: ($("pv_gw_poi") || {}).value || "",
     productOffering: ($("product_offering") || {}).value || "",
@@ -12316,9 +12475,11 @@ function pvSchedInputsRender() {
            placeholder="${r.ocpd ? r.ocpd : "auto"}" value="${m.ocpd !== undefined ? m.ocpd : ""}"></td>
       <td><input class="sched-len" type="number" step="0.1" min="0" style="width:80px"
            placeholder="${r.lengthFt}" value="${m.lengthFt !== undefined ? m.lengthFt : ""}"></td>
-      <td><input class="sched-grp" type="text" maxlength="6" style="width:80px"
-           placeholder="own pipe"
-           value="${m.conduitGroup !== undefined ? modEscHtml(m.conduitGroup) : modEscHtml(r.conduitGroup || "")}"></td>
+      <td><select class="sched-grp" style="width:118px">${
+        ['<option value="">own conduit</option>'].concat(CONDUIT_GROUPS.map(g =>
+          `<option value="${g}"${sameText(g, m.conduitGroup !== undefined
+            ? m.conduitGroup : (r.conduitGroup || "")) ? " selected" : ""}>${g}</option>`
+        )).join("")}</select></td>
     </tr>`;
   }).join("");
 }
@@ -12397,23 +12558,91 @@ function pvModeApply() {
   pvDcNote();
 }
 
+/**
+ * The limits a designer must not be able to type past.
+ *
+ * Catching an over-long string in the results is late — by then the number is on screen
+ * and looks considered. The inputs are capped instead, and the cap is stated, so the
+ * limit is visible before it is hit rather than reported afterwards.
+ */
+function pvLimits() {
+  const inv = projectStringInv({
+    stringInverter: ($("string_inverter") || {}).value || "",
+    battery_type: ($("battery_type") || {}).value || ""
+  });
+  const mi = miResolve(($("inverter_model") || {}).value,
+                       Number(($("service_voltage") || {}).value) || undefined).row;
+  const out = { maxMppt: null, maxPerString: null, maxPerBranch: null,
+                minPerString: null, inverter: inv, mi: mi };
+  if (inv) {
+    out.maxMppt = Number(inv.mpptCount) || null;
+    const mod = MODULE_DB.find(m => sameText(m.name, ($("module_type") || {}).value));
+    const loc = pvGetLocation(($("pv_location") || {}).value) ||
+                (typeof PV_LOC_OVERRIDE !== "undefined" ? PV_LOC_OVERRIDE : null);
+    if (mod && loc) {
+      const d = dcStringSize({
+        moduleName: mod.name, batteryModel: ($("battery_type") || {}).value,
+        stringInverter: ($("string_inverter") || {}).value,
+        mciModel: ($("pv_dc_mci") || {}).value,
+        tMax: Number(loc.tHigh), tMin: Number(loc.tMin),
+        mounting: ($("pv_dc_mounting") || {}).value, strings: []
+      });
+      if (d.maxPerString) out.maxPerString = d.maxPerString;
+      if (d.minPerString) out.minPerString = d.minPerString;
+    }
+  }
+  if (mi) out.maxPerBranch = Number(mi.maxBranch) || null;
+  return out;
+}
+
+/** Hold an input to its allowed range, and say so rather than silently clamping. */
+function pvClamp(el, max, what) {
+  if (!el || !max) return;
+  const v = Number(el.value) || 0;
+  if (v > max) {
+    el.value = max;
+    showMsg(`${what} is capped at ${max} — the value was reduced.`, "warn");
+  }
+}
+
 /** One string row. Modules and MPPT are what the sizing actually checks. */
 function pvDcAddRow(nMod, mppt, runFt) {
   const body = $("pv_dc_body");
   if (!body) return;
+  const lim = pvLimits();
   const n = body.children.length + 1;
+  // An inverter has a fixed number of MPPT inputs; a further string has nowhere to go.
+  if (lim.maxMppt && n > lim.maxMppt) {
+    showMsg(`${lim.inverter.model} has ${lim.maxMppt} MPPT inputs and all of them are ` +
+            `in use. Combine strings on an MPPT instead of adding another.`, "warn");
+    return;
+  }
   const tr = document.createElement("tr");
   tr.innerHTML =
     `<td class="dc-idx">${n}</td>` +
-    `<td><input class="dc-mod" type="number" min="0" step="1" style="width:80px" value="${nMod || 0}"></td>` +
-    `<td><input class="dc-mppt" type="number" min="1" step="1" style="width:70px" value="${mppt || n}"></td>` +
+    `<td><input class="dc-mod" type="number" min="0" step="1"` +
+    (lim.maxPerString ? ` max="${lim.maxPerString}"` : "") +
+    ` style="width:80px" value="${nMod || 0}"></td>` +
+    `<td><input class="dc-mppt" type="number" min="1" step="1"` +
+    (lim.maxMppt ? ` max="${lim.maxMppt}"` : "") +
+    ` style="width:70px" value="${mppt || n}"></td>` +
     `<td><input class="dc-run" type="number" min="0" step="0.1" style="width:80px" value="${runFt === undefined ? 0 : runFt}"></td>` +
     `<td><button type="button" class="dc-del">Remove</button></td>`;
   body.appendChild(tr);
   tr.querySelector(".dc-del").addEventListener("click", () => {
     tr.remove(); pvDcRenumber(); pvDcNote();
   });
+  const mEl = tr.querySelector(".pv-mods");
+  if (mEl) mEl.addEventListener("change", () =>
+    pvClamp(mEl, pvLimits().maxPerBranch, "Modules per branch"));
   tr.querySelectorAll("input").forEach(i => i.addEventListener("input", pvDcNote));
+  const modEl = tr.querySelector(".dc-mod"), mpEl = tr.querySelector(".dc-mppt");
+  if (modEl) modEl.addEventListener("change", () => {
+    pvClamp(modEl, lim.maxPerString, "Modules per string"); pvDcNote();
+  });
+  if (mpEl) mpEl.addEventListener("change", () => {
+    pvClamp(mpEl, lim.maxMppt, "MPPT input"); pvDcNote();
+  });
   pvDcNote();
 }
 
@@ -12441,9 +12670,12 @@ function pvDcNote() {
   const b = battElecRow(($("battery_type") || {}).value);
   const cap = b && b.mpptCount ? ` of ${b.mpptCount} MPPTs` : "";
   const used = new Set(s.map(x => x.mppt)).size;
-  el.textContent = s.length
+  const lim = pvLimits();
+  el.textContent = (s.length
     ? `${s.length} string(s), ${mods} module(s), ${used}${cap} in use.`
-    : "No strings yet.";
+    : "No strings yet.") +
+    (lim.maxPerString ? `  Allowed ${lim.minPerString}–${lim.maxPerString} modules ` +
+      `per string.` : "");
 }
 
 /**
@@ -12572,6 +12804,29 @@ function pvEssPoiNote() {
   const b = ($("battery_type") || {}).value || "";
   const row = battElecRow(b);
   if (!b) { note.textContent = "No battery selected, so no ESS run is scheduled."; return; }
+  const qty = Math.max(1, Number(($("battery_qty") || {}).value) || 1);
+  const bn = $("battery_breaker_note");
+  if (bn) {
+    const pick = ($("battery_breaker") || {}).value || "";
+    const each = pick === "each" ? true
+               : pick === "shared" ? false
+               : !!(row && row.perUnitBreaker);
+    bn.textContent = !b ? "No battery selected."
+      : qty < 2 ? "One unit — one breaker either way."
+      : each
+        ? `${qty} runs, one breaker each` +
+          (row && row.ocpd ? ` at ${row.ocpd} A.` : ".") +
+          (pick ? "" : ` ${b} requires it.`)
+        : `One shared feeder carrying ${qty} units` +
+          (row && row.acAmps ? `, ${(row.acAmps * qty).toFixed(1)} A combined.` : ".");
+  }
+  const qn = $("battery_qty_note");
+  if (qn) {
+    qn.textContent = !b ? "No battery selected."
+      : row && Number(row.acAmps) > 0
+        ? `${qty} × ${row.acAmps} A = ${(row.acAmps * qty).toFixed(1)} A combined.`
+        : `${qty} unit(s); no AC output on file for ${b}.`;
+  }
   note.textContent = row && Number(row.acAmps) > 0
     ? `${b}: ${row.acAmps} A continuous` +
       (Number(row.ocpd) > 0 ? `, ${row.ocpd} A breaker.` : `, no breaker on file.`)
@@ -12751,7 +13006,11 @@ function pvAddBranchRow(mods, runFt, fill) {
   tr.dataset.branch = i;
   tr.innerHTML =
     `<td style="font-weight:700">${i}</td>` +
-    `<td><input class="pv-mods" type="number" min="0" step="1" value="${mods || 0}"></td>` +
+    // The microinverter caps modules per branch, so the input caps too rather than
+    // reporting an over-long branch after the fact.
+    `<td><input class="pv-mods" type="number" min="0" step="1"` +
+    (pvLimits().maxPerBranch ? ` max="${pvLimits().maxPerBranch}"` : "") +
+    ` value="${mods || 0}"></td>` +
     `<td><input class="pv-run" type="number" min="0" step="0.01" value="${runFt === undefined ? 4.27 : runFt}"></td>` +
     `<td><input class="pv-fill" type="number" min="1" step="1" value="${fill || (phase === 3 ? 3 : 2)}"></td>` +
     `<td><button type="button" class="pv-del" style="padding:3px 9px">Remove</button></td>`;
@@ -12804,6 +13063,7 @@ function pvReadInput() {
     dcMounting: ($("pv_dc_mounting") || {}).value || DC_MOUNTING_DEFAULT,
     dcJumpered: !!(($("pv_dc_jumper") || {}).value),
     dcStrings: pvReadDcStrings(),
+    circuitsOwnConduit: !!(($("pv_circ_conduit") || {}).value),
     stringInverter: ($("string_inverter") || {}).value || "",
     mciModel: ($("pv_dc_mci") || {}).value || "",
     vdropMax: Number($("pv_vdrop_max").value) || 3,
@@ -12927,6 +13187,7 @@ function pvRenderResults(r) {
     `${pvNum(r.worstTotalVd, 4)} % of ${r.vdropMax} %</span></div>`;
 
   pvRenderSchedule(r);
+  pvSchedInputsFill(r);
   pvRenderDc(r);
 }
 
@@ -13008,6 +13269,32 @@ const SCHED_COLS = ["ID", "TYPICAL", "INITIAL CONDUCTOR LOCATION",
  * The columns are the reference plan's, in its order, so a reviewer comparing the
  * two documents is reading the same table twice rather than translating.
  */
+/**
+ * Put the computed current and breaker back into the Schedule runs inputs.
+ *
+ * They are derived, so the boxes stay empty and the value shows as a placeholder — a
+ * typed value still wins. Before this the placeholder read "from ess" for ever and the
+ * number only appeared on the schedule below, which is not where anyone was looking.
+ */
+function pvSchedInputsFill(r) {
+  const sch = (r && r.schedule) || null;
+  if (!sch) return;
+  document.querySelectorAll("#pv_sched_inputs_body tr").forEach(tr => {
+    const id = Number(tr.dataset.run);
+    const row = sch.prePlumb.find(x => x.id === id);
+    const cur = tr.querySelector(".sched-cur");
+    const ocp = tr.querySelector(".sched-ocpd");
+    if (!row) {
+      // The run was dropped — no battery, or merged into another conductor.
+      if (cur) cur.placeholder = "not in this design";
+      if (ocp) ocp.placeholder = "—";
+      return;
+    }
+    if (cur) cur.placeholder = pvNum(row.contCurrent, 2) + " A";
+    if (ocp) ocp.placeholder = row.ocpd ? row.ocpd + " A" : "none";
+  });
+}
+
 function pvRenderSchedule(r) {
   const s = r.schedule;
   const head = `<tr>${SCHED_COLS.map(c =>
