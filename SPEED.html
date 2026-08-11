@@ -810,15 +810,15 @@
           <div class="grid">
             <div class="full">
               <label for="pv_module">Module</label>
-              <select id="pv_module" disabled></select>
+              <select id="pv_module"></select>
               <div class="hint" style="margin-top:5px">Follows <b>Module type</b> on
-                Project Information &mdash; change it there.</div>
+                Project Information until you change it here.</div>
             </div>
             <div id="pv_mi_wrap">
               <label for="pv_mi">Microinverter</label>
-              <select id="pv_mi" disabled></select>
+              <select id="pv_mi"></select>
               <div class="hint" style="margin-top:5px">Follows <b>Inverter model</b> on
-                Project Information &mdash; change it there.</div>
+                Project Information until you change it here.</div>
             </div>
             <div>
               <label for="pv_phase">Service</label>
@@ -858,8 +858,7 @@
             </div>
             <div>
               <label for="pv_landing">PV lands at</label>
-              <input id="pv_landing" readonly tabindex="-1"
-                     style="background:var(--panel); cursor:default">
+              <input id="pv_landing" autocomplete="off">
               <div id="pv_landing_note" class="hint" style="margin-top:5px"></div>
             </div>
             <div>
@@ -990,6 +989,7 @@
               <th style="text-align:left">#</th><th style="text-align:left">From</th>
               <th style="text-align:left">To</th><th>Current (A)</th>
               <th>OCPD (A)</th><th>Length (ft)</th><th>Shared conduit</th>
+              <th>Min wire</th><th>Min conduit</th>
             </tr></thead><tbody id="pv_sched_inputs_body"></tbody>
           </table></div>
         </fieldset>
@@ -1404,7 +1404,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.49.0";
+const APP_VERSION = "2.52.0";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -2630,6 +2630,25 @@ let RT_BATTERY = [
  * a row, and clear of the synthetic gateway run.
  */
 const ESS_UNIT_BASE = 300;
+
+/*
+ * Where the appendix line goes in the cover sheet's SHEET INDEX.
+ *
+ * Kevin marked the blank row under ELECTRICAL DRAWINGS: about x 18–269 pt, y 103–134 pt
+ * on a 1224 × 792 sheet, with the index entries at roughly 7.5 pt, the number at x 27 and
+ * the title at x 67.
+ *
+ * Held as FRACTIONS of the page rather than points, so a plot that comes out a different
+ * size still puts the line in the same place on the drawing instead of somewhere in the
+ * middle of it. Nudge these if the line sits a row high or low.
+ */
+const SPEC_INDEX_STAMP = {
+  xNumFrac:   27 / 1224,
+  xTitleFrac: 67 / 1224,
+  yFrac:     116 / 792,
+  size: 7.5,
+  maxWidthFrac: (269 - 67) / 1224
+};
 
 /*
  * String inverters, and the DC limits a string is sized against.
@@ -4088,7 +4107,11 @@ function conduitOptions(o) {
   const col = nTotal <= 1 ? "a1" : nTotal === 2 ? "a31" : "a40";
   const pct = nTotal <= 1 ? 53 : nTotal === 2 ? 31 : 40;
 
-  const floor = CONDUIT_TRADES.indexOf(CONDUIT_MIN_TRADE);
+  // The house floor, or a larger one the designer has asked for — an AHJ requirement, or
+  // room left for a future circuit. Never smaller than fill demands.
+  const asked = CONDUIT_TRADES.indexOf(String(o.minTrade || "").trim());
+  const floor = Math.max(CONDUIT_TRADES.indexOf(CONDUIT_MIN_TRADE),
+                         asked >= 0 ? asked : -1);
   const types = (o.types && o.types.length ? o.types : CONDUIT_TYPES);
   return types.map(type => {
     const sizes = RT_CONDUIT.filter(r => sameText(r.type, type) &&
@@ -4247,6 +4270,26 @@ function pvSizeRun(o) {
   let row = pvGetWireRow(needBase, col, ct.material);
   let upsizedForVd = false;
 
+  /*
+   * A floor the designer sets, for reasons the Code cannot see.
+   *
+   * An AHJ may insist on a size, a long run may want headroom beyond the 3 % limit, or a
+   * conductor may be matched to one already in the ground. It can only ever raise the
+   * size — never lower it below what ampacity and voltage drop require — so an override
+   * cannot make a run unsafe, only more expensive.
+   */
+  let upsizedByUser = false;
+  const minWire = String(o.minWire || "").trim();
+  if (minWire) {
+    const wanted = RT_AMPACITY.findIndex(x => x.size === minWire);
+    if (wanted >= 0 && wanted > RT_AMPACITY.indexOf(row)) {
+      row = RT_AMPACITY[wanted];
+      upsizedByUser = true;
+      notes.push(`Run ${o.id} ${o.from} to ${o.to}: upsized to ${minWire} because it ` +
+        `was asked for, above the calculated size.`);
+    }
+  }
+
   let vd = pvVD(cont, row.size, Number(o.lengthFt) || 0, Number(o.vac) || 240, ct.material);
   const vdMax = Number(o.vdropMax) || 3;
   if (vd > vdMax) {
@@ -4290,7 +4333,8 @@ function pvSizeRun(o) {
       const areaOthers = Number(o.sharedArea) || 0;
       const area = aOne * ccc + aEgc + areaOthers;
       conduitAll = conduitOptions({ area, ccc: cccDerate, nGround: 1,
-        types: o.conduitTypes && o.conduitTypes.length ? o.conduitTypes : CONDUIT_TYPES });
+        types: o.conduitTypes && o.conduitTypes.length ? o.conduitTypes : CONDUIT_TYPES,
+        minTrade: o.minConduitTrade || "" });
       conduit = conduitAll.find(c => sameText(c.type, o.conduitType || CONDUIT_DEFAULT)) ||
                 conduitAll[0];
       conduitAll.filter(c => c.tooSmall).forEach(c =>
@@ -4314,7 +4358,7 @@ function pvSizeRun(o) {
   return {
     id: o.id, from: o.from, to: o.to, typical: Number(o.typical) || 1,
     condType: ct.type, condLabel: ct.label, material: ct.material,
-    wire: row.size, termTemp: col, baseAmp, deratedAmp,
+    wire: row.size, termTemp: col, baseAmp, deratedAmp, upsizedByUser,
     contCurrent: cont, maxCurrent, mustCarry, ocpd, egc,
     ocpdGoverns: !!(givenOcpd && givenOcpd > maxCurrent),
     tempFactor, fillFactor, tUsed, tAmb, adder,
@@ -4886,6 +4930,8 @@ function buildSchedule(o) {
               ? Number(o.essUnitOcpd) : 0) ||
             Number(run.ocpd) || 0,
       vdropMax: o.vdropMax, conduitTypes: o.conduitTypes,
+      minWire: m.minWire || "",
+      minConduitTrade: m.minConduitTrade || "",
       conduitGroup: run.conduitGroup || "",
       sharedCcc: groupCcc[String(run.conduitGroup || "").trim()] || 0
     });
@@ -5000,13 +5046,39 @@ function specSheetTitle(fileName) {
     if (!Array.isArray(rows)) continue;
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
-      const matches = Object.keys(row).some(k => sameText(row[k], f));
-      if (!matches) continue;
+      // WHICH column held the filename matters. A roof row carries both the attachment
+      // and the racking datasheet, so a row-level match alone named them identically —
+      // the racking sheet was labelled with the attachment's name.
+      const key = Object.keys(row).find(k => sameText(row[k], f));
+      if (key === undefined) continue;
+
+      /*
+       * The naming field that belongs to the matched column.
+       *
+       * A spec-sheet column is named after the thing it documents — attachmentSheet next
+       * to attachment, railingSheet next to railing — so stripping the suffix finds its
+       * partner. Anything else falls back to the row's general naming fields.
+       */
+      const base = key.replace(/Sheet$|_sheet$|specSheet/i, "").trim();
+      const partner = base && base !== key
+        ? Object.keys(row).find(k => k !== key && sameText(k, base))
+        : null;
+
+      const lead = row.roofType && !sameText(row.roofType, f)
+        ? [String(row.roofType).trim()] : [];
+      if (partner && String(row[partner] || "").trim()) {
+        return [...lead, String(row[partner]).trim()].join(" — ").toUpperCase();
+      }
+
+      // A row with no category of its own gets one from the table it lives in, so a
+      // module sheet reads "PV MODULE — …" like the combiner reads "COMBINER — …".
+      const IMPLIED = { MODULE_DB: "PV MODULE", RT_MI: "MICROINVERTER" };
       const parts = NAME_FIELDS.map(k => row[k]).filter(v =>
         v !== undefined && v !== null && String(v).trim() && !sameText(v, f));
       if (parts.length) {
-        return [...new Set(parts.map(v => String(v).trim()))]
-          .slice(0, 2).join(" — ").toUpperCase();
+        const named = [...new Set(parts.map(v => String(v).trim()))].slice(0, 2);
+        if (IMPLIED[table] && !row.category) named.unshift(IMPLIED[table]);
+        return named.slice(0, 2).join(" — ").toUpperCase();
       }
     }
   }
@@ -5514,7 +5586,9 @@ function pvCalculate(input) {
       ? (input.dcStrings || []).filter(x => Number(x.nMod) > 0).length
       : branches.length,
     circuitsOwnConduit: !!input.circuitsOwnConduit,
-    landingPoint: pvLandingPoint(input),
+    // A hand-typed landing point wins: the equipment may be named differently on this
+    // job than the reference table calls it.
+    landingPoint: String(input.landingPointText || "").trim() || pvLandingPoint(input),
     gatewayPoi: input.gatewayPoi || "",
     productOffering: input.productOffering || "",
     stringInvName: (projectStringInv(input) || {}).model || "",
@@ -9337,6 +9411,15 @@ async function buildPackage(opts) {
     } catch (e) { /* the read below reports it properly */ }
   }
 
+  /*
+   * One line in the cover sheet's index for the whole appendix.
+   *
+   * The alternative is importing every datasheet into CAD to list it, which is work the
+   * tool can do — and the range updates itself when equipment changes, so the index
+   * cannot fall out of step with the sheets behind it.
+   */
+  let coverPage = null;
+
   const merged = [];
   let done = 0;
   for (const inp of inputs) {
@@ -9378,8 +9461,39 @@ async function buildPackage(opts) {
     } else {
       const pages = await out.copyPages(src, src.getPageIndices());
       pages.forEach(p => out.addPage(p));
+      // The cover sheet is page 1 of the CAD plot; the appendix line goes on it once the
+      // sheet count is known.
+      if (inp.role === "CAD plot" && pages.length && !coverPage) coverPage = pages[0];
     }
     merged.push({ name: inp.name, pages: src.getPageCount(), role: inp.role });
+  }
+
+  if (coverPage && specPageTotal > 0) {
+    const { width: cw, height: chh } = coverPage.getSize();
+    const label = specPageTotal === 1
+      ? `${SPEC_SHEET_PREFIX}-1`
+      : `${SPEC_SHEET_PREFIX}-1~${SPEC_SHEET_PREFIX}-${specPageTotal}`;
+    const title = "EQUIPMENT SPECIFICATION SHEET";
+    const size = SPEC_INDEX_STAMP.size;
+    const room = SPEC_INDEX_STAMP.maxWidthFrac * cw;
+
+    // Shrink rather than overrun: the index box is a fixed width and text running out of
+    // it would land on the drawing.
+    let fit = size;
+    while (fit > 5 && bandBold.widthOfTextAtSize(title, fit) > room) fit -= 0.25;
+    if (fit < size) {
+      frameNotes.push(`The appendix line was set at ${fit} pt to fit the sheet index.`);
+    }
+
+    const y = SPEC_INDEX_STAMP.yFrac * chh;
+    coverPage.drawText(winAnsi(label), {
+      x: SPEC_INDEX_STAMP.xNumFrac * cw, y, size: fit, font: bandBold });
+    coverPage.drawText(winAnsi(title), {
+      x: SPEC_INDEX_STAMP.xTitleFrac * cw, y, size: fit, font: bandBold });
+    frameNotes.push(`Cover sheet index now lists ${label} — ${title}.`);
+  } else if (specPageTotal > 0) {
+    frameNotes.push(`No cover sheet was found in the CAD plot, so the appendix was not ` +
+      `added to the sheet index.`);
   }
 
   if (framed) {
@@ -10183,6 +10297,8 @@ async function buildECalcsPdf(o) {
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  // The attic alternative is set in italic, as Kevin's own schedule does it.
+  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
   const ink = rgb(0, 0, 0);          // black, not near-black: it prints grey otherwise
   const inkSoft = rgb(0.20, 0.22, 0.28);
   const muted = rgb(0.42, 0.45, 0.52);
@@ -10443,7 +10559,8 @@ async function buildECalcsPdf(o) {
 
     rows.forEach(row => {
       row.cells.forEach((c, i) => {
-        const f = row.strongCols && row.strongCols.includes(i) ? bold : font;
+        const f = (row.italicCols && row.italicCols.includes(i)) ? italic
+                : (row.strongCols && row.strongCols.includes(i)) ? bold : font;
         const t = clip(c, widths[i] - PAD * 2, f, 9);
         const x = align[i] === "r"
           ? xs[i] + widths[i] - PAD - f.widthOfTextAtSize(t, 9)
@@ -10540,9 +10657,10 @@ async function buildECalcsPdf(o) {
       const first = vi === 0;
       rows.push({
         bad: !!(x.errors && x.errors.length) || x.vd > r.vdropMax,
-        strongCols: [3, 8, 10],
-        cells: [first ? poiCaps(x.from) : "", first ? poiCaps(x.to) : "",
-          first ? "" : "OPTIONAL: ATTIC RUN",
+        strongCols: [7, 9],
+        italicCols: first ? [] : [1],
+        cells: [first ? poiCaps(x.from) : "",
+          first ? poiCaps(x.to) : "Optional: ATTIC RUN",
           `${x.wire} ${x.condLabel}`, n(x.contCurrent), n(x.maxCurrent),
           n(x.tempFactor, 2), x.openAir ? "N/A" : n(x.fillFactor, 2),
           n(x.baseAmp, 0), n(x.deratedAmp, 1), x.termTemp + "°",
@@ -10557,15 +10675,15 @@ async function buildECalcsPdf(o) {
 
   if (rows.length) {
     ftable("Conductor schedule — exterior run and optional attic run",
-      [["FROM", ""], ["TO", ""], ["", ""],
+      [["FROM", ""], ["TO", ""],
        ["CONDUCTOR", "size / type"], ["IOUT", "continuous"],
        ["IMAX", "IOUT × 1.25"], ["TEMP f", ""],
        ["FILL f", ""], ["BASE", "at term"],
        ["DERATED", "BASE × TF × FF"], ["TERM", ""],
        ["OCPD", ""], ["EGC", ""],
        ["CONDUIT", ""], ["FILL", ""], ["LEN", ""], ["VD", ""]],
-      [10.5, 11.5, 12, 11, 5.5, 5.5, 4.5, 4.5, 5, 6.5, 4, 5.5, 4.5, 8, 4.5, 4.5, 5],
-      ["l", "l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
+      [11.5, 14, 11, 5.5, 5.5, 4.5, 4.5, 5, 6.5, 4, 5.5, 4.5, 8, 4.5, 4.5, 5],
+      ["l", "l", "l", "c", "c", "c", "c", "c", "c", "c", "c", "l", "l",
        "c", "c", "c"],
       rows);
   }
@@ -12317,10 +12435,16 @@ function inverterRenderStatus(r) {
 function moduleSyncDownstream() {
   const r = moduleResolve();
 
-  // PV Calc's Module is a read-only mirror. It has to carry the value even
-  // when the module is unknown, otherwise the two screens would disagree.
+  /*
+   * PV Calc mirrors Project Information until the designer changes it here.
+   *
+   * It used to be disabled, which meant a loaded job could not be explored without going
+   * back and editing the project — and sometimes the point is to try a different module
+   * against the same site. The mirror adopts while the field is untouched and never
+   * clobbers a deliberate choice, which is how location and service voltage already work.
+   */
   const pv = $("pv_module");
-  if (pv) {
+  if (pv && pv.dataset.userSet !== "1") {
     if (r.name && !Array.from(pv.options).some(o => o.value === r.name)) {
       const opt = document.createElement("option");
       opt.value = r.name;
@@ -12342,11 +12466,9 @@ function moduleSyncDownstream() {
     if (hit && locEl.value !== hit.display) locEl.value = hit.display;
   }
 
-  // PV Calc's Microinverter is a read-only mirror of Project Information, the
-  // same arrangement as the module. Both equipment choices live in one place.
   const inv = inverterResolve();
   const miSel = $("pv_mi");
-  if (miSel) {
+  if (miSel && miSel.dataset.userSet !== "1") {
     const want = inv.mi ? miKey(inv.mi) : inv.name;
     if (want && !Array.from(miSel.options).some(o => o.value === want)) {
       const opt = document.createElement("option");
@@ -12460,6 +12582,8 @@ function pvSchedInputsRender() {
     stringInvName: inv ? inv.model : "",
     pvPoi: ($("pv_poi") || {}).value || "",
     combiner_type: ($("combiner_type") || {}).value || "",
+    landingPointText: (($("pv_landing") || {}).dataset || {}).userSet === "1"
+      ? (($("pv_landing") || {}).value || "") : "",
     gatewayPoi: ($("pv_gw_poi") || {}).value || "",
     essPoi: ($("pv_ess_poi") || {}).value || ""
   }).runs;
@@ -12475,6 +12599,14 @@ function pvSchedInputsRender() {
            placeholder="${r.ocpd ? r.ocpd : "auto"}" value="${m.ocpd !== undefined ? m.ocpd : ""}"></td>
       <td><input class="sched-len" type="number" step="0.1" min="0" style="width:80px"
            placeholder="${r.lengthFt}" value="${m.lengthFt !== undefined ? m.lengthFt : ""}"></td>
+      <td><select class="sched-min" style="width:82px">${
+        ['<option value="">calculated</option>'].concat(PV_WIRE_SIZES.map(w =>
+          `<option value="${w}"${sameText(w, m.minWire || "") ? " selected" : ""}>${w}</option>`
+        )).join("")}</select></td>
+      <td><select class="sched-mincond" style="width:92px">${
+        ['<option value="">calculated</option>'].concat(CONDUIT_TRADES.map(tr =>
+          `<option value="${tr}"${sameText(tr, m.minConduitTrade || "") ? " selected" : ""}>${tr}"</option>`
+        )).join("")}</select></td>
       <td><select class="sched-grp" style="width:118px">${
         ['<option value="">own conduit</option>'].concat(CONDUIT_GROUPS.map(g =>
           `<option value="${g}"${sameText(g, m.conduitGroup !== undefined
@@ -12503,6 +12635,14 @@ function pvReadSchedManual() {
     const gEl = tr.querySelector(".sched-grp");
     const g = gEl ? String(gEl.value).trim() : "";
     if (g) rec.conduitGroup = g;
+    // Floors the designer sets: an AHJ requirement, headroom on a long run, or matching
+    // a conductor already in the ground. They can only raise a size, never lower it.
+    const wEl = tr.querySelector(".sched-min");
+    const w = wEl ? String(wEl.value).trim() : "";
+    if (w) rec.minWire = w;
+    const cEl = tr.querySelector(".sched-mincond");
+    const c2 = cEl ? String(cEl.value).trim() : "";
+    if (c2) rec.minConduitTrade = c2;
     if (Object.keys(rec).length) out[id] = rec;
   });
   return out;
@@ -12744,7 +12884,7 @@ function poiPopulate() {
     combiner_type: ($("combiner_type") || {}).value || ""
   });
   const lbox = $("pv_landing");
-  if (lbox) lbox.value = landing || "(nothing selected)";
+  if (lbox && lbox.dataset.userSet !== "1") lbox.value = landing || "";
   const lnote = $("pv_landing_note");
   if (lnote) {
     lnote.textContent = !landing
@@ -13480,8 +13620,24 @@ function pvInit() {
   $("pv_btn_add").addEventListener("click", () => pvAddBranchRow(0));
   $("pv_btn_clear").addEventListener("click", pvReset);
 
-  // pv_module and pv_mi are both disabled mirrors of Project Information, so
-  // neither has a listener of its own.
+  /*
+   * Changing either here takes ownership of the field.
+   *
+   * A "Follow project again" reset is deliberately not offered: reloading the project
+   * does that, and a second button would be one more thing to explain.
+   */
+  ["pv_module", "pv_mi"].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      el.dataset.userSet = "1";
+      const note = $(id === "pv_module" ? "pv_module_note" : "inverter_model_status");
+      if (note && id === "pv_module") note.textContent = "Set here, not from the project.";
+    });
+  });
+  // The landing point is derived, but a job may name that equipment differently.
+  const landEl = $("pv_landing");
+  if (landEl) landEl.addEventListener("input", () => { landEl.dataset.userSet = "1"; });
 
   // Paint the status lines from whatever the form already holds.
   moduleSyncDownstream();
