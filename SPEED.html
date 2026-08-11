@@ -1404,7 +1404,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.52.0";
+const APP_VERSION = "2.52.1";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -9469,7 +9469,34 @@ async function buildPackage(opts) {
   }
 
   if (coverPage && specPageTotal > 0) {
-    const { width: cw, height: chh } = coverPage.getSize();
+    const { degrees } = window.PDFLib;
+    /*
+     * The cover sheet is stored portrait with /Rotate 270 — 792 × 1224 rotated for
+     * display, like every page out of this CAD plot. drawText works in UNROTATED page
+     * space, so fractions of the media box put the line in the wrong place and sideways
+     * at once. Same cause as the datasheets that came out on their side.
+     *
+     * So: work out where the line goes on the page AS DISPLAYED, map that back into page
+     * space, and rotate the text to match. The mapping for a page the viewer turns R
+     * degrees clockwise, with media box W × H:
+     *
+     *   R = 0     px = dx            py = dy
+     *   R = 90    px = W − dy        py = dx
+     *   R = 180   px = W − dx        py = H − dy
+     *   R = 270   px = dy            py = H − dx
+     */
+    const mb = coverPage.getSize();
+    const rot = (((coverPage.getRotation().angle || 0) % 360) + 360) % 360;
+    const quarter = rot === 90 || rot === 270;
+    const dispW = quarter ? mb.height : mb.width;
+    const dispH = quarter ? mb.width : mb.height;
+    const toPage = (dx, dy) =>
+      rot === 90  ? { x: mb.width - dy, y: dx } :
+      rot === 180 ? { x: mb.width - dx, y: mb.height - dy } :
+      rot === 270 ? { x: dy, y: mb.height - dx } :
+                    { x: dx, y: dy };
+
+    const cw = dispW, chh = dispH;
     const label = specPageTotal === 1
       ? `${SPEC_SHEET_PREFIX}-1`
       : `${SPEC_SHEET_PREFIX}-1~${SPEC_SHEET_PREFIX}-${specPageTotal}`;
@@ -9485,11 +9512,13 @@ async function buildPackage(opts) {
       frameNotes.push(`The appendix line was set at ${fit} pt to fit the sheet index.`);
     }
 
-    const y = SPEC_INDEX_STAMP.yFrac * chh;
+    const dy = SPEC_INDEX_STAMP.yFrac * chh;
+    const pNum = toPage(SPEC_INDEX_STAMP.xNumFrac * cw, dy);
+    const pTitle = toPage(SPEC_INDEX_STAMP.xTitleFrac * cw, dy);
     coverPage.drawText(winAnsi(label), {
-      x: SPEC_INDEX_STAMP.xNumFrac * cw, y, size: fit, font: bandBold });
+      x: pNum.x, y: pNum.y, size: fit, font: bandBold, rotate: degrees(rot) });
     coverPage.drawText(winAnsi(title), {
-      x: SPEC_INDEX_STAMP.xTitleFrac * cw, y, size: fit, font: bandBold });
+      x: pTitle.x, y: pTitle.y, size: fit, font: bandBold, rotate: degrees(rot) });
     frameNotes.push(`Cover sheet index now lists ${label} — ${title}.`);
   } else if (specPageTotal > 0) {
     frameNotes.push(`No cover sheet was found in the CAD plot, so the appendix was not ` +
