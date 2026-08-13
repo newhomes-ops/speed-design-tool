@@ -713,6 +713,28 @@
         </fieldset>
 
         <fieldset>
+          <legend>Site &amp; service data</legend>
+          <div class="hint" style="margin-bottom:10px">Nothing in the tool can derive
+            these &mdash; they come off the service equipment, the meter or the county
+            record. They feed the drawing JSON, and any left blank are reported when it is
+            written rather than guessed.</div>
+          <div class="grid">
+            <div><label for="msp_brand">MSP brand</label>
+              <input id="msp_brand" autocomplete="off" placeholder="SQUARE D"></div>
+            <div><label for="bus_rating">Bus rating (A)</label>
+              <input id="bus_rating" type="number" min="0" step="1" placeholder="225"></div>
+            <div><label for="mcb_rating">Main breaker (A)</label>
+              <input id="mcb_rating" type="number" min="0" step="1" placeholder="200"></div>
+            <div><label for="acd_rating">AC disconnect (A)</label>
+              <input id="acd_rating" type="number" min="0" step="1" placeholder="60"></div>
+            <div><label for="meter_number">Meter #</label>
+              <input id="meter_number" autocomplete="off"></div>
+            <div><label for="apn">APN</label>
+              <input id="apn" autocomplete="off"></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
           <legend>Provenance</legend>
           <div class="grid three">
             <div><label for="financier">Financier</label><input id="financier" autocomplete="off"></div>
@@ -1058,7 +1080,9 @@
 
         <div class="actions" style="margin-top:14px">
           <button id="pv_btn_ecalc" class="primary" type="button">Export Electrical Calculations PDF</button>
+          <button id="pv_btn_dwgjson" type="button">Write drawing JSON</button>
           <span id="pv_ecalc_note" class="hint"></span>
+          <div id="pv_dwg_note" class="hint" style="margin-top:6px"></div>
         </div>
         <div id="pv_sched_note" class="msg show" style="margin-top:10px"></div>
         <div id="pv_sched_diverge" style="margin-top:10px"></div>
@@ -1404,7 +1428,7 @@
 /* Bump APP_VERSION on every change you distribute. It is shown in the header,
    recorded in each project.json, and is the first thing to ask for when a
    designer reports a problem. */
-const APP_VERSION = "2.52.2";
+const APP_VERSION = "2.53.1";
 const APP_BUILD   = "2026-08-06";
 
 const CONFIG = {
@@ -1481,6 +1505,7 @@ const FORM_FIELDS = [
   "combiner_type","battery_type","financier","loan_type","phone",
   "module_quantity","inverter_model","roof_type","module_orientation","coupling",
   "battery_qty","battery_breaker",
+  "msp_brand","bus_rating","mcb_rating","acd_rating","meter_number","apn",
   "string_inverter",
   "roof_pitch","story_type",
   "attachment_type","railing_type","service_voltage","designer","checked_by",
@@ -1497,7 +1522,9 @@ const FIELD_LABELS = {
   product_offering:"Product offering", combiner_type:"Combiner type",
   financier:"Financier", loan_type:"Loan type", phone:"Phone",
   battery_type:"Battery (ESS)", battery_qty:"Battery qty",
-  battery_breaker:"Battery breakers", coupling:"Coupling", string_inverter:"String inverter",
+  battery_breaker:"Battery breakers", coupling:"Coupling",
+  msp_brand:"MSP brand", bus_rating:"Bus rating", mcb_rating:"Main breaker",
+  acd_rating:"AC disconnect", meter_number:"Meter #", apn:"APN", string_inverter:"String inverter",
   module_quantity:"Module qty", account_name:"Customer",
   street_address:"Street address", project_number:"Project number"
 };
@@ -2643,19 +2670,22 @@ const ESS_UNIT_BASE = 300;
  * middle of it. Nudge these if the line sits a row high or low.
  */
 const SPEC_INDEX_STAMP = {
-  // Measured against the E-1..E-4 rows: the number column starts at about 27 pt and the
-  // title column at about 66 pt, with roughly 10.5 pt between rows.
-  xNumFrac:   27 / 1224,
-  // Pushed right of the index's own title column: "SS-1~SS-5" is nine characters where
-  // "E-1" is three, and at 66 pt the two ran together.
-  xTitleFrac: 82 / 1224,
-  // Two rows higher than the first attempt, which sat below the box on the panel edge.
+  /*
+   * Kevin's own index is Verdana at 8.85 pt. The size is matched exactly; the TYPEFACE is
+   * not, and cannot be from a standard PDF font — Helvetica is drawn instead.
+   *
+   * That is the visible difference, more than the size ever was: Verdana is appreciably
+   * wider and rounder, with taller lowercase, so the same string at the same size reads
+   * lighter and more condensed in Helvetica. Embedding real Verdana needs fontkit, which
+   * pdf-lib does not bundle — see the note in the changelog. Nothing here has to change
+   * when it is embedded except the font object.
+   */
+  xNumFrac:   30 / 1224,     // 3 pt right, to line up under E-1 rather than left of it
+  xTitleFrac: 85 / 1224,     // moved with it, keeping the gap after a nine-character range
   yFrac:     137 / 792,
-  // The index entries are regular weight, not bold — the first attempt was noticeably
-  // heavier than the lines above it.
   bold: false,
-  size: 8,
-  maxWidthFrac: (330 - 82) / 1224
+  size: 8.85,
+  maxWidthFrac: (330 - 85) / 1224
 };
 
 /*
@@ -2885,34 +2915,34 @@ let RT_ZIP3 = [
   {"zip3":"005","wmo":"725050","tHigh":32.1,"tMin":-14.5,"lat":40.794,"lon":-73.102},
   {"zip3":"010","wmo":"744910","tHigh":32.9,"tMin":-24.9,"lat":42.2,"lon":-72.533},
   {"zip3":"011","wmo":"744910","tHigh":32.9,"tMin":-24.9,"lat":42.2,"lon":-72.533},
-  {"zip3":"012","wmo":"744104","tHigh":29.9,"tMin":-23.0,"lat":42.427,"lon":-73.289},
+  {"zip3":"012","wmo":"744104","tHigh":29.9,"tMin":-23,"lat":42.427,"lon":-73.289},
   {"zip3":"013","wmo":"725085","tHigh":32.1,"tMin":-23.8,"lat":42.57,"lon":-72.291},
   {"zip3":"014","wmo":"725107","tHigh":32.8,"tMin":-20.1,"lat":42.552,"lon":-71.756},
-  {"zip3":"015","wmo":"725100","tHigh":30.0,"tMin":-20.0,"lat":42.271,"lon":-71.873},
-  {"zip3":"016","wmo":"725100","tHigh":30.0,"tMin":-20.0,"lat":42.271,"lon":-71.873},
+  {"zip3":"015","wmo":"725100","tHigh":30,"tMin":-20,"lat":42.271,"lon":-71.873},
+  {"zip3":"016","wmo":"725100","tHigh":30,"tMin":-20,"lat":42.271,"lon":-71.873},
   {"zip3":"017","wmo":"725059","tHigh":32.8,"tMin":-20.1,"lat":42.47,"lon":-71.289},
   {"zip3":"018","wmo":"744904","tHigh":32.7,"tMin":-18.3,"lat":42.717,"lon":-71.124},
   {"zip3":"019","wmo":"725088","tHigh":31.9,"tMin":-18.6,"lat":42.584,"lon":-70.918},
-  {"zip3":"020","wmo":"725098","tHigh":33.0,"tMin":-20.5,"lat":42.191,"lon":-71.174},
+  {"zip3":"020","wmo":"725098","tHigh":33,"tMin":-20.5,"lat":42.191,"lon":-71.174},
   {"zip3":"021","wmo":"725090","tHigh":32.8,"tMin":-16.5,"lat":42.361,"lon":-71.01},
   {"zip3":"022","wmo":"725090","tHigh":32.8,"tMin":-16.5,"lat":42.361,"lon":-71.01},
   {"zip3":"023","wmo":"725097","tHigh":32.8,"tMin":-18.9,"lat":42.15,"lon":-70.933},
   {"zip3":"024","wmo":"725059","tHigh":32.8,"tMin":-20.1,"lat":42.47,"lon":-71.289},
-  {"zip3":"025","wmo":"725061","tHigh":29.0,"tMin":-16.6,"lat":41.65,"lon":-70.517},
-  {"zip3":"026","wmo":"725067","tHigh":29.7,"tMin":-16.0,"lat":41.669,"lon":-70.28},
+  {"zip3":"025","wmo":"725061","tHigh":29,"tMin":-16.6,"lat":41.65,"lon":-70.517},
+  {"zip3":"026","wmo":"725067","tHigh":29.7,"tMin":-16,"lat":41.669,"lon":-70.28},
   {"zip3":"027","wmo":"725065","tHigh":31.7,"tMin":-17.5,"lat":41.676,"lon":-70.958},
   {"zip3":"028","wmo":"725054","tHigh":31.2,"tMin":-17.4,"lat":41.921,"lon":-71.491},
   {"zip3":"029","wmo":"997278","tHigh":32.4,"tMin":-14.5,"lat":41.807,"lon":-71.401},
   {"zip3":"030","wmo":"743946","tHigh":33.3,"tMin":-21.1,"lat":42.783,"lon":-71.517},
   {"zip3":"031","wmo":"743945","tHigh":32.8,"tMin":-20.3,"lat":42.93,"lon":-71.436},
   {"zip3":"032","wmo":"726155","tHigh":31.3,"tMin":-22.8,"lat":43.567,"lon":-71.433},
-  {"zip3":"033","wmo":"726050","tHigh":32.2,"tMin":-24.0,"lat":43.205,"lon":-71.503},
+  {"zip3":"033","wmo":"726050","tHigh":32.2,"tMin":-24,"lat":43.205,"lon":-71.503},
   {"zip3":"034","wmo":"726165","tHigh":31.7,"tMin":-24.5,"lat":42.9,"lon":-72.267},
   {"zip3":"035","wmo":"726164","tHigh":29.8,"tMin":-32.2,"lat":44.368,"lon":-71.545},
   {"zip3":"036","wmo":"726115","tHigh":31.4,"tMin":-25.4,"lat":43.344,"lon":-72.518},
   {"zip3":"037","wmo":"726116","tHigh":31.8,"tMin":-27.9,"lat":43.626,"lon":-72.305},
   {"zip3":"038","wmo":"726183","tHigh":31.7,"tMin":-29.3,"lat":43.991,"lon":-70.948},
-  {"zip3":"039","wmo":"726055","tHigh":32.0,"tMin":-20.3,"lat":43.083,"lon":-70.817},
+  {"zip3":"039","wmo":"726055","tHigh":32,"tMin":-20.3,"lat":43.083,"lon":-70.817},
   {"zip3":"040","wmo":"726060","tHigh":30.2,"tMin":-22.4,"lat":43.65,"lon":-70.317},
   {"zip3":"041","wmo":"726060","tHigh":30.2,"tMin":-22.4,"lat":43.65,"lon":-70.317},
   {"zip3":"042","wmo":"726184","tHigh":30.7,"tMin":-25.8,"lat":44.05,"lon":-70.283},
@@ -2939,8 +2969,8 @@ let RT_ZIP3 = [
   {"zip3":"063","wmo":"725046","tHigh":29.4,"tMin":-16.2,"lat":41.328,"lon":-72.049},
   {"zip3":"064","wmo":"720545","tHigh":32.1,"tMin":-17.1,"lat":41.384,"lon":-72.506},
   {"zip3":"065","wmo":"997284","tHigh":29.4,"tMin":-13.7,"lat":41.283,"lon":-72.908},
-  {"zip3":"066","wmo":"725040","tHigh":31.7,"tMin":-15.0,"lat":41.164,"lon":-73.127},
-  {"zip3":"067","wmo":"725029","tHigh":31.0,"tMin":-19.6,"lat":41.483,"lon":-73.133},
+  {"zip3":"066","wmo":"725040","tHigh":31.7,"tMin":-15,"lat":41.164,"lon":-73.127},
+  {"zip3":"067","wmo":"725029","tHigh":31,"tMin":-19.6,"lat":41.483,"lon":-73.133},
   {"zip3":"068","wmo":"725086","tHigh":31.5,"tMin":-19.8,"lat":41.371,"lon":-73.483},
   {"zip3":"069","wmo":"725037","tHigh":32.3,"tMin":-15.8,"lat":41.062,"lon":-73.705},
   {"zip3":"070","wmo":"725020","tHigh":34.9,"tMin":-13.9,"lat":40.683,"lon":-74.169},
@@ -2949,18 +2979,18 @@ let RT_ZIP3 = [
   {"zip3":"073","wmo":"997743","tHigh":32.8,"tMin":-12.9,"lat":40.6574,"lon":-74.0654},
   {"zip3":"074","wmo":"724094","tHigh":33.8,"tMin":-15.5,"lat":40.876,"lon":-74.283},
   {"zip3":"075","wmo":"724094","tHigh":33.8,"tMin":-15.5,"lat":40.876,"lon":-74.283},
-  {"zip3":"076","wmo":"725025","tHigh":34.0,"tMin":-14.3,"lat":40.85,"lon":-74.061},
-  {"zip3":"077","wmo":"724084","tHigh":33.3,"tMin":-15.0,"lat":40.183,"lon":-74.117},
-  {"zip3":"078","wmo":"724077","tHigh":32.0,"tMin":-19.1,"lat":41.009,"lon":-74.736},
+  {"zip3":"076","wmo":"725025","tHigh":34,"tMin":-14.3,"lat":40.85,"lon":-74.061},
+  {"zip3":"077","wmo":"724084","tHigh":33.3,"tMin":-15,"lat":40.183,"lon":-74.117},
+  {"zip3":"078","wmo":"724077","tHigh":32,"tMin":-19.1,"lat":41.009,"lon":-74.736},
   {"zip3":"079","wmo":"722247","tHigh":33.5,"tMin":-16.8,"lat":40.624,"lon":-74.669},
-  {"zip3":"080","wmo":"724080","tHigh":34.5,"tMin":-13.0,"lat":39.873,"lon":-75.227},
+  {"zip3":"080","wmo":"724080","tHigh":34.5,"tMin":-13,"lat":39.873,"lon":-75.227},
   {"zip3":"081","wmo":"997286","tHigh":35.8,"tMin":-12.1,"lat":39.933,"lon":-75.142},
   {"zip3":"082","wmo":"745966","tHigh":32.5,"tMin":-12.7,"lat":39.008,"lon":-74.908},
   {"zip3":"083","wmo":"724075","tHigh":33.6,"tMin":-16.8,"lat":39.366,"lon":-75.078},
   {"zip3":"084","wmo":"997270","tHigh":30.5,"tMin":-7.6,"lat":39.357,"lon":-74.418},
   {"zip3":"085","wmo":"724095","tHigh":33.9,"tMin":-14.1,"lat":40.277,"lon":-74.816},
   {"zip3":"086","wmo":"724095","tHigh":33.9,"tMin":-14.1,"lat":40.277,"lon":-74.816},
-  {"zip3":"087","wmo":"724084","tHigh":33.3,"tMin":-15.0,"lat":40.183,"lon":-74.117},
+  {"zip3":"087","wmo":"724084","tHigh":33.3,"tMin":-15,"lat":40.183,"lon":-74.117},
   {"zip3":"088","wmo":"722247","tHigh":33.5,"tMin":-16.8,"lat":40.624,"lon":-74.669},
   {"zip3":"089","wmo":"722247","tHigh":33.5,"tMin":-16.8,"lat":40.624,"lon":-74.669},
   {"zip3":"090","wmo":"727100","tHigh":28.2,"tMin":-31.2,"lat":46.9601,"lon":-67.8833},
@@ -2972,20 +3002,20 @@ let RT_ZIP3 = [
   {"zip3":"096","wmo":"727100","tHigh":28.2,"tMin":-31.2,"lat":46.9601,"lon":-67.8833},
   {"zip3":"097","wmo":"700270","tHigh":13.8,"tMin":-40.6,"lat":71.323,"lon":-156.616},
   {"zip3":"098","wmo":"700270","tHigh":13.8,"tMin":-40.6,"lat":71.323,"lon":-156.616},
-  {"zip3":"100","wmo":"725053","tHigh":33.0,"tMin":-13.2,"lat":40.779,"lon":-73.969},
-  {"zip3":"101","wmo":"725053","tHigh":33.0,"tMin":-13.2,"lat":40.779,"lon":-73.969},
-  {"zip3":"102","wmo":"725053","tHigh":33.0,"tMin":-13.2,"lat":40.779,"lon":-73.969},
+  {"zip3":"100","wmo":"725053","tHigh":33,"tMin":-13.2,"lat":40.779,"lon":-73.969},
+  {"zip3":"101","wmo":"725053","tHigh":33,"tMin":-13.2,"lat":40.779,"lon":-73.969},
+  {"zip3":"102","wmo":"725053","tHigh":33,"tMin":-13.2,"lat":40.779,"lon":-73.969},
   {"zip3":"103","wmo":"997272","tHigh":33.7,"tMin":-12.2,"lat":40.639,"lon":-74.146},
-  {"zip3":"104","wmo":"725030","tHigh":34.0,"tMin":-13.0,"lat":40.779,"lon":-73.88},
+  {"zip3":"104","wmo":"725030","tHigh":34,"tMin":-13,"lat":40.779,"lon":-73.88},
   {"zip3":"105","wmo":"725037","tHigh":32.3,"tMin":-15.8,"lat":41.062,"lon":-73.705},
   {"zip3":"106","wmo":"725037","tHigh":32.3,"tMin":-15.8,"lat":41.062,"lon":-73.705},
   {"zip3":"107","wmo":"725037","tHigh":32.3,"tMin":-15.8,"lat":41.062,"lon":-73.705},
   {"zip3":"108","wmo":"997280","tHigh":31.6,"tMin":-11.8,"lat":40.811,"lon":-73.765},
   {"zip3":"109","wmo":"725037","tHigh":32.3,"tMin":-15.8,"lat":41.062,"lon":-73.705},
   {"zip3":"110","wmo":"997280","tHigh":31.6,"tMin":-11.8,"lat":40.811,"lon":-73.765},
-  {"zip3":"111","wmo":"725053","tHigh":33.0,"tMin":-13.2,"lat":40.779,"lon":-73.969},
+  {"zip3":"111","wmo":"725053","tHigh":33,"tMin":-13.2,"lat":40.779,"lon":-73.969},
   {"zip3":"112","wmo":"997743","tHigh":32.8,"tMin":-12.9,"lat":40.6574,"lon":-74.0654},
-  {"zip3":"113","wmo":"725030","tHigh":34.0,"tMin":-13.0,"lat":40.779,"lon":-73.88},
+  {"zip3":"113","wmo":"725030","tHigh":34,"tMin":-13,"lat":40.779,"lon":-73.88},
   {"zip3":"114","wmo":"744860","tHigh":32.7,"tMin":-13.2,"lat":40.639,"lon":-73.764},
   {"zip3":"115","wmo":"744860","tHigh":32.7,"tMin":-13.2,"lat":40.639,"lon":-73.764},
   {"zip3":"116","wmo":"744860","tHigh":32.7,"tMin":-13.2,"lat":40.639,"lon":-73.764},
@@ -2998,17 +3028,17 @@ let RT_ZIP3 = [
   {"zip3":"123","wmo":"725180","tHigh":31.9,"tMin":-22.1,"lat":42.747,"lon":-73.799},
   {"zip3":"124","wmo":"743690","tHigh":31.6,"tMin":-22.2,"lat":41.7857,"lon":-73.7422},
   {"zip3":"125","wmo":"743690","tHigh":31.6,"tMin":-22.2,"lat":41.7857,"lon":-73.7422},
-  {"zip3":"126","wmo":"725036","tHigh":33.4,"tMin":-21.0,"lat":41.626,"lon":-73.882},
+  {"zip3":"126","wmo":"725036","tHigh":33.4,"tMin":-21,"lat":41.626,"lon":-73.882},
   {"zip3":"127","wmo":"725145","tHigh":30.8,"tMin":-22.1,"lat":41.701,"lon":-74.795},
   {"zip3":"128","wmo":"725220","tHigh":31.2,"tMin":-28.2,"lat":43.338,"lon":-73.61},
   {"zip3":"129","wmo":"726225","tHigh":30.9,"tMin":-26.9,"lat":44.65,"lon":-73.467},
   {"zip3":"130","wmo":"725190","tHigh":31.8,"tMin":-22.8,"lat":43.111,"lon":-76.104},
-  {"zip3":"131","wmo":"725146","tHigh":31.0,"tMin":-22.7,"lat":43.35,"lon":-76.385},
+  {"zip3":"131","wmo":"725146","tHigh":31,"tMin":-22.7,"lat":43.35,"lon":-76.385},
   {"zip3":"132","wmo":"725190","tHigh":31.8,"tMin":-22.8,"lat":43.111,"lon":-76.104},
   {"zip3":"133","wmo":"725197","tHigh":30.5,"tMin":-24.5,"lat":43.145,"lon":-75.384},
   {"zip3":"134","wmo":"725197","tHigh":30.5,"tMin":-24.5,"lat":43.145,"lon":-75.384},
   {"zip3":"135","wmo":"725197","tHigh":30.5,"tMin":-24.5,"lat":43.145,"lon":-75.384},
-  {"zip3":"136","wmo":"994580","tHigh":27.3,"tMin":-23.0,"lat":44.4645,"lon":-75.7936},
+  {"zip3":"136","wmo":"994580","tHigh":27.3,"tMin":-23,"lat":44.4645,"lon":-75.7936},
   {"zip3":"137","wmo":"725150","tHigh":29.4,"tMin":-20.9,"lat":42.207,"lon":-75.98},
   {"zip3":"138","wmo":"725150","tHigh":29.4,"tMin":-20.9,"lat":42.207,"lon":-75.98},
   {"zip3":"139","wmo":"725150","tHigh":29.4,"tMin":-20.9,"lat":42.207,"lon":-75.98},
@@ -3018,10 +3048,10 @@ let RT_ZIP3 = [
   {"zip3":"143","wmo":"998235","tHigh":29.7,"tMin":-17.4,"lat":43.077,"lon":-79.014},
   {"zip3":"144","wmo":"725290","tHigh":31.7,"tMin":-19.8,"lat":43.117,"lon":-77.677},
   {"zip3":"145","wmo":"725290","tHigh":31.7,"tMin":-19.8,"lat":43.117,"lon":-77.677},
-  {"zip3":"146","wmo":"998009","tHigh":30.0,"tMin":-16.0,"lat":43.2625,"lon":-77.5981},
-  {"zip3":"147","wmo":"725235","tHigh":28.0,"tMin":-20.6,"lat":42.15,"lon":-79.25},
-  {"zip3":"148","wmo":"725156","tHigh":32.0,"tMin":-23.0,"lat":42.159,"lon":-76.892},
-  {"zip3":"149","wmo":"725156","tHigh":32.0,"tMin":-23.0,"lat":42.159,"lon":-76.892},
+  {"zip3":"146","wmo":"998009","tHigh":30,"tMin":-16,"lat":43.2625,"lon":-77.5981},
+  {"zip3":"147","wmo":"725235","tHigh":28,"tMin":-20.6,"lat":42.15,"lon":-79.25},
+  {"zip3":"148","wmo":"725156","tHigh":32,"tMin":-23,"lat":42.159,"lon":-76.892},
+  {"zip3":"149","wmo":"725156","tHigh":32,"tMin":-23,"lat":42.159,"lon":-76.892},
   {"zip3":"150","wmo":"725200","tHigh":31.5,"tMin":-18.6,"lat":40.5317,"lon":-80.2172},
   {"zip3":"151","wmo":"725205","tHigh":31.4,"tMin":-17.4,"lat":40.355,"lon":-79.922},
   {"zip3":"152","wmo":"725205","tHigh":31.4,"tMin":-17.4,"lat":40.355,"lon":-79.922},
@@ -3029,19 +3059,19 @@ let RT_ZIP3 = [
   {"zip3":"154","wmo":"724176","tHigh":31.8,"tMin":-17.9,"lat":39.643,"lon":-79.916},
   {"zip3":"155","wmo":"725127","tHigh":28.7,"tMin":-19.6,"lat":40.316,"lon":-78.834},
   {"zip3":"156","wmo":"725205","tHigh":31.4,"tMin":-17.4,"lat":40.355,"lon":-79.922},
-  {"zip3":"157","wmo":"725175","tHigh":31.2,"tMin":-21.0,"lat":40.633,"lon":-79.1},
+  {"zip3":"157","wmo":"725175","tHigh":31.2,"tMin":-21,"lat":40.633,"lon":-79.1},
   {"zip3":"158","wmo":"725125","tHigh":29.3,"tMin":-20.5,"lat":41.179,"lon":-78.893},
   {"zip3":"159","wmo":"725127","tHigh":28.7,"tMin":-19.6,"lat":40.316,"lon":-78.834},
   {"zip3":"160","wmo":"725124","tHigh":31.2,"tMin":-19.9,"lat":40.777,"lon":-79.95},
-  {"zip3":"161","wmo":"720378","tHigh":32.4,"tMin":-22.0,"lat":41.033,"lon":-80.417},
+  {"zip3":"161","wmo":"720378","tHigh":32.4,"tMin":-22,"lat":41.033,"lon":-80.417},
   {"zip3":"162","wmo":"725125","tHigh":29.3,"tMin":-20.5,"lat":41.179,"lon":-78.893},
   {"zip3":"163","wmo":"725267","tHigh":29.8,"tMin":-19.8,"lat":41.383,"lon":-79.867},
   {"zip3":"164","wmo":"725260","tHigh":30.3,"tMin":-17.6,"lat":42.08,"lon":-80.182},
   {"zip3":"165","wmo":"725260","tHigh":30.3,"tMin":-17.6,"lat":42.08,"lon":-80.182},
   {"zip3":"166","wmo":"725126","tHigh":31.5,"tMin":-18.2,"lat":40.296,"lon":-78.32},
   {"zip3":"167","wmo":"725266","tHigh":28.7,"tMin":-23.9,"lat":41.8,"lon":-78.633},
-  {"zip3":"168","wmo":"725128","tHigh":32.0,"tMin":-16.4,"lat":40.85,"lon":-77.85},
-  {"zip3":"169","wmo":"725156","tHigh":32.0,"tMin":-23.0,"lat":42.159,"lon":-76.892},
+  {"zip3":"168","wmo":"725128","tHigh":32,"tMin":-16.4,"lat":40.85,"lon":-77.85},
+  {"zip3":"169","wmo":"725156","tHigh":32,"tMin":-23,"lat":42.159,"lon":-76.892},
   {"zip3":"170","wmo":"725118","tHigh":33.8,"tMin":-14.4,"lat":40.217,"lon":-76.851},
   {"zip3":"171","wmo":"725118","tHigh":33.8,"tMin":-14.4,"lat":40.217,"lon":-76.851},
   {"zip3":"172","wmo":"724066","tHigh":33.7,"tMin":-14.1,"lat":39.706,"lon":-77.73},
@@ -3051,7 +3081,7 @@ let RT_ZIP3 = [
   {"zip3":"176","wmo":"725116","tHigh":33.2,"tMin":-15.9,"lat":40.12,"lon":-76.294},
   {"zip3":"177","wmo":"725140","tHigh":32.8,"tMin":-18.3,"lat":41.243,"lon":-76.922},
   {"zip3":"178","wmo":"725105","tHigh":32.7,"tMin":-18.9,"lat":40.821,"lon":-76.864},
-  {"zip3":"179","wmo":"725144","tHigh":33.7,"tMin":-17.0,"lat":40.433,"lon":-76.567},
+  {"zip3":"179","wmo":"725144","tHigh":33.7,"tMin":-17,"lat":40.433,"lon":-76.567},
   {"zip3":"180","wmo":"725170","tHigh":33.3,"tMin":-16.4,"lat":40.65,"lon":-75.448},
   {"zip3":"181","wmo":"725170","tHigh":33.3,"tMin":-16.4,"lat":40.65,"lon":-75.448},
   {"zip3":"182","wmo":"725130","tHigh":31.9,"tMin":-18.6,"lat":41.334,"lon":-75.727},
@@ -3062,13 +3092,13 @@ let RT_ZIP3 = [
   {"zip3":"187","wmo":"725130","tHigh":31.9,"tMin":-18.6,"lat":41.334,"lon":-75.727},
   {"zip3":"188","wmo":"725150","tHigh":29.4,"tMin":-20.9,"lat":42.207,"lon":-75.98},
   {"zip3":"189","wmo":"725113","tHigh":33.1,"tMin":-15.3,"lat":40.33,"lon":-75.123},
-  {"zip3":"190","wmo":"724080","tHigh":34.5,"tMin":-13.0,"lat":39.873,"lon":-75.227},
+  {"zip3":"190","wmo":"724080","tHigh":34.5,"tMin":-13,"lat":39.873,"lon":-75.227},
   {"zip3":"191","wmo":"997286","tHigh":35.8,"tMin":-12.1,"lat":39.933,"lon":-75.142},
   {"zip3":"192","wmo":"997286","tHigh":35.8,"tMin":-12.1,"lat":39.933,"lon":-75.142},
   {"zip3":"193","wmo":"725160","tHigh":31.9,"tMin":-15.7,"lat":39.8593,"lon":-75.7861},
   {"zip3":"194","wmo":"720304","tHigh":32.9,"tMin":-14.7,"lat":40.1,"lon":-75.267},
-  {"zip3":"195","wmo":"725103","tHigh":34.0,"tMin":-14.9,"lat":40.373,"lon":-75.959},
-  {"zip3":"196","wmo":"725103","tHigh":34.0,"tMin":-14.9,"lat":40.373,"lon":-75.959},
+  {"zip3":"195","wmo":"725103","tHigh":34,"tMin":-14.9,"lat":40.373,"lon":-75.959},
+  {"zip3":"196","wmo":"725103","tHigh":34,"tMin":-14.9,"lat":40.373,"lon":-75.959},
   {"zip3":"197","wmo":"997694","tHigh":33.3,"tMin":-12.5,"lat":39.582,"lon":-75.589},
   {"zip3":"198","wmo":"724180","tHigh":33.8,"tMin":-13.6,"lat":39.674,"lon":-75.606},
   {"zip3":"199","wmo":"724088","tHigh":33.9,"tMin":-12.8,"lat":39.133,"lon":-75.467},
@@ -3093,16 +3123,16 @@ let RT_ZIP3 = [
   {"zip3":"219","wmo":"997694","tHigh":33.3,"tMin":-12.5,"lat":39.582,"lon":-75.589},
   {"zip3":"220","wmo":"724037","tHigh":35.7,"tMin":-14.7,"lat":38.717,"lon":-77.183},
   {"zip3":"221","wmo":"724037","tHigh":35.7,"tMin":-14.7,"lat":38.717,"lon":-77.183},
-  {"zip3":"222","wmo":"724050","tHigh":35.1,"tMin":-11.0,"lat":38.847,"lon":-77.035},
-  {"zip3":"223","wmo":"724050","tHigh":35.1,"tMin":-11.0,"lat":38.847,"lon":-77.035},
+  {"zip3":"222","wmo":"724050","tHigh":35.1,"tMin":-11,"lat":38.847,"lon":-77.035},
+  {"zip3":"223","wmo":"724050","tHigh":35.1,"tMin":-11,"lat":38.847,"lon":-77.035},
   {"zip3":"224","wmo":"724033","tHigh":35.4,"tMin":-14.2,"lat":38.267,"lon":-77.449},
   {"zip3":"225","wmo":"997304","tHigh":32.9,"tMin":-8.9,"lat":37.9954,"lon":-76.4646},
   {"zip3":"226","wmo":"724053","tHigh":34.6,"tMin":-14.7,"lat":39.143,"lon":-78.144},
-  {"zip3":"227","wmo":"723098","tHigh":35.0,"tMin":-15.4,"lat":38.527,"lon":-77.859},
+  {"zip3":"227","wmo":"723098","tHigh":35,"tMin":-15.4,"lat":38.527,"lon":-77.859},
   {"zip3":"228","wmo":"724105","tHigh":33.9,"tMin":-16.6,"lat":38.264,"lon":-78.896},
-  {"zip3":"229","wmo":"746010","tHigh":32.2,"tMin":-13.0,"lat":37.9975,"lon":-78.4656},
+  {"zip3":"229","wmo":"746010","tHigh":32.2,"tMin":-13,"lat":37.9975,"lon":-78.4656},
   {"zip3":"230","wmo":"997708","tHigh":31.8,"tMin":-7.5,"lat":37.251,"lon":-76.342},
-  {"zip3":"231","wmo":"720285","tHigh":35.1,"tMin":-13.0,"lat":37.521,"lon":-76.765},
+  {"zip3":"231","wmo":"720285","tHigh":35.1,"tMin":-13,"lat":37.521,"lon":-76.765},
   {"zip3":"232","wmo":"724010","tHigh":35.1,"tMin":-12.9,"lat":37.512,"lon":-77.323},
   {"zip3":"233","wmo":"724020","tHigh":33.3,"tMin":-11.8,"lat":37.937,"lon":-75.466},
   {"zip3":"234","wmo":"724026","tHigh":34.1,"tMin":-10.3,"lat":37.647,"lon":-75.761},
@@ -3110,24 +3140,24 @@ let RT_ZIP3 = [
   {"zip3":"236","wmo":"745980","tHigh":33.9,"tMin":-10.1,"lat":37.083,"lon":-76.36},
   {"zip3":"237","wmo":"997305","tHigh":33.9,"tMin":-7.9,"lat":36.778,"lon":-76.302},
   {"zip3":"238","wmo":"724014","tHigh":36.4,"tMin":-14.3,"lat":37.183,"lon":-77.5},
-  {"zip3":"239","wmo":"724017","tHigh":36.0,"tMin":-15.0,"lat":37.358,"lon":-78.438},
+  {"zip3":"239","wmo":"724017","tHigh":36,"tMin":-15,"lat":37.358,"lon":-78.438},
   {"zip3":"240","wmo":"724110","tHigh":33.5,"tMin":-12.6,"lat":37.317,"lon":-79.974},
   {"zip3":"241","wmo":"724110","tHigh":33.5,"tMin":-12.6,"lat":37.317,"lon":-79.974},
   {"zip3":"242","wmo":"724117","tHigh":30.1,"tMin":-16.9,"lat":36.988,"lon":-82.53},
   {"zip3":"243","wmo":"724056","tHigh":31.4,"tMin":-16.2,"lat":36.895,"lon":-81.35},
   {"zip3":"244","wmo":"724105","tHigh":33.9,"tMin":-16.6,"lat":38.264,"lon":-78.896},
   {"zip3":"245","wmo":"724100","tHigh":33.5,"tMin":-14.9,"lat":37.321,"lon":-79.207},
-  {"zip3":"246","wmo":"720264","tHigh":29.9,"tMin":-11.0,"lat":37.064,"lon":-81.798},
+  {"zip3":"246","wmo":"720264","tHigh":29.9,"tMin":-11,"lat":37.064,"lon":-81.798},
   {"zip3":"247","wmo":"724125","tHigh":29.7,"tMin":-16.6,"lat":37.298,"lon":-81.204},
-  {"zip3":"248","wmo":"720160","tHigh":32.0,"tMin":-17.0,"lat":37.601,"lon":-81.559},
+  {"zip3":"248","wmo":"720160","tHigh":32,"tMin":-17,"lat":37.601,"lon":-81.559},
   {"zip3":"249","wmo":"724127","tHigh":30.2,"tMin":-17.5,"lat":37.867,"lon":-80.4},
   {"zip3":"250","wmo":"724140","tHigh":32.7,"tMin":-16.6,"lat":38.379,"lon":-81.59},
   {"zip3":"251","wmo":"724140","tHigh":32.7,"tMin":-16.6,"lat":38.379,"lon":-81.59},
   {"zip3":"252","wmo":"724140","tHigh":32.7,"tMin":-16.6,"lat":38.379,"lon":-81.59},
   {"zip3":"253","wmo":"724140","tHigh":32.7,"tMin":-16.6,"lat":38.379,"lon":-81.59},
-  {"zip3":"254","wmo":"724177","tHigh":34.0,"tMin":-16.3,"lat":39.402,"lon":-77.984},
+  {"zip3":"254","wmo":"724177","tHigh":34,"tMin":-16.3,"lat":39.402,"lon":-77.984},
   {"zip3":"255","wmo":"724250","tHigh":32.7,"tMin":-16.4,"lat":38.365,"lon":-82.555},
-  {"zip3":"256","wmo":"720160","tHigh":32.0,"tMin":-17.0,"lat":37.601,"lon":-81.559},
+  {"zip3":"256","wmo":"720160","tHigh":32,"tMin":-17,"lat":37.601,"lon":-81.559},
   {"zip3":"257","wmo":"724250","tHigh":32.7,"tMin":-16.4,"lat":38.365,"lon":-82.555},
   {"zip3":"258","wmo":"724120","tHigh":29.2,"tMin":-18.3,"lat":37.784,"lon":-81.123},
   {"zip3":"259","wmo":"724120","tHigh":29.2,"tMin":-18.3,"lat":37.784,"lon":-81.123},
@@ -3137,13 +3167,13 @@ let RT_ZIP3 = [
   {"zip3":"263","wmo":"724175","tHigh":31.4,"tMin":-18.1,"lat":39.296,"lon":-80.229},
   {"zip3":"264","wmo":"724175","tHigh":31.4,"tMin":-18.1,"lat":39.296,"lon":-80.229},
   {"zip3":"265","wmo":"724176","tHigh":31.8,"tMin":-17.9,"lat":39.643,"lon":-79.916},
-  {"zip3":"266","wmo":"720328","tHigh":31.1,"tMin":-17.6,"lat":39.0,"lon":-80.274},
+  {"zip3":"266","wmo":"720328","tHigh":31.1,"tMin":-17.6,"lat":39,"lon":-80.274},
   {"zip3":"267","wmo":"720355","tHigh":33.7,"tMin":-14.7,"lat":39.617,"lon":-78.767},
   {"zip3":"268","wmo":"724165","tHigh":33.7,"tMin":-16.2,"lat":38.994,"lon":-79.144},
   {"zip3":"270","wmo":"723193","tHigh":33.5,"tMin":-10.9,"lat":36.134,"lon":-80.222},
   {"zip3":"271","wmo":"723193","tHigh":33.5,"tMin":-10.9,"lat":36.134,"lon":-80.222},
-  {"zip3":"272","wmo":"723174","tHigh":34.7,"tMin":-12.0,"lat":36.047,"lon":-79.477},
-  {"zip3":"273","wmo":"723174","tHigh":34.7,"tMin":-12.0,"lat":36.047,"lon":-79.477},
+  {"zip3":"272","wmo":"723174","tHigh":34.7,"tMin":-12,"lat":36.047,"lon":-79.477},
+  {"zip3":"273","wmo":"723174","tHigh":34.7,"tMin":-12,"lat":36.047,"lon":-79.477},
   {"zip3":"274","wmo":"723170","tHigh":33.6,"tMin":-11.5,"lat":36.097,"lon":-79.943},
   {"zip3":"275","wmo":"720288","tHigh":34.2,"tMin":-11.2,"lat":36.361,"lon":-78.529},
   {"zip3":"276","wmo":"723060","tHigh":35.1,"tMin":-10.9,"lat":35.892,"lon":-78.782},
@@ -3151,14 +3181,14 @@ let RT_ZIP3 = [
   {"zip3":"278","wmo":"723068","tHigh":34.9,"tMin":-10.7,"lat":35.855,"lon":-77.893},
   {"zip3":"279","wmo":"723074","tHigh":34.3,"tMin":-8.5,"lat":36.028,"lon":-76.567},
   {"zip3":"280","wmo":"723156","tHigh":33.9,"tMin":-11.8,"lat":35.646,"lon":-80.52},
-  {"zip3":"281","wmo":"723194","tHigh":35.0,"tMin":-9.8,"lat":35.017,"lon":-80.621},
+  {"zip3":"281","wmo":"723194","tHigh":35,"tMin":-9.8,"lat":35.017,"lon":-80.621},
   {"zip3":"282","wmo":"723140","tHigh":34.5,"tMin":-10.1,"lat":35.224,"lon":-80.955},
   {"zip3":"283","wmo":"723035","tHigh":35.7,"tMin":-9.4,"lat":34.991,"lon":-78.88},
   {"zip3":"284","wmo":"723020","tHigh":34.2,"tMin":-7.9,"lat":34.268,"lon":-77.9},
-  {"zip3":"285","wmo":"723095","tHigh":34.0,"tMin":-8.6,"lat":35.068,"lon":-77.048},
+  {"zip3":"285","wmo":"723095","tHigh":34,"tMin":-8.6,"lat":35.068,"lon":-77.048},
   {"zip3":"286","wmo":"722198","tHigh":28.8,"tMin":-15.1,"lat":36.2,"lon":-81.65},
-  {"zip3":"287","wmo":"746960","tHigh":29.9,"tMin":-15.0,"lat":35.4945,"lon":-82.6142},
-  {"zip3":"288","wmo":"746960","tHigh":29.9,"tMin":-15.0,"lat":35.4945,"lon":-82.6142},
+  {"zip3":"287","wmo":"746960","tHigh":29.9,"tMin":-15,"lat":35.4945,"lon":-82.6142},
+  {"zip3":"288","wmo":"746960","tHigh":29.9,"tMin":-15,"lat":35.4945,"lon":-82.6142},
   {"zip3":"289","wmo":"722177","tHigh":32.3,"tMin":-13.5,"lat":35.195,"lon":-83.865},
   {"zip3":"290","wmo":"998177","tHigh":34.7,"tMin":-5.8,"lat":34.1074,"lon":-81.2707},
   {"zip3":"291","wmo":"723115","tHigh":35.7,"tMin":-6.9,"lat":33.462,"lon":-80.858},
@@ -3169,7 +3199,7 @@ let RT_ZIP3 = [
   {"zip3":"296","wmo":"723119","tHigh":34.4,"tMin":-8.7,"lat":34.846,"lon":-82.346},
   {"zip3":"297","wmo":"723117","tHigh":34.8,"tMin":-10.3,"lat":34.987,"lon":-81.058},
   {"zip3":"298","wmo":"720601","tHigh":35.3,"tMin":-8.1,"lat":33.65,"lon":-81.683},
-  {"zip3":"299","wmo":"722085","tHigh":35.0,"tMin":-5.1,"lat":32.483,"lon":-80.717},
+  {"zip3":"299","wmo":"722085","tHigh":35,"tMin":-5.1,"lat":32.483,"lon":-80.717},
   {"zip3":"300","wmo":"722196","tHigh":34.5,"tMin":-9.3,"lat":33.875,"lon":-84.302},
   {"zip3":"301","wmo":"720674","tHigh":33.7,"tMin":-3.7,"lat":33.633,"lon":-85.15},
   {"zip3":"302","wmo":"722190","tHigh":34.2,"tMin":-9.5,"lat":33.63,"lon":-84.442},
@@ -3177,9 +3207,9 @@ let RT_ZIP3 = [
   {"zip3":"304","wmo":"722134","tHigh":36.1,"tMin":-4.3,"lat":32.193,"lon":-82.372},
   {"zip3":"305","wmo":"722185","tHigh":33.4,"tMin":-8.9,"lat":34.272,"lon":-83.83},
   {"zip3":"306","wmo":"723110","tHigh":35.1,"tMin":-9.2,"lat":33.948,"lon":-83.328},
-  {"zip3":"307","wmo":"722154","tHigh":34.0,"tMin":-10.5,"lat":34.722,"lon":-84.869},
-  {"zip3":"308","wmo":"720289","tHigh":36.0,"tMin":-8.7,"lat":33.53,"lon":-82.516},
-  {"zip3":"309","wmo":"722181","tHigh":36.0,"tMin":-5.9,"lat":33.467,"lon":-82.039},
+  {"zip3":"307","wmo":"722154","tHigh":34,"tMin":-10.5,"lat":34.722,"lon":-84.869},
+  {"zip3":"308","wmo":"720289","tHigh":36,"tMin":-8.7,"lat":33.53,"lon":-82.516},
+  {"zip3":"309","wmo":"722181","tHigh":36,"tMin":-5.9,"lat":33.467,"lon":-82.039},
   {"zip3":"310","wmo":"722175","tHigh":35.8,"tMin":-7.6,"lat":32.633,"lon":-83.6},
   {"zip3":"311","wmo":"722195","tHigh":34.3,"tMin":-9.2,"lat":33.779,"lon":-84.521},
   {"zip3":"312","wmo":"722170","tHigh":35.7,"tMin":-8.1,"lat":32.685,"lon":-83.653},
@@ -3204,8 +3234,8 @@ let RT_ZIP3 = [
   {"zip3":"331","wmo":"997355","tHigh":30.7,"tMin":12.5,"lat":25.7315,"lon":-80.1619},
   {"zip3":"332","wmo":"997355","tHigh":30.7,"tMin":12.5,"lat":25.7315,"lon":-80.1619},
   {"zip3":"333","wmo":"747830","tHigh":32.9,"tMin":5.2,"lat":26.079,"lon":-80.162},
-  {"zip3":"334","wmo":"722030","tHigh":33.0,"tMin":3.3,"lat":26.685,"lon":-80.099},
-  {"zip3":"335","wmo":"720373","tHigh":34.9,"tMin":4.9,"lat":28.0,"lon":-82.164},
+  {"zip3":"334","wmo":"722030","tHigh":33,"tMin":3.3,"lat":26.685,"lon":-80.099},
+  {"zip3":"335","wmo":"720373","tHigh":34.9,"tMin":4.9,"lat":28,"lon":-82.164},
   {"zip3":"336","wmo":"720374","tHigh":34.1,"tMin":7.1,"lat":27.916,"lon":-82.449},
   {"zip3":"337","wmo":"722116","tHigh":33.3,"tMin":1.5,"lat":27.911,"lon":-82.688},
   {"zip3":"338","wmo":"747931","tHigh":34.3,"tMin":0.1,"lat":28.062,"lon":-81.754},
@@ -3213,28 +3243,28 @@ let RT_ZIP3 = [
   {"zip3":"340","wmo":"994570","tHigh":30.8,"tMin":10.1,"lat":24.4539,"lon":-81.8775},
   {"zip3":"341","wmo":"722038","tHigh":33.1,"tMin":3.1,"lat":26.155,"lon":-81.775},
   {"zip3":"342","wmo":"722115","tHigh":33.4,"tMin":0.6,"lat":27.401,"lon":-82.559},
-  {"zip3":"344","wmo":"722055","tHigh":34.0,"tMin":-5.3,"lat":29.167,"lon":-82.233},
+  {"zip3":"344","wmo":"722055","tHigh":34,"tMin":-5.3,"lat":29.167,"lon":-82.233},
   {"zip3":"346","wmo":"994008","tHigh":31.9,"tMin":7.6,"lat":28.1533,"lon":-82.8012},
   {"zip3":"347","wmo":"722213","tHigh":34.1,"tMin":-0.6,"lat":28.821,"lon":-81.81},
   {"zip3":"349","wmo":"722103","tHigh":32.9,"tMin":0.3,"lat":27.498,"lon":-80.377},
-  {"zip3":"350","wmo":"722280","tHigh":35.5,"tMin":-10.0,"lat":33.566,"lon":-86.745},
-  {"zip3":"351","wmo":"722280","tHigh":35.5,"tMin":-10.0,"lat":33.566,"lon":-86.745},
-  {"zip3":"352","wmo":"722280","tHigh":35.5,"tMin":-10.0,"lat":33.566,"lon":-86.745},
+  {"zip3":"350","wmo":"722280","tHigh":35.5,"tMin":-10,"lat":33.566,"lon":-86.745},
+  {"zip3":"351","wmo":"722280","tHigh":35.5,"tMin":-10,"lat":33.566,"lon":-86.745},
+  {"zip3":"352","wmo":"722280","tHigh":35.5,"tMin":-10,"lat":33.566,"lon":-86.745},
   {"zip3":"354","wmo":"722288","tHigh":35.8,"tMin":-9.1,"lat":33.2125,"lon":-87.5914},
   {"zip3":"355","wmo":"720413","tHigh":33.9,"tMin":-12.5,"lat":34.267,"lon":-87.6},
-  {"zip3":"356","wmo":"722279","tHigh":35.0,"tMin":-11.3,"lat":34.653,"lon":-86.945},
+  {"zip3":"356","wmo":"722279","tHigh":35,"tMin":-11.3,"lat":34.653,"lon":-86.945},
   {"zip3":"357","wmo":"750070","tHigh":34.3,"tMin":-11.6,"lat":34.6941,"lon":-85.9998},
   {"zip3":"358","wmo":"720307","tHigh":35.1,"tMin":-10.8,"lat":34.861,"lon":-86.557},
   {"zip3":"359","wmo":"722285","tHigh":34.5,"tMin":-10.9,"lat":33.967,"lon":-86.083},
   {"zip3":"360","wmo":"722265","tHigh":36.2,"tMin":-6.9,"lat":32.383,"lon":-86.35},
   {"zip3":"361","wmo":"722265","tHigh":36.2,"tMin":-6.9,"lat":32.383,"lon":-86.35},
-  {"zip3":"362","wmo":"722287","tHigh":35.0,"tMin":-9.9,"lat":33.587,"lon":-85.856},
+  {"zip3":"362","wmo":"722287","tHigh":35,"tMin":-9.9,"lat":33.587,"lon":-85.856},
   {"zip3":"363","wmo":"722268","tHigh":35.8,"tMin":-6.2,"lat":31.317,"lon":-85.45},
   {"zip3":"364","wmo":"722276","tHigh":35.5,"tMin":-7.2,"lat":31.416,"lon":-87.044},
   {"zip3":"365","wmo":"722230","tHigh":34.3,"tMin":-6.1,"lat":30.688,"lon":-88.246},
   {"zip3":"366","wmo":"722235","tHigh":34.1,"tMin":-4.9,"lat":30.626,"lon":-88.068},
   {"zip3":"367","wmo":"750100","tHigh":35.6,"tMin":-8.7,"lat":32.3355,"lon":-86.9787},
-  {"zip3":"368","wmo":"722284","tHigh":34.1,"tMin":-9.0,"lat":32.616,"lon":-85.433},
+  {"zip3":"368","wmo":"722284","tHigh":34.1,"tMin":-9,"lat":32.616,"lon":-85.433},
   {"zip3":"369","wmo":"721551","tHigh":34.4,"tMin":-8.3,"lat":31.8814,"lon":-87.7367},
   {"zip3":"370","wmo":"723270","tHigh":34.8,"tMin":-12.7,"lat":36.119,"lon":-86.689},
   {"zip3":"371","wmo":"723273","tHigh":37.6,"tMin":-12.8,"lat":36.009,"lon":-86.52},
@@ -3248,7 +3278,7 @@ let RT_ZIP3 = [
   {"zip3":"379","wmo":"723260","tHigh":33.6,"tMin":-12.3,"lat":35.818,"lon":-83.986},
   {"zip3":"380","wmo":"723284","tHigh":37.7,"tMin":-12.1,"lat":35.35,"lon":-89.867},
   {"zip3":"381","wmo":"723340","tHigh":36.1,"tMin":-10.3,"lat":35.056,"lon":-89.987},
-  {"zip3":"382","wmo":"723347","tHigh":36.0,"tMin":-12.3,"lat":36.0,"lon":-89.409},
+  {"zip3":"382","wmo":"723347","tHigh":36,"tMin":-12.3,"lat":36,"lon":-89.409},
   {"zip3":"383","wmo":"723346","tHigh":35.2,"tMin":-13.5,"lat":35.593,"lon":-88.917},
   {"zip3":"384","wmo":"750050","tHigh":34.9,"tMin":-11.5,"lat":34.7728,"lon":-87.6399},
   {"zip3":"385","wmo":"754330","tHigh":30.7,"tMin":-16.3,"lat":36.0138,"lon":-85.1345},
@@ -3257,42 +3287,42 @@ let RT_ZIP3 = [
   {"zip3":"388","wmo":"723320","tHigh":35.9,"tMin":-10.8,"lat":34.262,"lon":-88.771},
   {"zip3":"389","wmo":"747580","tHigh":36.1,"tMin":-9.6,"lat":33.496,"lon":-90.087},
   {"zip3":"390","wmo":"722354","tHigh":35.4,"tMin":-7.2,"lat":32.337,"lon":-90.221},
-  {"zip3":"391","wmo":"722350","tHigh":36.0,"tMin":-8.0,"lat":32.321,"lon":-90.078},
+  {"zip3":"391","wmo":"722350","tHigh":36,"tMin":-8,"lat":32.321,"lon":-90.078},
   {"zip3":"392","wmo":"722354","tHigh":35.4,"tMin":-7.2,"lat":32.337,"lon":-90.221},
-  {"zip3":"393","wmo":"722340","tHigh":35.6,"tMin":-9.0,"lat":32.335,"lon":-88.744},
-  {"zip3":"394","wmo":"722348","tHigh":35.7,"tMin":-8.0,"lat":31.467,"lon":-89.333},
+  {"zip3":"393","wmo":"722340","tHigh":35.6,"tMin":-9,"lat":32.335,"lon":-88.744},
+  {"zip3":"394","wmo":"722348","tHigh":35.7,"tMin":-8,"lat":31.467,"lon":-89.333},
   {"zip3":"395","wmo":"747570","tHigh":34.2,"tMin":-4.9,"lat":30.412,"lon":-89.081},
-  {"zip3":"396","wmo":"722358","tHigh":35.0,"tMin":-7.0,"lat":31.183,"lon":-90.471},
-  {"zip3":"397","wmo":"723307","tHigh":36.0,"tMin":-10.9,"lat":33.45,"lon":-88.583},
+  {"zip3":"396","wmo":"722358","tHigh":35,"tMin":-7,"lat":31.183,"lon":-90.471},
+  {"zip3":"397","wmo":"723307","tHigh":36,"tMin":-10.9,"lat":33.45,"lon":-88.583},
   {"zip3":"398","wmo":"720268","tHigh":36.4,"tMin":-4.1,"lat":30.983,"lon":-84.633},
   {"zip3":"399","wmo":"722196","tHigh":34.5,"tMin":-9.3,"lat":33.875,"lon":-84.302},
-  {"zip3":"400","wmo":"724235","tHigh":34.0,"tMin":-15.4,"lat":38.228,"lon":-85.664},
-  {"zip3":"401","wmo":"724240","tHigh":33.3,"tMin":-18.0,"lat":37.9,"lon":-85.967},
-  {"zip3":"402","wmo":"724235","tHigh":34.0,"tMin":-15.4,"lat":38.228,"lon":-85.664},
-  {"zip3":"403","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
-  {"zip3":"404","wmo":"720455","tHigh":33.0,"tMin":-10.1,"lat":37.633,"lon":-84.333},
+  {"zip3":"400","wmo":"724235","tHigh":34,"tMin":-15.4,"lat":38.228,"lon":-85.664},
+  {"zip3":"401","wmo":"724240","tHigh":33.3,"tMin":-18,"lat":37.9,"lon":-85.967},
+  {"zip3":"402","wmo":"724235","tHigh":34,"tMin":-15.4,"lat":38.228,"lon":-85.664},
+  {"zip3":"403","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"404","wmo":"720455","tHigh":33,"tMin":-10.1,"lat":37.633,"lon":-84.333},
   {"zip3":"405","wmo":"724220","tHigh":32.9,"tMin":-17.6,"lat":38.041,"lon":-84.606},
-  {"zip3":"406","wmo":"724233","tHigh":33.0,"tMin":-17.7,"lat":38.185,"lon":-84.903},
+  {"zip3":"406","wmo":"724233","tHigh":33,"tMin":-17.7,"lat":38.185,"lon":-84.903},
   {"zip3":"407","wmo":"724243","tHigh":32.4,"tMin":-15.6,"lat":37.087,"lon":-84.077},
   {"zip3":"408","wmo":"720353","tHigh":33.7,"tMin":-13.3,"lat":36.611,"lon":-83.738},
   {"zip3":"409","wmo":"720353","tHigh":33.7,"tMin":-13.3,"lat":36.611,"lon":-83.738},
   {"zip3":"410","wmo":"724297","tHigh":33.5,"tMin":-17.6,"lat":39.103,"lon":-84.419},
   {"zip3":"411","wmo":"724250","tHigh":32.7,"tMin":-16.4,"lat":38.365,"lon":-82.555},
-  {"zip3":"412","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
-  {"zip3":"413","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
-  {"zip3":"414","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"412","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"413","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"414","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
   {"zip3":"415","wmo":"724117","tHigh":30.1,"tMin":-16.9,"lat":36.988,"lon":-82.53},
-  {"zip3":"416","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
-  {"zip3":"417","wmo":"724190","tHigh":31.7,"tMin":-16.0,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"416","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
+  {"zip3":"417","wmo":"724190","tHigh":31.7,"tMin":-16,"lat":37.5911,"lon":-83.3139},
   {"zip3":"418","wmo":"724117","tHigh":30.1,"tMin":-16.9,"lat":36.988,"lon":-82.53},
   {"zip3":"420","wmo":"724350","tHigh":34.5,"tMin":-15.6,"lat":37.056,"lon":-88.774},
   {"zip3":"421","wmo":"722322","tHigh":33.9,"tMin":-16.1,"lat":37.033,"lon":-85.95},
   {"zip3":"422","wmo":"746710","tHigh":34.6,"tMin":-15.6,"lat":36.667,"lon":-87.483},
   {"zip3":"423","wmo":"724237","tHigh":34.6,"tMin":-15.9,"lat":37.75,"lon":-87.167},
-  {"zip3":"424","wmo":"724238","tHigh":34.0,"tMin":-18.4,"lat":37.8,"lon":-87.683},
-  {"zip3":"425","wmo":"724354","tHigh":34.0,"tMin":-14.2,"lat":37.054,"lon":-84.615},
+  {"zip3":"424","wmo":"724238","tHigh":34,"tMin":-18.4,"lat":37.8,"lon":-87.683},
+  {"zip3":"425","wmo":"724354","tHigh":34,"tMin":-14.2,"lat":37.054,"lon":-84.615},
   {"zip3":"426","wmo":"720379","tHigh":33.6,"tMin":-9.9,"lat":36.855,"lon":-84.856},
-  {"zip3":"427","wmo":"724130","tHigh":33.0,"tMin":-15.1,"lat":37.2504,"lon":-86.2325},
+  {"zip3":"427","wmo":"724130","tHigh":33,"tMin":-15.1,"lat":37.2504,"lon":-86.2325},
   {"zip3":"430","wmo":"720651","tHigh":32.3,"tMin":-22.4,"lat":40.225,"lon":-83.352},
   {"zip3":"431","wmo":"724285","tHigh":33.1,"tMin":-19.1,"lat":39.817,"lon":-82.933},
   {"zip3":"432","wmo":"724280","tHigh":32.8,"tMin":-18.3,"lat":39.991,"lon":-82.877},
@@ -3304,7 +3334,7 @@ let RT_ZIP3 = [
   {"zip3":"438","wmo":"745710","tHigh":30.7,"tMin":-19.9,"lat":40.3667,"lon":-81.7829},
   {"zip3":"439","wmo":"724275","tHigh":31.2,"tMin":-17.6,"lat":40.176,"lon":-80.647},
   {"zip3":"440","wmo":"725256","tHigh":31.3,"tMin":-21.2,"lat":41.778,"lon":-80.696},
-  {"zip3":"441","wmo":"997692","tHigh":30.0,"tMin":-17.7,"lat":41.542,"lon":-81.637},
+  {"zip3":"441","wmo":"997692","tHigh":30,"tMin":-17.7,"lat":41.542,"lon":-81.637},
   {"zip3":"442","wmo":"725253","tHigh":31.1,"tMin":-19.8,"lat":41.217,"lon":-81.25},
   {"zip3":"443","wmo":"724303","tHigh":32.1,"tMin":-19.1,"lat":41.038,"lon":-81.464},
   {"zip3":"444","wmo":"725250","tHigh":31.2,"tMin":-19.5,"lat":41.255,"lon":-80.674},
@@ -3316,7 +3346,7 @@ let RT_ZIP3 = [
   {"zip3":"450","wmo":"725217","tHigh":33.5,"tMin":-20.7,"lat":39.364,"lon":-84.525},
   {"zip3":"451","wmo":"724297","tHigh":33.5,"tMin":-17.6,"lat":39.103,"lon":-84.419},
   {"zip3":"452","wmo":"724297","tHigh":33.5,"tMin":-17.6,"lat":39.103,"lon":-84.419},
-  {"zip3":"453","wmo":"720713","tHigh":32.1,"tMin":-21.0,"lat":40.204,"lon":-84.532},
+  {"zip3":"453","wmo":"720713","tHigh":32.1,"tMin":-21,"lat":40.204,"lon":-84.532},
   {"zip3":"454","wmo":"724276","tHigh":32.5,"tMin":-18.5,"lat":39.594,"lon":-84.226},
   {"zip3":"455","wmo":"724295","tHigh":32.2,"tMin":-22.4,"lat":39.84,"lon":-83.84},
   {"zip3":"456","wmo":"724250","tHigh":32.7,"tMin":-16.4,"lat":38.365,"lon":-82.555},
@@ -3325,7 +3355,7 @@ let RT_ZIP3 = [
   {"zip3":"459","wmo":"724297","tHigh":33.5,"tMin":-17.6,"lat":39.103,"lon":-84.419},
   {"zip3":"460","wmo":"720575","tHigh":32.7,"tMin":-22.9,"lat":40.031,"lon":-86.251},
   {"zip3":"461","wmo":"724356","tHigh":32.9,"tMin":-20.7,"lat":39.578,"lon":-85.803},
-  {"zip3":"462","wmo":"724380","tHigh":33.0,"tMin":-20.2,"lat":39.725,"lon":-86.282},
+  {"zip3":"462","wmo":"724380","tHigh":33,"tMin":-20.2,"lat":39.725,"lon":-86.282},
   {"zip3":"463","wmo":"725327","tHigh":32.4,"tMin":-22.4,"lat":41.453,"lon":-87.006},
   {"zip3":"464","wmo":"722126","tHigh":32.7,"tMin":-22.8,"lat":41.54,"lon":-87.532},
   {"zip3":"465","wmo":"724388","tHigh":32.4,"tMin":-22.4,"lat":41.525,"lon":-85.791},
@@ -3334,7 +3364,7 @@ let RT_ZIP3 = [
   {"zip3":"468","wmo":"725330","tHigh":32.8,"tMin":-21.7,"lat":40.971,"lon":-85.206},
   {"zip3":"469","wmo":"725335","tHigh":32.7,"tMin":-23.1,"lat":40.65,"lon":-86.15},
   {"zip3":"470","wmo":"724210","tHigh":32.9,"tMin":-19.1,"lat":39.044,"lon":-84.672},
-  {"zip3":"471","wmo":"724235","tHigh":34.0,"tMin":-15.4,"lat":38.228,"lon":-85.664},
+  {"zip3":"471","wmo":"724235","tHigh":34,"tMin":-15.4,"lat":38.228,"lon":-85.664},
   {"zip3":"472","wmo":"724356","tHigh":32.9,"tMin":-20.7,"lat":39.578,"lon":-85.803},
   {"zip3":"473","wmo":"725336","tHigh":32.3,"tMin":-20.4,"lat":40.234,"lon":-85.394},
   {"zip3":"474","wmo":"724375","tHigh":32.8,"tMin":-20.6,"lat":39.146,"lon":-86.616},
@@ -3347,20 +3377,20 @@ let RT_ZIP3 = [
   {"zip3":"481","wmo":"725370","tHigh":32.6,"tMin":-19.8,"lat":42.231,"lon":-83.331},
   {"zip3":"482","wmo":"725375","tHigh":32.6,"tMin":-18.6,"lat":42.409,"lon":-83.01},
   {"zip3":"483","wmo":"726375","tHigh":32.1,"tMin":-21.2,"lat":42.665,"lon":-83.418},
-  {"zip3":"484","wmo":"726370","tHigh":32.3,"tMin":-23.0,"lat":42.967,"lon":-83.749},
-  {"zip3":"485","wmo":"726370","tHigh":32.3,"tMin":-23.0,"lat":42.967,"lon":-83.749},
+  {"zip3":"484","wmo":"726370","tHigh":32.3,"tMin":-23,"lat":42.967,"lon":-83.749},
+  {"zip3":"485","wmo":"726370","tHigh":32.3,"tMin":-23,"lat":42.967,"lon":-83.749},
   {"zip3":"486","wmo":"720629","tHigh":32.4,"tMin":-24.6,"lat":43.663,"lon":-84.261},
-  {"zip3":"487","wmo":"726395","tHigh":32.1,"tMin":-24.0,"lat":44.45,"lon":-83.4},
+  {"zip3":"487","wmo":"726395","tHigh":32.1,"tMin":-24,"lat":44.45,"lon":-83.4},
   {"zip3":"488","wmo":"725405","tHigh":32.1,"tMin":-23.7,"lat":43.322,"lon":-84.688},
   {"zip3":"489","wmo":"725390","tHigh":32.1,"tMin":-22.7,"lat":42.776,"lon":-84.6},
   {"zip3":"490","wmo":"726357","tHigh":32.4,"tMin":-20.7,"lat":42.235,"lon":-85.552},
   {"zip3":"491","wmo":"998012","tHigh":30.3,"tMin":-12.2,"lat":42.098,"lon":-86.494},
   {"zip3":"492","wmo":"725395","tHigh":31.7,"tMin":-22.3,"lat":42.267,"lon":-84.467},
   {"zip3":"493","wmo":"726350","tHigh":32.1,"tMin":-21.1,"lat":42.883,"lon":-85.524},
-  {"zip3":"494","wmo":"726360","tHigh":30.4,"tMin":-19.0,"lat":43.171,"lon":-86.237},
+  {"zip3":"494","wmo":"726360","tHigh":30.4,"tMin":-19,"lat":43.171,"lon":-86.237},
   {"zip3":"495","wmo":"726350","tHigh":32.1,"tMin":-21.1,"lat":42.883,"lon":-85.524},
   {"zip3":"496","wmo":"726387","tHigh":31.4,"tMin":-21.4,"lat":44.741,"lon":-85.583},
-  {"zip3":"497","wmo":"722145","tHigh":28.0,"tMin":-23.5,"lat":45.426,"lon":-84.913},
+  {"zip3":"497","wmo":"722145","tHigh":28,"tMin":-23.5,"lat":45.426,"lon":-84.913},
   {"zip3":"498","wmo":"726480","tHigh":28.6,"tMin":-26.2,"lat":45.733,"lon":-87.083},
   {"zip3":"499","wmo":"727440","tHigh":28.7,"tMin":-24.2,"lat":47.169,"lon":-88.489},
   {"zip3":"500","wmo":"720412","tHigh":33.8,"tMin":-18.6,"lat":41.828,"lon":-94.16},
@@ -3377,40 +3407,40 @@ let RT_ZIP3 = [
   {"zip3":"511","wmo":"725570","tHigh":33.9,"tMin":-26.3,"lat":42.4,"lon":-96.383},
   {"zip3":"512","wmo":"725495","tHigh":32.6,"tMin":-29.5,"lat":43.208,"lon":-95.833},
   {"zip3":"513","wmo":"726500","tHigh":32.9,"tMin":-29.4,"lat":43.164,"lon":-95.202},
-  {"zip3":"514","wmo":"725468","tHigh":33.0,"tMin":-25.9,"lat":42.046,"lon":-94.789},
+  {"zip3":"514","wmo":"725468","tHigh":33,"tMin":-25.9,"lat":42.046,"lon":-94.789},
   {"zip3":"515","wmo":"722097","tHigh":32.7,"tMin":-26.5,"lat":41.584,"lon":-95.339},
-  {"zip3":"516","wmo":"725467","tHigh":36.0,"tMin":-25.5,"lat":40.751,"lon":-95.413},
+  {"zip3":"516","wmo":"725467","tHigh":36,"tMin":-25.5,"lat":40.751,"lon":-95.413},
   {"zip3":"520","wmo":"725470","tHigh":31.4,"tMin":-26.8,"lat":42.398,"lon":-90.704},
   {"zip3":"521","wmo":"725476","tHigh":32.2,"tMin":-26.6,"lat":43.275,"lon":-91.739},
   {"zip3":"522","wmo":"725450","tHigh":32.4,"tMin":-27.1,"lat":41.883,"lon":-91.717},
   {"zip3":"523","wmo":"725450","tHigh":32.4,"tMin":-27.1,"lat":41.883,"lon":-91.717},
   {"zip3":"524","wmo":"725450","tHigh":32.4,"tMin":-27.1,"lat":41.883,"lon":-91.717},
   {"zip3":"525","wmo":"725465","tHigh":33.9,"tMin":-24.4,"lat":41.108,"lon":-92.447},
-  {"zip3":"526","wmo":"720309","tHigh":34.0,"tMin":-22.4,"lat":40.947,"lon":-91.511},
-  {"zip3":"527","wmo":"744550","tHigh":33.0,"tMin":-26.3,"lat":41.614,"lon":-90.591},
-  {"zip3":"528","wmo":"744550","tHigh":33.0,"tMin":-26.3,"lat":41.614,"lon":-90.591},
+  {"zip3":"526","wmo":"720309","tHigh":34,"tMin":-22.4,"lat":40.947,"lon":-91.511},
+  {"zip3":"527","wmo":"744550","tHigh":33,"tMin":-26.3,"lat":41.614,"lon":-90.591},
+  {"zip3":"528","wmo":"744550","tHigh":33,"tMin":-26.3,"lat":41.614,"lon":-90.591},
   {"zip3":"530","wmo":"726413","tHigh":31.3,"tMin":-23.7,"lat":43.417,"lon":-88.133},
   {"zip3":"531","wmo":"722059","tHigh":31.3,"tMin":-25.5,"lat":42.69,"lon":-88.304},
   {"zip3":"532","wmo":"726400","tHigh":32.2,"tMin":-22.3,"lat":42.955,"lon":-87.904},
-  {"zip3":"534","wmo":"726424","tHigh":32.2,"tMin":-22.0,"lat":42.761,"lon":-87.814},
+  {"zip3":"534","wmo":"726424","tHigh":32.2,"tMin":-22,"lat":42.761,"lon":-87.814},
   {"zip3":"535","wmo":"726414","tHigh":31.7,"tMin":-24.4,"lat":42.615,"lon":-89.591},
-  {"zip3":"537","wmo":"726410","tHigh":32.0,"tMin":-25.3,"lat":43.141,"lon":-89.345},
+  {"zip3":"537","wmo":"726410","tHigh":32,"tMin":-25.3,"lat":43.141,"lon":-89.345},
   {"zip3":"538","wmo":"726444","tHigh":32.4,"tMin":-26.5,"lat":43.019,"lon":-91.124},
   {"zip3":"539","wmo":"726503","tHigh":32.1,"tMin":-26.2,"lat":43.522,"lon":-89.774},
   {"zip3":"540","wmo":"722179","tHigh":31.8,"tMin":-29.9,"lat":45.15,"lon":-92.533},
   {"zip3":"541","wmo":"720589","tHigh":31.5,"tMin":-25.1,"lat":44.783,"lon":-88.55},
-  {"zip3":"542","wmo":"726455","tHigh":30.0,"tMin":-23.3,"lat":44.133,"lon":-87.667},
+  {"zip3":"542","wmo":"726455","tHigh":30,"tMin":-23.3,"lat":44.133,"lon":-87.667},
   {"zip3":"543","wmo":"726450","tHigh":31.3,"tMin":-26.2,"lat":44.479,"lon":-88.137},
   {"zip3":"544","wmo":"726574","tHigh":31.1,"tMin":-28.3,"lat":44.638,"lon":-90.188},
   {"zip3":"545","wmo":"726404","tHigh":29.1,"tMin":-29.5,"lat":45.928,"lon":-89.731},
   {"zip3":"546","wmo":"726430","tHigh":33.4,"tMin":-26.8,"lat":43.879,"lon":-91.253},
   {"zip3":"547","wmo":"726435","tHigh":32.5,"tMin":-28.8,"lat":44.867,"lon":-91.488},
   {"zip3":"548","wmo":"726508","tHigh":31.7,"tMin":-32.6,"lat":46.026,"lon":-91.444},
-  {"zip3":"549","wmo":"726457","tHigh":32.0,"tMin":-17.9,"lat":44.267,"lon":-88.517},
+  {"zip3":"549","wmo":"726457","tHigh":32,"tMin":-17.9,"lat":44.267,"lon":-88.517},
   {"zip3":"550","wmo":"726418","tHigh":31.7,"tMin":-29.8,"lat":45.308,"lon":-92.69},
   {"zip3":"551","wmo":"726584","tHigh":32.5,"tMin":-26.7,"lat":44.932,"lon":-93.056},
   {"zip3":"553","wmo":"726579","tHigh":32.7,"tMin":-27.8,"lat":44.832,"lon":-93.471},
-  {"zip3":"554","wmo":"726580","tHigh":33.0,"tMin":-27.1,"lat":44.883,"lon":-93.229},
+  {"zip3":"554","wmo":"726580","tHigh":33,"tMin":-27.1,"lat":44.883,"lon":-93.229},
   {"zip3":"555","wmo":"726575","tHigh":32.6,"tMin":-27.2,"lat":45.062,"lon":-93.351},
   {"zip3":"556","wmo":"997259","tHigh":25.3,"tMin":-21.7,"lat":47.7483,"lon":-90.3415},
   {"zip3":"557","wmo":"727458","tHigh":29.1,"tMin":-31.9,"lat":47.211,"lon":-93.51},
@@ -3422,26 +3452,26 @@ let RT_ZIP3 = [
   {"zip3":"563","wmo":"726550","tHigh":32.1,"tMin":-31.3,"lat":45.543,"lon":-94.051},
   {"zip3":"564","wmo":"727514","tHigh":31.2,"tMin":-33.1,"lat":46.381,"lon":-94.806},
   {"zip3":"565","wmo":"727457","tHigh":30.9,"tMin":-32.1,"lat":46.833,"lon":-95.883},
-  {"zip3":"566","wmo":"727550","tHigh":30.0,"tMin":-34.8,"lat":47.5,"lon":-94.933},
+  {"zip3":"566","wmo":"727550","tHigh":30,"tMin":-34.8,"lat":47.5,"lon":-94.933},
   {"zip3":"567","wmo":"727478","tHigh":31.2,"tMin":-33.7,"lat":48.753,"lon":-96.943},
   {"zip3":"569","wmo":"997314","tHigh":34.9,"tMin":-10.6,"lat":38.873,"lon":-77.021},
   {"zip3":"570","wmo":"726525","tHigh":34.1,"tMin":-26.1,"lat":42.917,"lon":-97.383},
   {"zip3":"571","wmo":"726510","tHigh":33.4,"tMin":-28.1,"lat":43.578,"lon":-96.754},
   {"zip3":"572","wmo":"726546","tHigh":32.4,"tMin":-30.5,"lat":44.905,"lon":-97.149},
   {"zip3":"573","wmo":"726545","tHigh":35.4,"tMin":-27.4,"lat":43.774,"lon":-98.038},
-  {"zip3":"574","wmo":"726590","tHigh":33.0,"tMin":-33.3,"lat":45.443,"lon":-98.413},
+  {"zip3":"574","wmo":"726590","tHigh":33,"tMin":-33.3,"lat":45.443,"lon":-98.413},
   {"zip3":"575","wmo":"726518","tHigh":37.6,"tMin":-24.9,"lat":43.391,"lon":-99.842},
   {"zip3":"576","wmo":"726685","tHigh":35.7,"tMin":-30.5,"lat":45.546,"lon":-100.408},
-  {"zip3":"577","wmo":"726605","tHigh":32.9,"tMin":-26.0,"lat":44.483,"lon":-103.783},
+  {"zip3":"577","wmo":"726605","tHigh":32.9,"tMin":-26,"lat":44.483,"lon":-103.783},
   {"zip3":"580","wmo":"727530","tHigh":31.9,"tMin":-31.4,"lat":46.925,"lon":-96.811},
   {"zip3":"581","wmo":"727530","tHigh":31.9,"tMin":-31.4,"lat":46.925,"lon":-96.811},
   {"zip3":"582","wmo":"727575","tHigh":31.4,"tMin":-32.4,"lat":47.967,"lon":-97.4},
-  {"zip3":"583","wmo":"720858","tHigh":30.1,"tMin":-33.0,"lat":48.48,"lon":-99.236},
+  {"zip3":"583","wmo":"720858","tHigh":30.1,"tMin":-33,"lat":48.48,"lon":-99.236},
   {"zip3":"584","wmo":"727535","tHigh":31.7,"tMin":-31.1,"lat":46.926,"lon":-98.669},
   {"zip3":"585","wmo":"727640","tHigh":34.2,"tMin":-32.5,"lat":46.783,"lon":-100.757},
   {"zip3":"586","wmo":"727630","tHigh":33.9,"tMin":-30.6,"lat":46.799,"lon":-102.797},
   {"zip3":"587","wmo":"727675","tHigh":32.7,"tMin":-33.6,"lat":48.417,"lon":-101.35},
-  {"zip3":"588","wmo":"727670","tHigh":34.4,"tMin":-33.0,"lat":48.174,"lon":-103.637},
+  {"zip3":"588","wmo":"727670","tHigh":34.4,"tMin":-33,"lat":48.174,"lon":-103.637},
   {"zip3":"590","wmo":"726770","tHigh":35.5,"tMin":-26.2,"lat":45.807,"lon":-108.542},
   {"zip3":"591","wmo":"726770","tHigh":35.5,"tMin":-26.2,"lat":45.807,"lon":-108.542},
   {"zip3":"592","wmo":"727680","tHigh":35.2,"tMin":-32.9,"lat":48.2067,"lon":-106.6256},
@@ -3451,7 +3481,7 @@ let RT_ZIP3 = [
   {"zip3":"596","wmo":"727720","tHigh":34.9,"tMin":-28.3,"lat":46.606,"lon":-111.964},
   {"zip3":"597","wmo":"726797","tHigh":34.1,"tMin":-30.8,"lat":45.788,"lon":-111.161},
   {"zip3":"598","wmo":"727730","tHigh":34.8,"tMin":-23.4,"lat":46.921,"lon":-114.093},
-  {"zip3":"599","wmo":"727790","tHigh":33.0,"tMin":-25.7,"lat":48.304,"lon":-114.264},
+  {"zip3":"599","wmo":"727790","tHigh":33,"tMin":-25.7,"lat":48.304,"lon":-114.264},
   {"zip3":"600","wmo":"744665","tHigh":33.3,"tMin":-21.9,"lat":42.121,"lon":-87.905},
   {"zip3":"601","wmo":"725305","tHigh":32.5,"tMin":-24.2,"lat":41.914,"lon":-88.246},
   {"zip3":"602","wmo":"997338","tHigh":31.3,"tMin":-19.6,"lat":41.916,"lon":-87.572},
@@ -3469,8 +3499,8 @@ let RT_ZIP3 = [
   {"zip3":"614","wmo":"722089","tHigh":33.6,"tMin":-24.6,"lat":40.933,"lon":-90.433},
   {"zip3":"615","wmo":"725320","tHigh":33.7,"tMin":-22.7,"lat":40.668,"lon":-89.684},
   {"zip3":"616","wmo":"725320","tHigh":33.7,"tMin":-22.7,"lat":40.668,"lon":-89.684},
-  {"zip3":"617","wmo":"724397","tHigh":33.0,"tMin":-22.5,"lat":40.479,"lon":-88.915},
-  {"zip3":"618","wmo":"725315","tHigh":32.7,"tMin":-23.0,"lat":40.04,"lon":-88.278},
+  {"zip3":"617","wmo":"724397","tHigh":33,"tMin":-22.5,"lat":40.479,"lon":-88.915},
+  {"zip3":"618","wmo":"725315","tHigh":32.7,"tMin":-23,"lat":40.04,"lon":-88.278},
   {"zip3":"619","wmo":"725317","tHigh":33.4,"tMin":-20.3,"lat":39.478,"lon":-88.28},
   {"zip3":"620","wmo":"722972","tHigh":34.1,"tMin":-19.3,"lat":39.163,"lon":-89.675},
   {"zip3":"622","wmo":"724338","tHigh":35.1,"tMin":-18.6,"lat":38.55,"lon":-89.85},
@@ -3478,7 +3508,7 @@ let RT_ZIP3 = [
   {"zip3":"624","wmo":"744661","tHigh":34.1,"tMin":-18.9,"lat":39.07,"lon":-88.534},
   {"zip3":"625","wmo":"725316","tHigh":33.8,"tMin":-20.7,"lat":39.834,"lon":-88.866},
   {"zip3":"626","wmo":"744666","tHigh":33.4,"tMin":-20.6,"lat":39.78,"lon":-90.238},
-  {"zip3":"627","wmo":"724390","tHigh":33.9,"tMin":-22.0,"lat":39.845,"lon":-89.684},
+  {"zip3":"627","wmo":"724390","tHigh":33.9,"tMin":-22,"lat":39.845,"lon":-89.684},
   {"zip3":"628","wmo":"724335","tHigh":34.9,"tMin":-20.3,"lat":38.323,"lon":-88.858},
   {"zip3":"629","wmo":"724336","tHigh":34.2,"tMin":-16.9,"lat":37.78,"lon":-89.25},
   {"zip3":"630","wmo":"724345","tHigh":35.6,"tMin":-19.2,"lat":38.657,"lon":-90.656},
@@ -3496,11 +3526,11 @@ let RT_ZIP3 = [
   {"zip3":"645","wmo":"724490","tHigh":34.9,"tMin":-21.6,"lat":39.774,"lon":-94.923},
   {"zip3":"646","wmo":"724464","tHigh":35.4,"tMin":-22.3,"lat":39.823,"lon":-93.579},
   {"zip3":"647","wmo":"720636","tHigh":37.1,"tMin":-18.7,"lat":38.35,"lon":-93.683},
-  {"zip3":"648","wmo":"723495","tHigh":36.5,"tMin":-17.0,"lat":37.152,"lon":-94.495},
+  {"zip3":"648","wmo":"723495","tHigh":36.5,"tMin":-17,"lat":37.152,"lon":-94.495},
   {"zip3":"649","wmo":"724463","tHigh":36.5,"tMin":-17.9,"lat":39.121,"lon":-94.597},
   {"zip3":"650","wmo":"724458","tHigh":35.7,"tMin":-18.7,"lat":38.591,"lon":-92.156},
   {"zip3":"651","wmo":"724458","tHigh":35.7,"tMin":-18.7,"lat":38.591,"lon":-92.156},
-  {"zip3":"652","wmo":"724450","tHigh":35.0,"tMin":-19.4,"lat":38.817,"lon":-92.218},
+  {"zip3":"652","wmo":"724450","tHigh":35,"tMin":-19.4,"lat":38.817,"lon":-92.218},
   {"zip3":"653","wmo":"724453","tHigh":36.1,"tMin":-18.4,"lat":38.704,"lon":-93.183},
   {"zip3":"654","wmo":"725600","tHigh":34.6,"tMin":-21.3,"lat":37.6344,"lon":-91.7226},
   {"zip3":"655","wmo":"724457","tHigh":35.7,"tMin":-18.4,"lat":37.74,"lon":-92.14},
@@ -3512,8 +3542,8 @@ let RT_ZIP3 = [
   {"zip3":"662","wmo":"724468","tHigh":35.6,"tMin":-19.4,"lat":38.85,"lon":-94.739},
   {"zip3":"664","wmo":"725533","tHigh":35.5,"tMin":-22.3,"lat":40.08,"lon":-95.592},
   {"zip3":"665","wmo":"725533","tHigh":35.5,"tMin":-22.3,"lat":40.08,"lon":-95.592},
-  {"zip3":"666","wmo":"724560","tHigh":37.0,"tMin":-19.7,"lat":39.0722,"lon":-95.6306},
-  {"zip3":"667","wmo":"724507","tHigh":36.8,"tMin":-18.0,"lat":37.67,"lon":-95.484},
+  {"zip3":"666","wmo":"724560","tHigh":37,"tMin":-19.7,"lat":39.0722,"lon":-95.6306},
+  {"zip3":"667","wmo":"724507","tHigh":36.8,"tMin":-18,"lat":37.67,"lon":-95.484},
   {"zip3":"668","wmo":"724556","tHigh":37.3,"tMin":-19.5,"lat":38.329,"lon":-96.195},
   {"zip3":"669","wmo":"724580","tHigh":37.3,"tMin":-20.5,"lat":39.551,"lon":-97.651},
   {"zip3":"670","wmo":"724520","tHigh":39.5,"tMin":-17.3,"lat":37.267,"lon":-98.548},
@@ -3522,7 +3552,7 @@ let RT_ZIP3 = [
   {"zip3":"673","wmo":"745431","tHigh":37.4,"tMin":-18.4,"lat":37.328,"lon":-95.504},
   {"zip3":"674","wmo":"724586","tHigh":39.3,"tMin":-19.3,"lat":38.8,"lon":-97.65},
   {"zip3":"675","wmo":"724517","tHigh":38.6,"tMin":-19.3,"lat":38.35,"lon":-98.867},
-  {"zip3":"676","wmo":"724655","tHigh":39.1,"tMin":-21.0,"lat":39.376,"lon":-99.83},
+  {"zip3":"676","wmo":"724655","tHigh":39.1,"tMin":-21,"lat":39.376,"lon":-99.83},
   {"zip3":"677","wmo":"724650","tHigh":36.9,"tMin":-22.2,"lat":39.367,"lon":-101.693},
   {"zip3":"678","wmo":"724510","tHigh":38.3,"tMin":-19.4,"lat":37.7614,"lon":-99.9686},
   {"zip3":"679","wmo":"724516","tHigh":37.9,"tMin":-18.5,"lat":37.05,"lon":-100.967},
@@ -3530,8 +3560,8 @@ let RT_ZIP3 = [
   {"zip3":"681","wmo":"725500","tHigh":35.5,"tMin":-23.5,"lat":41.31,"lon":-95.899},
   {"zip3":"683","wmo":"725515","tHigh":36.6,"tMin":-23.3,"lat":40.301,"lon":-96.754},
   {"zip3":"684","wmo":"725515","tHigh":36.6,"tMin":-23.3,"lat":40.301,"lon":-96.754},
-  {"zip3":"685","wmo":"725510","tHigh":36.2,"tMin":-24.0,"lat":40.851,"lon":-96.748},
-  {"zip3":"686","wmo":"725565","tHigh":34.1,"tMin":-25.0,"lat":41.45,"lon":-97.345},
+  {"zip3":"685","wmo":"725510","tHigh":36.2,"tMin":-24,"lat":40.851,"lon":-96.748},
+  {"zip3":"686","wmo":"725565","tHigh":34.1,"tMin":-25,"lat":41.45,"lon":-97.345},
   {"zip3":"687","wmo":"725566","tHigh":35.5,"tMin":-25.4,"lat":42.47,"lon":-98.688},
   {"zip3":"688","wmo":"725520","tHigh":35.7,"tMin":-24.2,"lat":40.961,"lon":-98.314},
   {"zip3":"689","wmo":"725628","tHigh":35.2,"tMin":-21.8,"lat":40.45,"lon":-99.339},
@@ -3543,13 +3573,13 @@ let RT_ZIP3 = [
   {"zip3":"701","wmo":"722315","tHigh":34.2,"tMin":-1.4,"lat":30.049,"lon":-90.029},
   {"zip3":"703","wmo":"722329","tHigh":33.8,"tMin":-3.1,"lat":29.717,"lon":-91.333},
   {"zip3":"704","wmo":"722312","tHigh":36.3,"tMin":-4.7,"lat":30.521,"lon":-90.418},
-  {"zip3":"705","wmo":"722405","tHigh":35.0,"tMin":-4.2,"lat":30.205,"lon":-91.988},
+  {"zip3":"705","wmo":"722405","tHigh":35,"tMin":-4.2,"lat":30.205,"lon":-91.988},
   {"zip3":"706","wmo":"722400","tHigh":35.1,"tMin":-3.8,"lat":30.1253,"lon":-93.2161},
-  {"zip3":"707","wmo":"722320","tHigh":35.0,"tMin":-5.3,"lat":30.537,"lon":-91.147},
-  {"zip3":"708","wmo":"722320","tHigh":35.0,"tMin":-5.3,"lat":30.537,"lon":-91.147},
+  {"zip3":"707","wmo":"722320","tHigh":35,"tMin":-5.3,"lat":30.537,"lon":-91.147},
+  {"zip3":"708","wmo":"722320","tHigh":35,"tMin":-5.3,"lat":30.537,"lon":-91.147},
   {"zip3":"710","wmo":"722485","tHigh":37.6,"tMin":-7.8,"lat":32.5,"lon":-93.667},
   {"zip3":"711","wmo":"722484","tHigh":37.6,"tMin":-6.5,"lat":32.543,"lon":-93.745},
-  {"zip3":"712","wmo":"722486","tHigh":37.1,"tMin":-7.0,"lat":32.516,"lon":-92.041},
+  {"zip3":"712","wmo":"722486","tHigh":37.1,"tMin":-7,"lat":32.516,"lon":-92.041},
   {"zip3":"713","wmo":"722487","tHigh":36.7,"tMin":-6.6,"lat":31.395,"lon":-92.291},
   {"zip3":"714","wmo":"722319","tHigh":37.5,"tMin":-5.8,"lat":31.736,"lon":-93.099},
   {"zip3":"716","wmo":"720175","tHigh":37.2,"tMin":-8.8,"lat":33.636,"lon":-91.756},
@@ -3564,31 +3594,31 @@ let RT_ZIP3 = [
   {"zip3":"725","wmo":"722450","tHigh":35.8,"tMin":-14.5,"lat":35.8201,"lon":-91.7812},
   {"zip3":"726","wmo":"723450","tHigh":35.1,"tMin":-15.2,"lat":36.267,"lon":-93.157},
   {"zip3":"727","wmo":"723445","tHigh":35.7,"tMin":-16.1,"lat":36.01,"lon":-94.169},
-  {"zip3":"728","wmo":"723429","tHigh":37.3,"tMin":-12.0,"lat":35.258,"lon":-93.095},
+  {"zip3":"728","wmo":"723429","tHigh":37.3,"tMin":-12,"lat":35.258,"lon":-93.095},
   {"zip3":"729","wmo":"723440","tHigh":37.9,"tMin":-11.3,"lat":35.333,"lon":-94.363},
   {"zip3":"730","wmo":"722071","tHigh":38.7,"tMin":-13.7,"lat":35.096,"lon":-97.966},
   {"zip3":"731","wmo":"723540","tHigh":37.9,"tMin":-13.8,"lat":35.417,"lon":-97.383},
-  {"zip3":"733","wmo":"722540","tHigh":38.0,"tMin":-6.4,"lat":30.183,"lon":-97.68},
-  {"zip3":"734","wmo":"723529","tHigh":39.0,"tMin":-9.9,"lat":34.147,"lon":-97.123},
-  {"zip3":"735","wmo":"723550","tHigh":40.0,"tMin":-13.0,"lat":34.65,"lon":-98.4},
+  {"zip3":"733","wmo":"722540","tHigh":38,"tMin":-6.4,"lat":30.183,"lon":-97.68},
+  {"zip3":"734","wmo":"723529","tHigh":39,"tMin":-9.9,"lat":34.147,"lon":-97.123},
+  {"zip3":"735","wmo":"723550","tHigh":40,"tMin":-13,"lat":34.65,"lon":-98.4},
   {"zip3":"736","wmo":"723526","tHigh":38.9,"tMin":-13.9,"lat":35.357,"lon":-99.204},
   {"zip3":"737","wmo":"723535","tHigh":38.9,"tMin":-15.3,"lat":36.333,"lon":-97.917},
   {"zip3":"738","wmo":"722152","tHigh":39.8,"tMin":-16.1,"lat":36.437,"lon":-99.521},
   {"zip3":"739","wmo":"724516","tHigh":37.9,"tMin":-18.5,"lat":37.05,"lon":-100.967},
   {"zip3":"740","wmo":"723564","tHigh":38.4,"tMin":-14.6,"lat":36.039,"lon":-95.984},
-  {"zip3":"741","wmo":"723560","tHigh":38.0,"tMin":-14.5,"lat":36.199,"lon":-95.887},
+  {"zip3":"741","wmo":"723560","tHigh":38,"tMin":-14.5,"lat":36.199,"lon":-95.887},
   {"zip3":"743","wmo":"722092","tHigh":37.5,"tMin":-15.5,"lat":36.605,"lon":-94.738},
   {"zip3":"744","wmo":"723556","tHigh":37.8,"tMin":-14.1,"lat":35.657,"lon":-95.361},
-  {"zip3":"745","wmo":"723566","tHigh":38.0,"tMin":-13.3,"lat":34.882,"lon":-95.783},
+  {"zip3":"745","wmo":"723566","tHigh":38,"tMin":-13.3,"lat":34.882,"lon":-95.783},
   {"zip3":"746","wmo":"724530","tHigh":38.5,"tMin":-16.4,"lat":36.737,"lon":-97.102},
   {"zip3":"747","wmo":"723759","tHigh":37.4,"tMin":-9.7,"lat":33.909,"lon":-94.859},
   {"zip3":"748","wmo":"722044","tHigh":37.8,"tMin":-13.3,"lat":34.804,"lon":-96.671},
   {"zip3":"749","wmo":"722178","tHigh":38.6,"tMin":-13.4,"lat":35.021,"lon":-94.621},
   {"zip3":"750","wmo":"722541","tHigh":38.6,"tMin":-9.9,"lat":33.19,"lon":-96.591},
   {"zip3":"751","wmo":"722469","tHigh":38.4,"tMin":-7.6,"lat":32.031,"lon":-96.399},
-  {"zip3":"752","wmo":"722580","tHigh":39.0,"tMin":-7.4,"lat":32.852,"lon":-96.856},
-  {"zip3":"753","wmo":"722580","tHigh":39.0,"tMin":-7.4,"lat":32.852,"lon":-96.856},
-  {"zip3":"754","wmo":"722587","tHigh":37.8,"tMin":-10.0,"lat":33.633,"lon":-95.45},
+  {"zip3":"752","wmo":"722580","tHigh":39,"tMin":-7.4,"lat":32.852,"lon":-96.856},
+  {"zip3":"753","wmo":"722580","tHigh":39,"tMin":-7.4,"lat":32.852,"lon":-96.856},
+  {"zip3":"754","wmo":"722587","tHigh":37.8,"tMin":-10,"lat":33.633,"lon":-95.45},
   {"zip3":"755","wmo":"723418","tHigh":37.7,"tMin":-8.4,"lat":33.454,"lon":-94.007},
   {"zip3":"756","wmo":"722470","tHigh":37.9,"tMin":-7.1,"lat":32.385,"lon":-94.712},
   {"zip3":"757","wmo":"722448","tHigh":37.8,"tMin":-7.2,"lat":32.354,"lon":-95.403},
@@ -3596,16 +3626,16 @@ let RT_ZIP3 = [
   {"zip3":"759","wmo":"722499","tHigh":37.4,"tMin":-7.9,"lat":31.578,"lon":-94.709},
   {"zip3":"760","wmo":"722479","tHigh":38.8,"tMin":-8.4,"lat":32.664,"lon":-97.094},
   {"zip3":"761","wmo":"747390","tHigh":38.9,"tMin":-8.9,"lat":32.819,"lon":-97.361},
-  {"zip3":"762","wmo":"722589","tHigh":39.0,"tMin":-10.4,"lat":33.206,"lon":-97.199},
+  {"zip3":"762","wmo":"722589","tHigh":39,"tMin":-10.4,"lat":33.206,"lon":-97.199},
   {"zip3":"763","wmo":"720404","tHigh":40.2,"tMin":-10.5,"lat":33.858,"lon":-98.49},
-  {"zip3":"764","wmo":"720578","tHigh":39.8,"tMin":-10.0,"lat":32.717,"lon":-98.892},
+  {"zip3":"764","wmo":"720578","tHigh":39.8,"tMin":-10,"lat":32.717,"lon":-98.892},
   {"zip3":"765","wmo":"722577","tHigh":37.9,"tMin":-7.7,"lat":31.15,"lon":-97.417},
-  {"zip3":"766","wmo":"720295","tHigh":38.0,"tMin":-8.6,"lat":32.084,"lon":-97.097},
+  {"zip3":"766","wmo":"720295","tHigh":38,"tMin":-8.6,"lat":32.084,"lon":-97.097},
   {"zip3":"767","wmo":"722560","tHigh":38.7,"tMin":-7.5,"lat":31.619,"lon":-97.228},
-  {"zip3":"768","wmo":"723628","tHigh":38.0,"tMin":-8.8,"lat":31.178,"lon":-99.324},
+  {"zip3":"768","wmo":"723628","tHigh":38,"tMin":-8.8,"lat":31.178,"lon":-99.324},
   {"zip3":"769","wmo":"722630","tHigh":38.7,"tMin":-9.1,"lat":31.352,"lon":-100.495},
-  {"zip3":"770","wmo":"720594","tHigh":38.0,"tMin":-2.1,"lat":29.717,"lon":-95.383},
-  {"zip3":"772","wmo":"720594","tHigh":38.0,"tMin":-2.1,"lat":29.717,"lon":-95.383},
+  {"zip3":"770","wmo":"720594","tHigh":38,"tMin":-2.1,"lat":29.717,"lon":-95.383},
+  {"zip3":"772","wmo":"720594","tHigh":38,"tMin":-2.1,"lat":29.717,"lon":-95.383},
   {"zip3":"773","wmo":"722444","tHigh":36.9,"tMin":-5.7,"lat":30.357,"lon":-95.414},
   {"zip3":"774","wmo":"722351","tHigh":37.4,"tMin":-3.4,"lat":29.254,"lon":-96.154},
   {"zip3":"775","wmo":"997370","tHigh":33.7,"tMin":-0.9,"lat":29.682,"lon":-94.985},
@@ -3613,14 +3643,14 @@ let RT_ZIP3 = [
   {"zip3":"777","wmo":"722410","tHigh":35.2,"tMin":-3.1,"lat":29.951,"lon":-94.021},
   {"zip3":"778","wmo":"747460","tHigh":37.9,"tMin":-5.1,"lat":30.589,"lon":-96.365},
   {"zip3":"779","wmo":"722550","tHigh":36.9,"tMin":-3.6,"lat":28.861,"lon":-96.93},
-  {"zip3":"780","wmo":"720395","tHigh":39.0,"tMin":-4.3,"lat":28.95,"lon":-98.517},
+  {"zip3":"780","wmo":"720395","tHigh":39,"tMin":-4.3,"lat":28.95,"lon":-98.517},
   {"zip3":"781","wmo":"722536","tHigh":37.9,"tMin":-5.5,"lat":29.533,"lon":-98.262},
   {"zip3":"782","wmo":"722523","tHigh":38.5,"tMin":-4.1,"lat":29.339,"lon":-98.472},
   {"zip3":"783","wmo":"722517","tHigh":38.3,"tMin":-1.9,"lat":27.741,"lon":-98.025},
   {"zip3":"784","wmo":"722510","tHigh":36.2,"tMin":-1.6,"lat":27.774,"lon":-97.512},
   {"zip3":"785","wmo":"722506","tHigh":38.6,"tMin":0.8,"lat":26.176,"lon":-98.24},
   {"zip3":"786","wmo":"722539","tHigh":37.8,"tMin":-5.4,"lat":29.891,"lon":-97.864},
-  {"zip3":"787","wmo":"722540","tHigh":38.0,"tMin":-6.4,"lat":30.183,"lon":-97.68},
+  {"zip3":"787","wmo":"722540","tHigh":38,"tMin":-6.4,"lat":30.183,"lon":-97.68},
   {"zip3":"788","wmo":"722202","tHigh":37.9,"tMin":-5.4,"lat":29.211,"lon":-99.744},
   {"zip3":"789","wmo":"722554","tHigh":37.9,"tMin":-3.8,"lat":29.908,"lon":-96.95},
   {"zip3":"790","wmo":"720393","tHigh":37.8,"tMin":-16.1,"lat":34.85,"lon":-102.333},
@@ -3629,10 +3659,10 @@ let RT_ZIP3 = [
   {"zip3":"793","wmo":"722675","tHigh":38.3,"tMin":-13.4,"lat":33.6,"lon":-102.05},
   {"zip3":"794","wmo":"722670","tHigh":37.7,"tMin":-12.6,"lat":33.666,"lon":-101.823},
   {"zip3":"795","wmo":"720965","tHigh":38.9,"tMin":-10.8,"lat":32.433,"lon":-99.85},
-  {"zip3":"796","wmo":"722660","tHigh":37.9,"tMin":-10.0,"lat":32.411,"lon":-99.682},
+  {"zip3":"796","wmo":"722660","tHigh":37.9,"tMin":-10,"lat":32.411,"lon":-99.682},
   {"zip3":"797","wmo":"722648","tHigh":38.6,"tMin":-8.7,"lat":31.921,"lon":-102.387},
-  {"zip3":"798","wmo":"722700","tHigh":39.0,"tMin":-7.4,"lat":31.811,"lon":-106.376},
-  {"zip3":"799","wmo":"722700","tHigh":39.0,"tMin":-7.4,"lat":31.811,"lon":-106.376},
+  {"zip3":"798","wmo":"722700","tHigh":39,"tMin":-7.4,"lat":31.811,"lon":-106.376},
+  {"zip3":"799","wmo":"722700","tHigh":39,"tMin":-7.4,"lat":31.811,"lon":-106.376},
   {"zip3":"800","wmo":"724690","tHigh":34.7,"tMin":-23.6,"lat":39.767,"lon":-104.869},
   {"zip3":"801","wmo":"724666","tHigh":33.9,"tMin":-21.7,"lat":39.57,"lon":-104.849},
   {"zip3":"802","wmo":"724690","tHigh":34.7,"tMin":-23.6,"lat":39.767,"lon":-104.869},
@@ -3643,7 +3673,7 @@ let RT_ZIP3 = [
   {"zip3":"807","wmo":"724698","tHigh":35.9,"tMin":-23.1,"lat":40.167,"lon":-103.217},
   {"zip3":"808","wmo":"724665","tHigh":34.7,"tMin":-25.9,"lat":39.275,"lon":-103.666},
   {"zip3":"809","wmo":"724660","tHigh":33.1,"tMin":-21.4,"lat":38.81,"lon":-104.688},
-  {"zip3":"810","wmo":"724640","tHigh":37.5,"tMin":-23.0,"lat":38.289,"lon":-104.506},
+  {"zip3":"810","wmo":"724640","tHigh":37.5,"tMin":-23,"lat":38.289,"lon":-104.506},
   {"zip3":"811","wmo":"724620","tHigh":30.3,"tMin":-29.2,"lat":37.439,"lon":-105.861},
   {"zip3":"812","wmo":"720532","tHigh":31.8,"tMin":-13.2,"lat":38.533,"lon":-106.05},
   {"zip3":"813","wmo":"724767","tHigh":34.8,"tMin":-21.2,"lat":37.307,"lon":-108.626},
@@ -3651,26 +3681,26 @@ let RT_ZIP3 = [
   {"zip3":"815","wmo":"724760","tHigh":37.2,"tMin":-17.6,"lat":39.12,"lon":-108.525},
   {"zip3":"816","wmo":"724676","tHigh":29.6,"tMin":-24.5,"lat":39.23,"lon":-106.871},
   {"zip3":"820","wmo":"725640","tHigh":32.5,"tMin":-24.7,"lat":41.158,"lon":-104.807},
-  {"zip3":"821","wmo":"726664","tHigh":25.7,"tMin":-35.0,"lat":44.544,"lon":-110.421},
+  {"zip3":"821","wmo":"726664","tHigh":25.7,"tMin":-35,"lat":44.544,"lon":-110.421},
   {"zip3":"822","wmo":"725763","tHigh":36.9,"tMin":-27.3,"lat":42.061,"lon":-104.158},
   {"zip3":"823","wmo":"726690","tHigh":32.6,"tMin":-29.7,"lat":41.806,"lon":-107.2},
   {"zip3":"824","wmo":"726667","tHigh":37.1,"tMin":-30.6,"lat":44.517,"lon":-108.082},
-  {"zip3":"825","wmo":"726720","tHigh":34.1,"tMin":-27.0,"lat":43.0647,"lon":-108.4767},
-  {"zip3":"826","wmo":"725690","tHigh":35.0,"tMin":-28.6,"lat":42.898,"lon":-106.474},
+  {"zip3":"825","wmo":"726720","tHigh":34.1,"tMin":-27,"lat":43.0647,"lon":-108.4767},
+  {"zip3":"826","wmo":"725690","tHigh":35,"tMin":-28.6,"lat":42.898,"lon":-106.474},
   {"zip3":"827","wmo":"755750","tHigh":28.2,"tMin":-27.9,"lat":44.5169,"lon":-104.4363},
   {"zip3":"828","wmo":"726660","tHigh":35.6,"tMin":-28.5,"lat":44.769,"lon":-106.969},
-  {"zip3":"829","wmo":"725744","tHigh":32.0,"tMin":-24.9,"lat":41.595,"lon":-109.053},
+  {"zip3":"829","wmo":"725744","tHigh":32,"tMin":-24.9,"lat":41.595,"lon":-109.053},
   {"zip3":"830","wmo":"725776","tHigh":29.9,"tMin":-30.8,"lat":43.6,"lon":-110.733},
   {"zip3":"831","wmo":"726710","tHigh":30.9,"tMin":-31.3,"lat":42.584,"lon":-110.108},
-  {"zip3":"832","wmo":"725780","tHigh":35.5,"tMin":-22.0,"lat":42.92,"lon":-112.571},
+  {"zip3":"832","wmo":"725780","tHigh":35.5,"tMin":-22,"lat":42.92,"lon":-112.571},
   {"zip3":"833","wmo":"726816","tHigh":34.9,"tMin":-17.5,"lat":42.727,"lon":-114.456},
   {"zip3":"834","wmo":"726818","tHigh":32.9,"tMin":-25.8,"lat":43.832,"lon":-111.808},
   {"zip3":"835","wmo":"726873","tHigh":32.5,"tMin":-18.3,"lat":45.943,"lon":-116.123},
   {"zip3":"836","wmo":"726813","tHigh":37.1,"tMin":-14.6,"lat":43.65,"lon":-116.633},
   {"zip3":"837","wmo":"726810","tHigh":37.6,"tMin":-14.1,"lat":43.567,"lon":-116.241},
   {"zip3":"838","wmo":"720322","tHigh":32.3,"tMin":-19.3,"lat":48.299,"lon":-116.56},
-  {"zip3":"840","wmo":"725720","tHigh":37.5,"tMin":-15.0,"lat":40.778,"lon":-111.969},
-  {"zip3":"841","wmo":"725720","tHigh":37.5,"tMin":-15.0,"lat":40.778,"lon":-111.969},
+  {"zip3":"840","wmo":"725720","tHigh":37.5,"tMin":-15,"lat":40.778,"lon":-111.969},
+  {"zip3":"841","wmo":"725720","tHigh":37.5,"tMin":-15,"lat":40.778,"lon":-111.969},
   {"zip3":"842","wmo":"725750","tHigh":36.2,"tMin":-15.3,"lat":41.196,"lon":-112.011},
   {"zip3":"843","wmo":"724796","tHigh":35.8,"tMin":-23.6,"lat":41.787,"lon":-111.853},
   {"zip3":"844","wmo":"725750","tHigh":36.2,"tMin":-15.3,"lat":41.196,"lon":-112.011},
@@ -3681,13 +3711,13 @@ let RT_ZIP3 = [
   {"zip3":"851","wmo":"722748","tHigh":42.6,"tMin":-3.2,"lat":32.95,"lon":-111.767},
   {"zip3":"852","wmo":"722780","tHigh":43.8,"tMin":1.4,"lat":33.428,"lon":-112.004},
   {"zip3":"853","wmo":"722785","tHigh":43.9,"tMin":-0.9,"lat":33.533,"lon":-112.383},
-  {"zip3":"855","wmo":"722747","tHigh":41.0,"tMin":-6.8,"lat":32.855,"lon":-109.635},
-  {"zip3":"856","wmo":"722720","tHigh":38.2,"tMin":-10.0,"lat":31.458,"lon":-109.606},
+  {"zip3":"855","wmo":"722747","tHigh":41,"tMin":-6.8,"lat":32.855,"lon":-109.635},
+  {"zip3":"856","wmo":"722720","tHigh":38.2,"tMin":-10,"lat":31.458,"lon":-109.606},
   {"zip3":"857","wmo":"722740","tHigh":41.1,"tMin":-3.1,"lat":32.228,"lon":-110.956},
   {"zip3":"859","wmo":"723747","tHigh":32.3,"tMin":-17.6,"lat":34.264,"lon":-110.008},
-  {"zip3":"860","wmo":"723740","tHigh":37.3,"tMin":-15.0,"lat":35.028,"lon":-110.721},
-  {"zip3":"863","wmo":"723723","tHigh":35.0,"tMin":-11.4,"lat":34.652,"lon":-112.421},
-  {"zip3":"864","wmo":"723700","tHigh":39.4,"tMin":-8.0,"lat":35.258,"lon":-113.933},
+  {"zip3":"860","wmo":"723740","tHigh":37.3,"tMin":-15,"lat":35.028,"lon":-110.721},
+  {"zip3":"863","wmo":"723723","tHigh":35,"tMin":-11.4,"lat":34.652,"lon":-112.421},
+  {"zip3":"864","wmo":"723700","tHigh":39.4,"tMin":-8,"lat":35.258,"lon":-113.933},
   {"zip3":"865","wmo":"722764","tHigh":32.7,"tMin":-22.6,"lat":35.658,"lon":-109.061},
   {"zip3":"870","wmo":"723650","tHigh":35.4,"tMin":-11.3,"lat":35.038,"lon":-106.622},
   {"zip3":"871","wmo":"723650","tHigh":35.4,"tMin":-11.3,"lat":35.038,"lon":-106.622},
@@ -3699,24 +3729,24 @@ let RT_ZIP3 = [
   {"zip3":"878","wmo":"723754","tHigh":36.1,"tMin":-17.1,"lat":34.518,"lon":-109.379},
   {"zip3":"879","wmo":"722710","tHigh":37.3,"tMin":-8.9,"lat":33.237,"lon":-107.268},
   {"zip3":"880","wmo":"722721","tHigh":37.1,"tMin":-11.5,"lat":32.633,"lon":-108.167},
-  {"zip3":"881","wmo":"722686","tHigh":37.4,"tMin":-14.0,"lat":34.383,"lon":-103.317},
+  {"zip3":"881","wmo":"722686","tHigh":37.4,"tMin":-14,"lat":34.383,"lon":-103.317},
   {"zip3":"882","wmo":"722107","tHigh":38.8,"tMin":-10.8,"lat":32.675,"lon":-102.654},
   {"zip3":"883","wmo":"722683","tHigh":31.3,"tMin":-13.6,"lat":33.467,"lon":-105.533},
   {"zip3":"884","wmo":"723676","tHigh":38.6,"tMin":-16.8,"lat":35.182,"lon":-103.603},
-  {"zip3":"885","wmo":"722700","tHigh":39.0,"tMin":-7.4,"lat":31.811,"lon":-106.376},
+  {"zip3":"885","wmo":"722700","tHigh":39,"tMin":-7.4,"lat":31.811,"lon":-106.376},
   {"zip3":"889","wmo":"746140","tHigh":43.6,"tMin":-3.6,"lat":36.25,"lon":-115.033},
   {"zip3":"890","wmo":"720741","tHigh":42.6,"tMin":-2.8,"lat":35.947,"lon":-114.861},
-  {"zip3":"891","wmo":"724846","tHigh":43.0,"tMin":-2.5,"lat":36.212,"lon":-115.196},
+  {"zip3":"891","wmo":"724846","tHigh":43,"tMin":-2.5,"lat":36.212,"lon":-115.196},
   {"zip3":"893","wmo":"724860","tHigh":33.8,"tMin":-25.2,"lat":39.295,"lon":-114.847},
   {"zip3":"894","wmo":"724880","tHigh":36.7,"tMin":-13.2,"lat":39.484,"lon":-119.771},
   {"zip3":"895","wmo":"724880","tHigh":36.7,"tMin":-13.2,"lat":39.484,"lon":-119.771},
-  {"zip3":"897","wmo":"720549","tHigh":35.0,"tMin":-16.1,"lat":39.192,"lon":-119.734},
+  {"zip3":"897","wmo":"720549","tHigh":35,"tMin":-16.1,"lat":39.192,"lon":-119.734},
   {"zip3":"898","wmo":"725825","tHigh":36.1,"tMin":-22.5,"lat":40.829,"lon":-115.789},
   {"zip3":"900","wmo":"722874","tHigh":32.9,"tMin":3.7,"lat":34.024,"lon":-118.291},
   {"zip3":"901","wmo":"722874","tHigh":32.9,"tMin":3.7,"lat":34.024,"lon":-118.291},
   {"zip3":"902","wmo":"722956","tHigh":30.6,"tMin":4.1,"lat":33.923,"lon":-118.334},
   {"zip3":"903","wmo":"722950","tHigh":28.6,"tMin":4.7,"lat":33.938,"lon":-118.389},
-  {"zip3":"904","wmo":"722885","tHigh":29.0,"tMin":4.2,"lat":34.016,"lon":-118.451},
+  {"zip3":"904","wmo":"722885","tHigh":29,"tMin":4.2,"lat":34.016,"lon":-118.451},
   {"zip3":"905","wmo":"722956","tHigh":30.6,"tMin":4.1,"lat":33.923,"lon":-118.334},
   {"zip3":"906","wmo":"722976","tHigh":34.7,"tMin":1.8,"lat":33.872,"lon":-117.979},
   {"zip3":"907","wmo":"722970","tHigh":32.5,"tMin":2.9,"lat":33.812,"lon":-118.146},
@@ -3733,11 +3763,11 @@ let RT_ZIP3 = [
   {"zip3":"919","wmo":"747186","tHigh":36.7,"tMin":-5.5,"lat":32.626,"lon":-116.468},
   {"zip3":"920","wmo":"722927","tHigh":28.2,"tMin":3.6,"lat":33.128,"lon":-117.279},
   {"zip3":"921","wmo":"722900","tHigh":28.5,"tMin":5.4,"lat":32.734,"lon":-117.183},
-  {"zip3":"922","wmo":"722868","tHigh":44.8,"tMin":2.0,"lat":33.822,"lon":-116.504},
+  {"zip3":"922","wmo":"722868","tHigh":44.8,"tMin":2,"lat":33.822,"lon":-116.504},
   {"zip3":"923","wmo":"722866","tHigh":39.2,"tMin":-1.2,"lat":34.095,"lon":-117.235},
   {"zip3":"924","wmo":"722866","tHigh":39.2,"tMin":-1.2,"lat":34.095,"lon":-117.235},
   {"zip3":"925","wmo":"722860","tHigh":38.7,"tMin":-3.6,"lat":33.9,"lon":-117.25},
-  {"zip3":"926","wmo":"722908","tHigh":33.0,"tMin":3.8,"lat":33.667,"lon":-117.733},
+  {"zip3":"926","wmo":"722908","tHigh":33,"tMin":3.8,"lat":33.667,"lon":-117.733},
   {"zip3":"927","wmo":"722915","tHigh":32.9,"tMin":1.7,"lat":33.7,"lon":-117.833},
   {"zip3":"928","wmo":"722976","tHigh":34.7,"tMin":1.8,"lat":33.872,"lon":-117.979},
   {"zip3":"930","wmo":"723927","tHigh":27.5,"tMin":2.5,"lat":34.201,"lon":-119.207},
@@ -3755,17 +3785,17 @@ let RT_ZIP3 = [
   {"zip3":"942","wmo":"724830","tHigh":37.7,"tMin":-2.4,"lat":38.507,"lon":-121.495},
   {"zip3":"943","wmo":"745090","tHigh":30.7,"tMin":-0.4,"lat":37.417,"lon":-122.05},
   {"zip3":"944","wmo":"724940","tHigh":27.5,"tMin":2.4,"lat":37.62,"lon":-122.365},
-  {"zip3":"945","wmo":"724950","tHigh":36.0,"tMin":-1.2,"lat":37.992,"lon":-122.055},
+  {"zip3":"945","wmo":"724950","tHigh":36,"tMin":-1.2,"lat":37.992,"lon":-122.055},
   {"zip3":"946","wmo":"994033","tHigh":25.8,"tMin":2.8,"lat":37.772,"lon":-122.298},
   {"zip3":"947","wmo":"994033","tHigh":25.8,"tMin":2.8,"lat":37.772,"lon":-122.298},
-  {"zip3":"948","wmo":"994036","tHigh":24.0,"tMin":4.0,"lat":37.923,"lon":-122.41},
+  {"zip3":"948","wmo":"994036","tHigh":24,"tMin":4,"lat":37.923,"lon":-122.41},
   {"zip3":"949","wmo":"720406","tHigh":33.9,"tMin":-3.7,"lat":38.15,"lon":-122.55},
   {"zip3":"950","wmo":"724945","tHigh":32.4,"tMin":0.1,"lat":37.359,"lon":-121.924},
   {"zip3":"951","wmo":"724945","tHigh":32.4,"tMin":0.1,"lat":37.359,"lon":-121.924},
   {"zip3":"952","wmo":"724920","tHigh":38.6,"tMin":-2.9,"lat":37.889,"lon":-121.226},
   {"zip3":"953","wmo":"724926","tHigh":38.9,"tMin":-2.5,"lat":37.624,"lon":-120.951},
   {"zip3":"954","wmo":"724957","tHigh":34.1,"tMin":-3.7,"lat":38.504,"lon":-122.81},
-  {"zip3":"955","wmo":"725940","tHigh":20.0,"tMin":-1.4,"lat":40.8097,"lon":-124.16},
+  {"zip3":"955","wmo":"725940","tHigh":20,"tMin":-1.4,"lat":40.8097,"lon":-124.16},
   {"zip3":"956","wmo":"724833","tHigh":38.7,"tMin":-4.3,"lat":38.567,"lon":-121.3},
   {"zip3":"957","wmo":"720267","tHigh":37.1,"tMin":-2.7,"lat":38.955,"lon":-121.082},
   {"zip3":"958","wmo":"724830","tHigh":37.7,"tMin":-2.4,"lat":38.507,"lon":-121.495},
@@ -3777,11 +3807,11 @@ let RT_ZIP3 = [
   {"zip3":"964","wmo":"704140","tHigh":13.6,"tMin":-7.9,"lat":52.717,"lon":174.1},
   {"zip3":"965","wmo":"704140","tHigh":13.6,"tMin":-7.9,"lat":52.717,"lon":174.1},
   {"zip3":"967","wmo":"912850","tHigh":30.1,"tMin":14.9,"lat":19.719,"lon":-155.053},
-  {"zip3":"968","wmo":"994007","tHigh":30.0,"tMin":17.4,"lat":21.3033,"lon":-157.8645},
+  {"zip3":"968","wmo":"994007","tHigh":30,"tMin":17.4,"lat":21.3033,"lon":-157.8645},
   {"zip3":"969","wmo":"992610","tHigh":28.5,"tMin":20.2,"lat":19.175,"lon":-160.625},
   {"zip3":"970","wmo":"726959","tHigh":33.4,"tMin":-6.5,"lat":45.249,"lon":-122.769},
   {"zip3":"971","wmo":"726986","tHigh":33.7,"tMin":-8.4,"lat":45.541,"lon":-122.949},
-  {"zip3":"972","wmo":"726980","tHigh":33.2,"tMin":-6.0,"lat":45.596,"lon":-122.609},
+  {"zip3":"972","wmo":"726980","tHigh":33.2,"tMin":-6,"lat":45.596,"lon":-122.609},
   {"zip3":"973","wmo":"726940","tHigh":33.8,"tMin":-7.5,"lat":44.905,"lon":-123.001},
   {"zip3":"974","wmo":"726930","tHigh":33.8,"tMin":-7.9,"lat":44.128,"lon":-123.221},
   {"zip3":"975","wmo":"725970","tHigh":37.6,"tMin":-7.5,"lat":42.3769,"lon":-122.8822},
@@ -3792,13 +3822,13 @@ let RT_ZIP3 = [
   {"zip3":"980","wmo":"727934","tHigh":30.2,"tMin":-5.7,"lat":47.493,"lon":-122.214},
   {"zip3":"981","wmo":"994014","tHigh":26.5,"tMin":-4.4,"lat":47.6026,"lon":-122.3392},
   {"zip3":"982","wmo":"727937","tHigh":27.2,"tMin":-6.1,"lat":47.908,"lon":-122.28},
-  {"zip3":"983","wmo":"720388","tHigh":32.0,"tMin":-10.2,"lat":47.104,"lon":-122.287},
-  {"zip3":"984","wmo":"727938","tHigh":29.0,"tMin":-4.5,"lat":47.268,"lon":-122.576},
+  {"zip3":"983","wmo":"720388","tHigh":32,"tMin":-10.2,"lat":47.104,"lon":-122.287},
+  {"zip3":"984","wmo":"727938","tHigh":29,"tMin":-4.5,"lat":47.268,"lon":-122.576},
   {"zip3":"985","wmo":"720254","tHigh":32.2,"tMin":-8.7,"lat":46.683,"lon":-122.983},
-  {"zip3":"986","wmo":"726988","tHigh":37.0,"tMin":-11.4,"lat":45.619,"lon":-121.166},
+  {"zip3":"986","wmo":"726988","tHigh":37,"tMin":-11.4,"lat":45.619,"lon":-121.166},
   {"zip3":"988","wmo":"727825","tHigh":36.3,"tMin":-14.7,"lat":47.398,"lon":-120.201},
-  {"zip3":"989","wmo":"727810","tHigh":36.9,"tMin":-17.0,"lat":46.568,"lon":-120.543},
-  {"zip3":"990","wmo":"742040","tHigh":34.0,"tMin":-23.9,"lat":47.4174,"lon":-117.5264},
+  {"zip3":"989","wmo":"727810","tHigh":36.9,"tMin":-17,"lat":46.568,"lon":-120.543},
+  {"zip3":"990","wmo":"742040","tHigh":34,"tMin":-23.9,"lat":47.4174,"lon":-117.5264},
   {"zip3":"991","wmo":"727870","tHigh":34.1,"tMin":-22.8,"lat":47.974,"lon":-117.429},
   {"zip3":"992","wmo":"727850","tHigh":34.4,"tMin":-18.9,"lat":47.622,"lon":-117.528},
   {"zip3":"993","wmo":"727845","tHigh":37.9,"tMin":-15.9,"lat":46.267,"lon":-119.117},
@@ -3925,16 +3955,16 @@ const SERVICE_VOLTAGES = [240, 208, 120, 277, 480];
 const MI_DEFAULT_VAC = 240;
 
 let RT_MI = [
-  {"miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.975,"minBranch":2,"maxBranch":12,"Iac":1.31,"Vac":240,"specSheet":"Inverter_IQ7XS.pdf"},
-  {"miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.51,"Vac":208,"specSheet":"Inverter_IQ7XS.pdf"},
-  {"miModel":"IQ7HS-66-M-US","acSize":384,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.6,"Vac":240,"specSheet":"Inverter_IQ7HS.pdf"},
-  {"miModel":"IQ7HS-66-M-US","acSize":367,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.77,"Vac":208,"specSheet":"Inverter_IQ7HS.pdf"},
-  {"miModel":"IQ8MC-72-M-US","acSize":320,"invEff":0.97,"minBranch":2,"maxBranch":12,"Iac":1.33,"Vac":240,"specSheet":"Inverter_IQ8MC.pdf"},
-  {"miModel":"IQ8MC-72-M-US","acSize":310,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.49,"Vac":208,"specSheet":"Inverter_IQ8MC.pdf"},
-  {"miModel":"IQ8X-80-M-DOM-US","acSize":380,"invEff":0.973,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8X.pdf"},
-  {"miModel":"IQ8X-80-M-DOM-US","acSize":360,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8X.pdf"},
-  {"miModel":"IQ8HC-72-M-DOM-US","acSize":380,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8HC.pdf"},
-  {"miModel":"IQ8HC-72-M-DOM-US","acSize":360,"invEff":0.965,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8HC.pdf"}
+  {"brand":"Enphase","miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.975,"minBranch":2,"maxBranch":12,"Iac":1.31,"Vac":240,"specSheet":"Inverter_IQ7XS.pdf"},
+  {"brand":"Enphase","miModel":"IQ7XS-96-2-US","acSize":315,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.51,"Vac":208,"specSheet":"Inverter_IQ7XS.pdf"},
+  {"brand":"Enphase","miModel":"IQ7HS-66-M-US","acSize":384,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.6,"Vac":240,"specSheet":"Inverter_IQ7HS.pdf"},
+  {"brand":"Enphase","miModel":"IQ7HS-66-M-US","acSize":367,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.77,"Vac":208,"specSheet":"Inverter_IQ7HS.pdf"},
+  {"brand":"Enphase","miModel":"IQ8MC-72-M-US","acSize":320,"invEff":0.97,"minBranch":2,"maxBranch":12,"Iac":1.33,"Vac":240,"specSheet":"Inverter_IQ8MC.pdf"},
+  {"brand":"Enphase","miModel":"IQ8MC-72-M-US","acSize":310,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.49,"Vac":208,"specSheet":"Inverter_IQ8MC.pdf"},
+  {"brand":"Enphase","miModel":"IQ8X-80-M-DOM-US","acSize":380,"invEff":0.973,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8X.pdf"},
+  {"brand":"Enphase","miModel":"IQ8X-80-M-DOM-US","acSize":360,"invEff":0.97,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8X.pdf"},
+  {"brand":"Enphase","miModel":"IQ8HC-72-M-DOM-US","acSize":380,"invEff":0.97,"minBranch":2,"maxBranch":10,"Iac":1.58,"Vac":240,"specSheet":"Inverter_IQ8HC.pdf"},
+  {"brand":"Enphase","miModel":"IQ8HC-72-M-DOM-US","acSize":360,"invEff":0.965,"minBranch":2,"maxBranch":9,"Iac":1.73,"Vac":208,"specSheet":"Inverter_IQ8HC.pdf"}
 ];
 
 /* Spec sheet database: which PDF in the "Spec Sheets" folder covers which
@@ -3946,7 +3976,8 @@ let SPEC_SHEETS = [
   {"category":"ESS","model":"Powerwall 3","file":"ESS_Powerwall_3.pdf","order":50,"always":"false"},
   {"category":"ESS","model":"Enphase 5P","file":"ESS_IQ_Battery_5P.pdf","order":50,"always":"false"},
   {"category":"ESS","model":"Enphase 10C","file":"ESS_IQ_Battery_10C.pdf","order":50,"always":"false"},
-  {"category":"Combiner","model":"IQ Combiner 6","file":"Combiner_IQ_6.pdf","order":25,"always":"false"}
+  {"category":"Combiner","model":"IQ Combiner 6","file":"Combiner_IQ_6.pdf","order":25,"always":"false"},
+  {"category":"Gateway","model":"Gateway 3","pn":"","file":"Gateway_GW3.pdf","order":24,"always":"false"}
 ];
 
 let MODULE_DB = [
@@ -5118,6 +5149,92 @@ function winAnsi(v) {
     if (c <= 0xFF || WINANSI_HIGH_OK.has(c)) out += ch;
   }
   return out;
+}
+
+/*
+ * The drawing's companion JSON.
+ *
+ * AutoCAD LT cannot run ActiveX or .NET, so values reach a DWG through a flat file the
+ * LISP side reads — the same reason the rest of this toolchain hands CAD text rather than
+ * calling into it. One JSON beside the drawing, same base name, keys exactly as the
+ * drawing's blocks expect them.
+ *
+ * Every value is a STRING, including numbers, because that is what the sample carries and
+ * an attribute is text once it is in the drawing. An unused branch is "-" rather than
+ * blank: the drawing distinguishes "no second branch" from "not filled in yet".
+ *
+ * Anything the project genuinely does not know is left "" and reported by name, rather
+ * than guessed. A wrong bus rating on a stamped drawing is worse than an empty one.
+ */
+const DWG_JSON_BRANCH_SLOTS = 8;
+
+/** The keys the drawing expects, in the sample's order. */
+const DWG_JSON_KEYS = [
+  "CUSTOMER NAME", "ADDRESS LINE 1", "ADDRESS LINE 2", "MODULE QTY",
+  "SYSTEM SIZE (DC)", "SYSTEM SIZE (AC)", "UTILITY", "JURISDICTION", "MODULE",
+  "MICROINVERTER", "BR1", "BR2", "COMBINER BREAKER", "MSP BRAND", "BUS_RATING",
+  "MCB_RATING", "RATED OUTPUT C", "METER_#", "ACD_RATING", "APN",
+  "BR3", "BR4", "BR5", "BR6", "BR7", "BR8"
+];
+
+/**
+ * Build the drawing JSON from a project and a calculation result.
+ *
+ * @returns {{data, missing}} `missing` names the keys nothing in the project supplies, so
+ *          the caller can say so instead of shipping silent blanks.
+ */
+function buildDwgJson(project, result) {
+  const p = project || {};
+  const r = result || {};
+  const txt = v => (v === undefined || v === null) ? "" : String(v).trim();
+  const num = (v, d) => Number.isFinite(Number(v)) ? Number(v).toFixed(d) : "";
+
+  const branches = Array.isArray(r.branches) ? r.branches : [];
+  const strings = (r.dc && Array.isArray(r.dc.strings)) ? r.dc.strings : [];
+  // A DC job strings into an inverter; the same slots carry modules per string.
+  const circuits = branches.length ? branches.map(b => b.nMod) : strings.map(x => x.nMod);
+
+  const mod = r.module || MODULE_DB.find(m => sameText(m.name, p.module_type)) || null;
+  const mi = r.mi || null;
+
+  const data = {};
+  DWG_JSON_KEYS.forEach(k => { data[k] = ""; });
+
+  data["CUSTOMER NAME"] = txt(p.account_name);
+  data["ADDRESS LINE 1"] = txt(p.street_address);
+  data["ADDRESS LINE 2"] = [txt(p.city), [txt(p.state), txt(p.zip_code)]
+    .filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  // The quantity as entered on Project Information, which is what the drawing is
+  // labelled with even when the branch rows have not been filled in yet.
+  data["MODULE QTY"] = txt(p.module_quantity || r.totalMods || "");
+  data["SYSTEM SIZE (DC)"] = num(r.dcKW, 3);
+  data["SYSTEM SIZE (AC)"] = num(r.acKW, 3);
+  data["UTILITY"] = txt(p.utility_name).toUpperCase();
+  data["JURISDICTION"] = txt(p.ahj_name).toUpperCase();
+  data["MODULE"] = mod
+    ? [txt(mod.brand), txt(mod.name)].filter(Boolean).join(" - ")
+    : txt(p.module_type);
+  data["MICROINVERTER"] = mi
+    ? [txt(mi.brand), txt(mi.miModel)].filter(Boolean).join(" ").toUpperCase()
+    : txt(p.inverter_model).toUpperCase();
+
+  // Branch slots. "-" for a slot the design does not use.
+  for (let i = 0; i < DWG_JSON_BRANCH_SLOTS; i++) {
+    data["BR" + (i + 1)] = i < circuits.length ? String(circuits[i]) : "-";
+  }
+
+  data["COMBINER BREAKER"] = txt(r.combinedOcpd || "");
+  // Rated output current for the whole array — every module combined, not one branch.
+  data["RATED OUTPUT C"] = num(r.iTotal, 2);
+  data["ACD_RATING"] = txt(p.acd_rating || "");
+  data["MSP BRAND"] = txt(p.msp_brand || "").toUpperCase();
+  data["BUS_RATING"] = txt(p.bus_rating || "");
+  data["MCB_RATING"] = txt(p.mcb_rating || "");
+  data["METER_#"] = txt(p.meter_number || "");
+  data["APN"] = txt(p.apn || "");
+
+  const missing = DWG_JSON_KEYS.filter(k => data[k] === "");
+  return { data, missing };
 }
 
 const SPEC_SHEET_PREFIX = "SS";
@@ -6823,6 +6940,9 @@ const TABLE_SCHEMAS = {
     keyFields: ["miModel", "Vac"],
     fields: [
       { name: "miModel",   type: "text", required: true, label: "Model" },
+      // The drawing wants the brand in front of the model, and inferring it from an "IQ"
+      // prefix would break the first time a non-Enphase microinverter is added.
+      { name: "brand",     type: "text", label: "Brand" },
       { name: "acSize",    type: "number", required: true, label: "AC size (W)" },
       { name: "invEff",    type: "number", label: "Efficiency" },
       { name: "minBranch", type: "int", required: true, label: "Min per branch" },
@@ -7473,6 +7593,7 @@ if (typeof module !== "undefined" && module.exports) {
     locationForAddress, locationMatchNote, locNormCity,
     get RT_ZIP3() { return RT_ZIP3; },
     specSheetTitle, SPEC_SHEET_PREFIX, winAnsi,
+    buildDwgJson, DWG_JSON_KEYS, DWG_JSON_BRANCH_SLOTS,
     GATEWAY_POI_POINTS, GATEWAY_RUN_ID,
     RD_GROUPS, RD_GROUP_OF, rdGroupOf, rdTablesIn,
     get RT_MCI() { return RT_MCI; },
@@ -8721,6 +8842,8 @@ function wireControls() {
   if (dcAdd) dcAdd.addEventListener("click", () => pvDcAddRow());
   const ecBtn = $("pv_btn_ecalc");
   if (ecBtn) ecBtn.addEventListener("click", pvExportECalcs);
+  const djBtn = $("pv_btn_dwgjson");
+  if (djBtn) djBtn.addEventListener("click", pvExportDwgJson);
   const epSel = $("pv_ess_poi");
   if (epSel) epSel.addEventListener("change", () => {
     pvEssPoiNote(); gatewayFieldSync(); pvSchedInputsRender();
@@ -13637,6 +13760,68 @@ async function pvExportECalcs() {
         built.overflow || built.notes.length ? "warn" : "ok");
   } catch (e) {
     say("Could not write the sheet: " + (e.message || e), "err");
+  } finally {
+    busy(false);
+  }
+}
+
+/**
+ * Write the drawing's companion JSON next to the DWG.
+ *
+ * Same base name as the drawing and in the same folder, because the LISP side finds it by
+ * swapping the extension — AutoCAD LT has no ActiveX or .NET, so a flat file beside the
+ * drawing is the whole interface.
+ *
+ * Overwrites deliberately: this file mirrors the current calculation, and a stale one
+ * feeding a drawing is worse than a replaced one.
+ */
+async function pvExportDwgJson() {
+  const note = $("pv_dwg_note");
+  const say = (m, kind) => { if (note) note.textContent = m; showMsg(m, kind); };
+
+  if (!state.pvResult) { say("Press Calculate first — the JSON carries the results.", "err"); return; }
+  const target = LOADED_PROJECT || BOM_PROJECT || null;
+  if (!target || !target.handle) {
+    say("Load a project first — the JSON is written beside its drawing.", "err");
+    return;
+  }
+
+  busy(true, "writing the drawing JSON…");
+  try {
+    const cad = await getDir(target.handle, "CAD Files", false);
+    if (!cad) throw new Error("no CAD Files folder in this project");
+
+    // Find the drawing. One is the normal case; if there are several, say so rather than
+    // pick one silently.
+    const dwgs = [];
+    for await (const [name, h] of cad.entries()) {
+      if (h.kind === "file" && /\.dwg$/i.test(name)) dwgs.push(name);
+    }
+    if (!dwgs.length) throw new Error("no .dwg found in CAD Files");
+    if (dwgs.length > 1) {
+      say(`CAD Files holds ${dwgs.length} drawings (${dwgs.join(", ")}) — ` +
+          `one JSON was written for each.`, "warn");
+    }
+
+    const built = buildDwgJson((target.manifest ||
+      (target.entry && target.entry.manifest) || {}), state.pvResult);
+    const body = JSON.stringify(built.data, null, 1) + "\n";
+
+    for (const name of dwgs) {
+      const jsonName = name.replace(/\.dwg$/i, ".json");
+      const fh = await cad.getFileHandle(jsonName, { create: true });
+      const w = await fh.createWritable();
+      await w.write(body);
+      await w.close();
+    }
+
+    const wrote = dwgs.map(n => n.replace(/\.dwg$/i, ".json")).join(", ");
+    say(built.missing.length
+      ? `Wrote ${wrote}. Blank, because nothing supplies them: ${built.missing.join(", ")}.`
+      : `Wrote ${wrote} — every field filled.`,
+      built.missing.length ? "warn" : "ok");
+  } catch (e) {
+    say("Could not write the drawing JSON: " + (e.message || e), "err");
   } finally {
     busy(false);
   }
